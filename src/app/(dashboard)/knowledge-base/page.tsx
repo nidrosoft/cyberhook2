@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
+import { useQuery, useMutation } from "convex/react";
 import {
     Plus,
     SearchLg,
@@ -9,10 +10,13 @@ import {
     File04,
     Database01,
     DotsVertical,
-    File05,
     Settings01,
     UploadCloud02,
     Edit01,
+    Trash01,
+    Loading02,
+    Eye,
+    Copy01,
 } from "@untitledui/icons";
 import type { SortDescriptor } from "react-aria-components";
 
@@ -24,61 +28,176 @@ import { ButtonUtility } from "@/components/base/buttons/button-utility";
 import { InputBase } from "@/components/base/input/input";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { Tabs } from "@/components/application/tabs/tabs";
+import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
+import { MetricsChart04 } from "@/components/application/metrics/metrics";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
-const mockSources = [
-    { id: "1", name: "Company Pricing Page", type: "Web Crawler", added: "Jan 12, 2026", status: "Active", scope: "Global", url: "https://acme-corp.com/pricing", documents: 12 },
-    { id: "2", name: "Q4 Objection Handling", type: "FAQ", added: "Feb 05, 2026", status: "Active", scope: "Global", url: "45 entries", documents: 45 },
-    { id: "3", name: "SOC2 Compliance Report", type: "File Upload", added: "Mar 01, 2026", status: "Active", scope: "Global", url: "SOC2_2024.pdf", documents: 1 },
-    { id: "4", name: "Competitor Battlecards", type: "Rich Text", added: "Dec 18, 2025", status: "Active", scope: "Global", url: "", documents: 8 },
-    { id: "5", name: "CEO Cold Email Template", type: "Rich Text", added: "Jan 25, 2026", status: "Active", scope: "Personal", url: "", documents: 1 },
-    { id: "6", name: "Product Demo Script", type: "Rich Text", added: "Feb 14, 2026", status: "Active", scope: "Personal", url: "", documents: 1 },
-    { id: "7", name: "HIPAA FAQ Sheet", type: "FAQ", added: "Feb 28, 2026", status: "Active", scope: "Global", url: "12 entries", documents: 12 },
-    { id: "8", name: "Security Architecture Diagram", type: "File Upload", added: "Mar 05, 2026", status: "Processing", scope: "Personal", url: "security_arch.pdf", documents: 1 },
-];
+type KbType = "web_crawler" | "faq" | "rich_text" | "file_upload";
+type KbScope = "global" | "personal";
 
-const kbSourceTypes = ["Web Crawler", "FAQ", "Rich Text", "File Upload"] as const;
-type KbSourceType = (typeof kbSourceTypes)[number];
+const typeLabels: Record<KbType, string> = {
+    web_crawler: "Web Crawler",
+    faq: "FAQ",
+    rich_text: "Rich Text",
+    file_upload: "File Upload",
+};
+
+function formatRelativeDate(timestamp: number): string {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    if (days < 7) return `${days} days ago`;
+    if (days < 30) return `${Math.floor(days / 7)} week${Math.floor(days / 7) > 1 ? "s" : ""} ago`;
+    return new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function getTypeIcon(type: string) {
+    switch (type) {
+        case "web_crawler": return <Globe01 className="w-5 h-5 text-tertiary" />;
+        case "faq": return <HelpCircle className="w-5 h-5 text-tertiary" />;
+        case "file_upload": return <File04 className="w-5 h-5 text-tertiary" />;
+        case "rich_text": return <Edit01 className="w-5 h-5 text-tertiary" />;
+        default: return <Database01 className="w-5 h-5 text-tertiary" />;
+    }
+}
 
 export default function KnowledgeBasePage() {
+    const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
+
+    // ─── Queries ─────────────────────────────────────────────────────
+    const allEntries = useQuery(
+        api.knowledgeBase.list,
+        companyId ? { companyId } : "skip"
+    );
+    const stats = useQuery(
+        api.knowledgeBase.getStats,
+        companyId ? { companyId } : "skip"
+    );
+
+    // ─── Mutations ───────────────────────────────────────────────────
+    const createEntry = useMutation(api.knowledgeBase.create);
+    const removeEntry = useMutation(api.knowledgeBase.remove);
+
+    // ─── Local state ─────────────────────────────────────────────────
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
-        column: "added",
+        column: "createdAt",
         direction: "descending",
     });
+    const [searchQuery, setSearchQuery] = useState("");
+    const [scopeFilter, setScopeFilter] = useState("all");
+    const [activeTab, setActiveTab] = useState("all");
 
     // Add Source slideout state
-    const [kbSourceType, setKbSourceType] = useState<KbSourceType>("Web Crawler");
+    const [kbSourceType, setKbSourceType] = useState<KbType>("web_crawler");
     const [kbSourceName, setKbSourceName] = useState("");
-    const [kbScope, setKbScope] = useState<"Global" | "Personal">("Global");
+    const [kbScope, setKbScope] = useState<KbScope>("global");
     const [kbUrl, setKbUrl] = useState("");
     const [kbQuestion, setKbQuestion] = useState("");
     const [kbAnswer, setKbAnswer] = useState("");
     const [kbRichContent, setKbRichContent] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const getStatusBadge = (status: string) => {
-        switch (status) {
-            case "Active": return <Badge color="success" size="sm">Active</Badge>;
-            case "Processing": return <Badge color="warning" size="sm">Processing</Badge>;
-            default: return <Badge color="gray" size="sm">{status}</Badge>;
-        }
-    };
+    // ─── Derived data ────────────────────────────────────────────────
+    const filteredEntries = useMemo(() => {
+        if (!allEntries) return [];
+        let items = [...allEntries];
 
-    const getScopeBadge = (scope: string) => {
-        switch (scope) {
-            case "Global": return <Badge color="brand" size="sm">Global</Badge>;
-            case "Personal": return <Badge color="gray" size="sm">Personal</Badge>;
-            default: return <Badge color="gray" size="sm">{scope}</Badge>;
+        // Tab type filter
+        if (activeTab !== "all") {
+            const typeMap: Record<string, KbType> = {
+                web: "web_crawler",
+                faq: "faq",
+                richtext: "rich_text",
+                files: "file_upload",
+            };
+            const filterType = typeMap[activeTab];
+            if (filterType) {
+                items = items.filter((e) => e.type === filterType);
+            }
         }
-    };
 
-    const getTypeIcon = (type: string) => {
-        switch (type) {
-            case "Web Crawler": return <Globe01 className="w-5 h-5 text-tertiary" />;
-            case "FAQ": return <HelpCircle className="w-5 h-5 text-tertiary" />;
-            case "File Upload": return <File04 className="w-5 h-5 text-tertiary" />;
-            case "Rich Text": return <Edit01 className="w-5 h-5 text-tertiary" />;
-            default: return <Database01 className="w-5 h-5 text-tertiary" />;
+        // Scope filter
+        if (scopeFilter !== "all") {
+            items = items.filter((e) => e.scope === scopeFilter);
         }
-    };
+
+        // Search filter
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            items = items.filter(
+                (e) =>
+                    e.name.toLowerCase().includes(q) ||
+                    (e.url && e.url.toLowerCase().includes(q)) ||
+                    (e.question && e.question.toLowerCase().includes(q))
+            );
+        }
+
+        return items;
+    }, [allEntries, activeTab, scopeFilter, searchQuery]);
+
+    // ─── Handlers ────────────────────────────────────────────────────
+    function resetForm() {
+        setKbSourceType("web_crawler");
+        setKbSourceName("");
+        setKbScope("global");
+        setKbUrl("");
+        setKbQuestion("");
+        setKbAnswer("");
+        setKbRichContent("");
+    }
+
+    async function handleAddSource(close: () => void) {
+        if (!companyId || !user || !kbSourceName.trim()) return;
+        setIsSubmitting(true);
+        try {
+            await createEntry({
+                companyId,
+                createdByUserId: user._id,
+                name: kbSourceName.trim(),
+                type: kbSourceType,
+                scope: kbScope,
+                ...(kbSourceType === "web_crawler" && { url: kbUrl.trim() }),
+                ...(kbSourceType === "faq" && {
+                    question: kbQuestion.trim(),
+                    answer: kbAnswer.trim(),
+                }),
+                ...(kbSourceType === "rich_text" && {
+                    richTextContent: kbRichContent,
+                }),
+            });
+            resetForm();
+            close();
+        } catch (error) {
+            console.error("Failed to add source:", error);
+            alert(error instanceof Error ? error.message : "Failed to add source");
+        } finally {
+            setIsSubmitting(false);
+        }
+    }
+
+    async function handleDelete(id: Id<"knowledgeBaseEntries">) {
+        if (!confirm("Are you sure you want to delete this entry?")) return;
+        try {
+            await removeEntry({ id });
+        } catch (error) {
+            console.error("Failed to delete:", error);
+        }
+    }
+
+    // ─── Loading state ───────────────────────────────────────────────
+    if (isUserLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <Loading02 className="h-8 w-8 animate-spin text-brand-600" />
+            </div>
+        );
+    }
+
+    const kbSourceTypes: KbType[] = ["web_crawler", "faq", "rich_text", "file_upload"];
 
     return (
         <div className="flex h-full w-full flex-col bg-primary relative">
@@ -88,16 +207,17 @@ export default function KnowledgeBasePage() {
                     {/* Page Header */}
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
                         <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-3">
-                                <h1 className="text-display-sm font-semibold text-primary">Knowledge Base</h1>
-                                <BadgeWithIcon color="brand" size="sm" iconLeading={Database01}>{mockSources.length} Sources</BadgeWithIcon>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <h1 className="text-xl font-semibold text-primary lg:text-display-sm">Knowledge Base</h1>
+                                <BadgeWithIcon color="brand" size="sm" iconLeading={Database01}>
+                                    {stats?.total ?? 0} Sources
+                                </BadgeWithIcon>
                             </div>
                             <p className="text-md text-tertiary">
                                 Train your AI Agents by adding data sources, FAQs, and files.
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
-                            <Button size="md" color="secondary" iconLeading={Settings01}>Settings</Button>
                             <SlideoutMenu.Trigger>
                                 <Button size="md" color="primary" iconLeading={Plus}>Add Source</Button>
                                 <SlideoutMenu className="max-w-[600px]">
@@ -112,7 +232,7 @@ export default function KnowledgeBasePage() {
                                                     {/* Source Type Selector */}
                                                     <div>
                                                         <label className="block text-sm font-medium text-secondary mb-1.5">Source Type</label>
-                                                        <div className="flex rounded-lg border border-secondary overflow-hidden">
+                                                        <div className="grid grid-cols-2 gap-px rounded-lg border border-secondary overflow-hidden sm:flex">
                                                             {kbSourceTypes.map((type) => (
                                                                 <button
                                                                     key={type}
@@ -120,13 +240,13 @@ export default function KnowledgeBasePage() {
                                                                     onClick={() => setKbSourceType(type)}
                                                                     className={`flex-1 px-3 py-2 text-sm font-medium transition ${kbSourceType === type ? "bg-brand-solid text-white" : "bg-primary text-secondary hover:bg-secondary_subtle"}`}
                                                                 >
-                                                                    {type}
+                                                                    {typeLabels[type]}
                                                                 </button>
                                                             ))}
                                                         </div>
                                                     </div>
 
-                                                    {/* Source Name - always shown */}
+                                                    {/* Source Name */}
                                                     <div>
                                                         <label className="block text-sm font-medium text-secondary mb-1.5">Source Name</label>
                                                         <input
@@ -138,16 +258,16 @@ export default function KnowledgeBasePage() {
                                                         />
                                                     </div>
 
-                                                    {/* Scope - always shown */}
+                                                    {/* Scope */}
                                                     <div className="flex flex-col gap-1.5">
                                                         <label className="block text-sm font-medium text-secondary">Scope</label>
                                                         <NativeSelect
                                                             aria-label="Scope"
                                                             value={kbScope}
-                                                            onChange={(e) => setKbScope(e.target.value as "Global" | "Personal")}
+                                                            onChange={(e) => setKbScope(e.target.value as KbScope)}
                                                             options={[
-                                                                { label: "Global", value: "Global" },
-                                                                { label: "Personal", value: "Personal" },
+                                                                { label: "Global (all team members)", value: "global" },
+                                                                { label: "Personal (only me)", value: "personal" },
                                                             ]}
                                                             className="w-full"
                                                             selectClassName="text-sm"
@@ -155,7 +275,7 @@ export default function KnowledgeBasePage() {
                                                     </div>
 
                                                     {/* Type-specific fields */}
-                                                    {kbSourceType === "Web Crawler" && (
+                                                    {kbSourceType === "web_crawler" && (
                                                         <div>
                                                             <label className="block text-sm font-medium text-secondary mb-1.5">URL</label>
                                                             <div className="flex gap-2">
@@ -171,7 +291,7 @@ export default function KnowledgeBasePage() {
                                                         </div>
                                                     )}
 
-                                                    {kbSourceType === "FAQ" && (
+                                                    {kbSourceType === "faq" && (
                                                         <>
                                                             <div>
                                                                 <label className="block text-sm font-medium text-secondary mb-1.5">Question</label>
@@ -183,7 +303,7 @@ export default function KnowledgeBasePage() {
                                                                     rows={4}
                                                                     className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
                                                                 />
-                                                                <span className="text-xs text-tertiary mt-1">{(kbQuestion.length)}/1000</span>
+                                                                <span className="text-xs text-tertiary mt-1">{kbQuestion.length}/1000</span>
                                                             </div>
                                                             <div>
                                                                 <label className="block text-sm font-medium text-secondary mb-1.5">Answer</label>
@@ -195,12 +315,12 @@ export default function KnowledgeBasePage() {
                                                                     rows={4}
                                                                     className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
                                                                 />
-                                                                <span className="text-xs text-tertiary mt-1">{(kbAnswer.length)}/1000</span>
+                                                                <span className="text-xs text-tertiary mt-1">{kbAnswer.length}/1000</span>
                                                             </div>
                                                         </>
                                                     )}
 
-                                                    {kbSourceType === "Rich Text" && (
+                                                    {kbSourceType === "rich_text" && (
                                                         <div>
                                                             <label className="block text-sm font-medium text-secondary mb-1.5">Content</label>
                                                             <textarea
@@ -213,10 +333,11 @@ export default function KnowledgeBasePage() {
                                                         </div>
                                                     )}
 
-                                                    {kbSourceType === "File Upload" && (
+                                                    {kbSourceType === "file_upload" && (
                                                         <div>
                                                             <label className="block text-sm font-medium text-secondary mb-1.5">Upload Files</label>
                                                             <div className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-secondary bg-secondary_subtle px-6 py-6">
+                                                                <UploadCloud02 className="w-8 h-8 text-tertiary" />
                                                                 <span className="text-sm font-medium text-secondary">Drop files here or browse</span>
                                                                 <span className="text-xs text-tertiary">Supports PDF, DOC, DOCX</span>
                                                             </div>
@@ -226,8 +347,14 @@ export default function KnowledgeBasePage() {
                                             </SlideoutMenu.Content>
                                             <SlideoutMenu.Footer>
                                                 <div className="flex items-center justify-end gap-3">
-                                                    <Button color="secondary" onClick={close}>Cancel</Button>
-                                                    <Button color="primary" onClick={close}>Add Source</Button>
+                                                    <Button color="secondary" onClick={() => { resetForm(); close(); }}>Cancel</Button>
+                                                    <Button
+                                                        color="primary"
+                                                        onClick={() => handleAddSource(close)}
+                                                        isDisabled={!kbSourceName.trim() || isSubmitting}
+                                                    >
+                                                        {isSubmitting ? "Adding..." : "Add Source"}
+                                                    </Button>
                                                 </div>
                                             </SlideoutMenu.Footer>
                                         </>
@@ -237,9 +364,41 @@ export default function KnowledgeBasePage() {
                         </div>
                     </div>
 
+                    {/* Stats Row */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <MetricsChart04
+                            title={(stats?.total ?? 0).toString()}
+                            subtitle="Total Sources"
+                            change={(stats?.byScope?.global ?? 0).toString()}
+                            changeTrend="positive"
+                            changeDescription="global"
+                        />
+                        <MetricsChart04
+                            title={(stats?.byType?.web_crawler ?? 0).toString()}
+                            subtitle="Web Crawlers"
+                            change={(stats?.byType?.web_crawler ?? 0).toString()}
+                            changeTrend="positive"
+                            changeDescription="active"
+                        />
+                        <MetricsChart04
+                            title={(stats?.byType?.faq ?? 0).toString()}
+                            subtitle="FAQ Entries"
+                            change={(stats?.byType?.faq ?? 0).toString()}
+                            changeTrend="positive"
+                            changeDescription="pairs"
+                        />
+                        <MetricsChart04
+                            title={((stats?.byType?.rich_text ?? 0) + (stats?.byType?.file_upload ?? 0)).toString()}
+                            subtitle="Documents & Files"
+                            change={(stats?.byType?.file_upload ?? 0).toString()}
+                            changeTrend="positive"
+                            changeDescription="files uploaded"
+                        />
+                    </div>
+
                     {/* Main Content Area */}
-                    <Tabs className="w-full">
-                        <Tabs.List size="sm" type="button-border" className="mb-6" items={[
+                    <Tabs className="w-full" onSelectionChange={(key) => setActiveTab(key as string)}>
+                        <Tabs.List size="sm" type="button-border" className="mb-6 overflow-x-auto" items={[
                             { id: "all", label: "All Sources" },
                             { id: "web", label: "Web Crawler" },
                             { id: "faq", label: "FAQs" },
@@ -249,110 +408,131 @@ export default function KnowledgeBasePage() {
                             {(item) => <Tabs.Item key={item.id} id={item.id}>{item.label}</Tabs.Item>}
                         </Tabs.List>
 
-                        <Tabs.Panel id="all">
-                            <div className="flex flex-col gap-6">
-                                <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                                    <div className="relative w-full sm:max-w-md">
-                                        <InputBase type="text" size="md" placeholder="Search knowledge sources..." className="w-full shadow-sm" icon={SearchLg} />
+                        {/* All tabs share the same content — just filtered differently */}
+                        {["all", "web", "faq", "files", "richtext"].map((tabId) => (
+                            <Tabs.Panel key={tabId} id={tabId}>
+                                <div className="flex flex-col gap-6">
+                                    {/* Search & Filters */}
+                                    <div className="flex flex-col gap-3 rounded-xl border border-secondary bg-primary p-3 sm:flex-row sm:items-center">
+                                        <div className="min-w-0 flex-1">
+                                            <InputBase
+                                                type="text"
+                                                size="sm"
+                                                placeholder="Search knowledge sources..."
+                                                icon={SearchLg}
+                                                value={searchQuery}
+                                                onChange={(v: string) => setSearchQuery(v)}
+                                            />
+                                        </div>
+                                        <div className="hidden sm:block h-8 w-px shrink-0 bg-secondary" />
+                                        <FilterDropdown
+                                            aria-label="Scope"
+                                            value={scopeFilter}
+                                            onChange={setScopeFilter}
+                                            options={[
+                                                { label: "Scope: All", value: "all" },
+                                                { label: "Global", value: "global" },
+                                                { label: "Personal", value: "personal" },
+                                            ]}
+                                        />
                                     </div>
-                                    <div className="flex items-center gap-3 w-full sm:w-auto">
-                                        <Button size="md" color="secondary">Filters</Button>
-                                    </div>
-                                </div>
 
-                                <TableCard.Root>
-                                    <TableCard.Header title="Knowledge Sources" badge={`${mockSources.length} Total`} />
-                                    <Table aria-label="Knowledge Sources" sortDescriptor={sortDescriptor} onSortChange={setSortDescriptor}>
-                                        <Table.Header>
-                                            <Table.Row>
-                                                <Table.Head id="name" isRowHeader allowsSorting>Source Name</Table.Head>
-                                                <Table.Head id="type" allowsSorting>Type</Table.Head>
-                                                <Table.Head id="status" allowsSorting>Status</Table.Head>
-                                                <Table.Head id="scope" allowsSorting>Scope</Table.Head>
-                                                <Table.Head id="documents" allowsSorting>Docs Learned</Table.Head>
-                                                <Table.Head id="added" allowsSorting>Date Added</Table.Head>
-                                                <Table.Head id="actions" className="w-12"></Table.Head>
-                                            </Table.Row>
-                                        </Table.Header>
-                                        <Table.Body items={mockSources}>
-                                            {(item) => (
-                                                <Table.Row id={item.id}>
-                                                    <Table.Cell>
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle">
-                                                                {getTypeIcon(item.type)}
-                                                            </div>
-                                                            <div className="flex flex-col">
-                                                                <span className="font-medium text-primary">{item.name}</span>
-                                                                {item.url && <span className="text-sm text-tertiary truncate max-w-[200px]">{item.url}</span>}
-                                                            </div>
-                                                        </div>
-                                                    </Table.Cell>
-                                                    <Table.Cell><span className="text-secondary">{item.type}</span></Table.Cell>
-                                                    <Table.Cell>{getStatusBadge(item.status)}</Table.Cell>
-                                                    <Table.Cell>{getScopeBadge(item.scope)}</Table.Cell>
-                                                    <Table.Cell><span className="text-secondary">{item.documents} files</span></Table.Cell>
-                                                    <Table.Cell><span className="text-secondary">{item.added}</span></Table.Cell>
-                                                    <Table.Cell><ButtonUtility size="sm" icon={DotsVertical} aria-label="Row actions" /></Table.Cell>
-                                                </Table.Row>
-                                            )}
-                                        </Table.Body>
-                                    </Table>
-                                </TableCard.Root>
-                            </div>
-                        </Tabs.Panel>
-
-                        <Tabs.Panel id="web">
-                            <div className="flex items-center justify-center py-24 border border-dashed border-secondary rounded-xl bg-secondary_subtle">
-                                <div className="flex flex-col items-center text-center max-w-sm gap-4">
-                                    <div className="p-3 bg-primary border border-secondary rounded-lg shadow-sm">
-                                        <Globe01 className="w-6 h-6 text-brand-secondary" />
-                                    </div>
-                                    <h3 className="text-lg font-semibold text-primary">Web Crawler</h3>
-                                    <p className="text-sm text-tertiary">Add your company's website or specific pages. The crawler will read all links automatically and update periodically.</p>
-                                    <Button color="primary" iconLeading={Plus} className="mt-2">Start Crawler</Button>
+                                    {/* Loading state */}
+                                    {allEntries === undefined ? (
+                                        <div className="flex items-center justify-center py-24">
+                                            <Loading02 className="h-8 w-8 animate-spin text-brand-600" />
+                                        </div>
+                                    ) : filteredEntries.length === 0 ? (
+                                        /* Empty state */
+                                        <div className="flex items-center justify-center py-24 border border-dashed border-secondary rounded-xl bg-secondary_subtle">
+                                            <div className="flex flex-col items-center text-center max-w-sm gap-4">
+                                                <div className="p-3 bg-primary border border-secondary rounded-lg shadow-sm">
+                                                    {tabId === "web" ? <Globe01 className="w-6 h-6 text-brand-secondary" /> :
+                                                     tabId === "faq" ? <HelpCircle className="w-6 h-6 text-brand-secondary" /> :
+                                                     tabId === "files" ? <UploadCloud02 className="w-6 h-6 text-brand-secondary" /> :
+                                                     tabId === "richtext" ? <Edit01 className="w-6 h-6 text-brand-secondary" /> :
+                                                     <Database01 className="w-6 h-6 text-brand-secondary" />}
+                                                </div>
+                                                <h3 className="text-lg font-semibold text-primary">
+                                                    {searchQuery || scopeFilter !== "all" ? "No matching sources" : "No sources yet"}
+                                                </h3>
+                                                <p className="text-sm text-tertiary">
+                                                    {searchQuery || scopeFilter !== "all"
+                                                        ? "Try adjusting your search or filters."
+                                                        : "Add your first knowledge source to start training your AI agents."
+                                                    }
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Data table */
+                                        <TableCard.Root>
+                                            <TableCard.Header title="Knowledge Sources" badge={`${filteredEntries.length} Total`} />
+                                            <div className="overflow-x-auto">
+                                            <Table aria-label="Knowledge Sources" sortDescriptor={sortDescriptor} onSortChange={setSortDescriptor}>
+                                                <Table.Header>
+                                                    <Table.Row>
+                                                        <Table.Head id="name" isRowHeader allowsSorting>Source Name</Table.Head>
+                                                        <Table.Head id="type" allowsSorting>Type</Table.Head>
+                                                        <Table.Head id="scope" allowsSorting>Scope</Table.Head>
+                                                        <Table.Head id="createdAt" allowsSorting>Date Added</Table.Head>
+                                                        <Table.Head id="actions" className="w-20">Actions</Table.Head>
+                                                    </Table.Row>
+                                                </Table.Header>
+                                                <Table.Body items={filteredEntries.map((item) => ({ ...item, id: item._id }))}>
+                                                    {(item) => (
+                                                        <Table.Row id={item.id}>
+                                                            <Table.Cell>
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle">
+                                                                        {getTypeIcon(item.type)}
+                                                                    </div>
+                                                                    <div className="flex flex-col">
+                                                                        <span className="font-medium text-primary">{item.name}</span>
+                                                                        {item.type === "web_crawler" && item.url && (
+                                                                            <span className="text-sm text-tertiary truncate max-w-[200px]">{item.url}</span>
+                                                                        )}
+                                                                        {item.type === "faq" && item.question && (
+                                                                            <span className="text-sm text-tertiary truncate max-w-[200px]">{item.question}</span>
+                                                                        )}
+                                                                        {item.type === "file_upload" && item.fileName && (
+                                                                            <span className="text-sm text-tertiary truncate max-w-[200px]">{item.fileName}</span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </Table.Cell>
+                                                            <Table.Cell>
+                                                                <Badge color="gray" size="sm">{typeLabels[item.type as KbType] || item.type}</Badge>
+                                                            </Table.Cell>
+                                                            <Table.Cell>
+                                                                <Badge color={item.scope === "global" ? "brand" : "gray"} size="sm">
+                                                                    {item.scope === "global" ? "Global" : "Personal"}
+                                                                </Badge>
+                                                            </Table.Cell>
+                                                            <Table.Cell>
+                                                                <span className="text-secondary">{formatRelativeDate(item.createdAt)}</span>
+                                                            </Table.Cell>
+                                                            <Table.Cell>
+                                                                <div className="flex items-center gap-1">
+                                                                    <ButtonUtility
+                                                                        size="sm"
+                                                                        color="tertiary"
+                                                                        icon={Trash01}
+                                                                        aria-label="Delete"
+                                                                        onClick={() => handleDelete(item._id)}
+                                                                    />
+                                                                </div>
+                                                            </Table.Cell>
+                                                        </Table.Row>
+                                                    )}
+                                                </Table.Body>
+                                            </Table>
+                                            </div>
+                                        </TableCard.Root>
+                                    )}
                                 </div>
-                            </div>
-                        </Tabs.Panel>
-
-                        <Tabs.Panel id="faq">
-                            <div className="flex items-center justify-center py-24 border border-dashed border-secondary rounded-xl bg-secondary_subtle">
-                                <div className="flex flex-col items-center text-center max-w-sm gap-4">
-                                    <div className="p-3 bg-primary border border-secondary rounded-lg shadow-sm">
-                                        <HelpCircle className="w-6 h-6 text-brand-secondary" />
-                                    </div>
-                                    <h3 className="text-lg font-semibold text-primary">Q&A Knowledge</h3>
-                                    <p className="text-sm text-tertiary">Directly teach the AI how to answer specific questions, objections, or competitor challenges.</p>
-                                    <Button color="primary" iconLeading={Plus} className="mt-2">Add Q&A Pair</Button>
-                                </div>
-                            </div>
-                        </Tabs.Panel>
-
-                        <Tabs.Panel id="files">
-                            <div className="flex items-center justify-center py-24 border border-dashed border-secondary rounded-xl bg-secondary_subtle">
-                                <div className="flex flex-col items-center text-center max-w-sm gap-4">
-                                    <div className="p-3 bg-primary border border-secondary rounded-lg shadow-sm">
-                                        <UploadCloud02 className="w-6 h-6 text-brand-secondary" />
-                                    </div>
-                                    <h3 className="text-lg font-semibold text-primary">Upload Files</h3>
-                                    <p className="text-sm text-tertiary">Drag and drop PDFs, docs, spreadsheets, or sales literature to power AI intelligence.</p>
-                                    <Button color="primary" iconLeading={Plus} className="mt-2">Upload Files</Button>
-                                </div>
-                            </div>
-                        </Tabs.Panel>
-
-                        <Tabs.Panel id="richtext">
-                            <div className="flex items-center justify-center py-24 border border-dashed border-secondary rounded-xl bg-secondary_subtle">
-                                <div className="flex flex-col items-center text-center max-w-sm gap-4">
-                                    <div className="p-3 bg-primary border border-secondary rounded-lg shadow-sm">
-                                        <Edit01 className="w-6 h-6 text-brand-secondary" />
-                                    </div>
-                                    <h3 className="text-lg font-semibold text-primary">Rich Text Templates</h3>
-                                    <p className="text-sm text-tertiary">Create named rich text entries with formatting for email templates, scripts, and reusable content.</p>
-                                    <Button color="primary" iconLeading={Plus} className="mt-2">Create Template</Button>
-                                </div>
-                            </div>
-                        </Tabs.Panel>
+                            </Tabs.Panel>
+                        ))}
                     </Tabs>
 
                 </div>

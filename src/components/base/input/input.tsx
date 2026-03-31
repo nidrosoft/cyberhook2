@@ -1,6 +1,6 @@
 "use client";
 
-import { type ComponentType, type HTMLAttributes, type ReactNode, type Ref, createContext, useContext } from "react";
+import { type ChangeEvent, type ComponentType, type HTMLAttributes, type ReactNode, type Ref, createContext, useContext } from "react";
 import { HelpCircle, InfoCircle } from "@untitledui/icons";
 import type { InputProps as AriaInputProps, TextFieldProps as AriaTextFieldProps } from "react-aria-components";
 import { Group as AriaGroup, Input as AriaInput, TextField as AriaTextField } from "react-aria-components";
@@ -51,8 +51,14 @@ export const InputBase = ({
     iconClassName,
     // Omit this prop to avoid invalid HTML attribute warning
     isRequired: _isRequired,
+    onChange,
     ...inputProps
 }: Omit<InputBaseProps, "label" | "hint">) => {
+    const handleChange = onChange
+        ? (e: ChangeEvent<HTMLInputElement>) => {
+              (onChange as (value: string) => void)(e.target.value);
+          }
+        : undefined;
     // Check if the input has a leading icon or tooltip
     const hasTrailingIcon = tooltip || isInvalid;
     const hasLeadingIcon = Icon;
@@ -122,6 +128,7 @@ export const InputBase = ({
                 {...(inputProps as AriaInputProps)}
                 ref={ref}
                 placeholder={placeholder}
+                onChange={handleChange}
                 className={cx(
                     "m-0 w-full bg-transparent text-md text-primary ring-0 outline-hidden placeholder:text-placeholder autofill:rounded-lg autofill:text-primary",
                     isDisabled && "cursor-not-allowed text-disabled",

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import {
     Plus,
     SearchLg,
@@ -25,174 +27,32 @@ import { Toggle } from "@/components/base/toggle/toggle";
 import { DatePicker } from "@/components/application/date-picker/date-picker";
 import { parseDate } from "@internationalized/date";
 
-type EventItem = {
-    id: string;
-    name: string;
-    type: "Conference" | "Webinar" | "Meeting" | "Trade Show" | "Appointment" | "Custom";
-    location: string;
-    date: string;
-    dateRange?: [number, number];
-    format: "In Person" | "Virtual" | "Hybrid";
-    registered: boolean;
-    actionLabel: string;
+const TYPE_LABELS: Record<string, string> = {
+    meeting: "Meeting",
+    appointment: "Appointment",
+    conference: "Conference",
+    webinar: "Webinar",
+    call: "Call",
+    other: "Other",
 };
 
-const mockEvents: EventItem[] = [
-    {
-        id: "evt-1",
-        name: "Channel Partners Conference",
-        type: "Conference",
-        location: "Las Vegas, NV",
-        date: "Mar 15-17, 2026",
-        dateRange: [15, 17],
-        format: "In Person",
-        registered: true,
-        actionLabel: "View Details",
-    },
-    {
-        id: "evt-2",
-        name: "RSAC 2026",
-        type: "Conference",
-        location: "San Francisco, CA",
-        date: "Apr 28 - May 1, 2026",
-        format: "In Person",
-        registered: true,
-        actionLabel: "View Details",
-    },
-    {
-        id: "evt-3",
-        name: "MSP Summit East",
-        type: "Trade Show",
-        location: "Orlando, FL",
-        date: "May 12-14, 2026",
-        format: "In Person",
-        registered: true,
-        actionLabel: "View Details",
-    },
-    {
-        id: "evt-4",
-        name: "CyberTech Webinar: AI in SecOps",
-        type: "Webinar",
-        location: "Virtual",
-        date: "Mar 20, 2026",
-        dateRange: [20, 20],
-        format: "Virtual",
-        registered: true,
-        actionLabel: "Join Link",
-    },
-    {
-        id: "evt-5",
-        name: "Dark Reading Summit",
-        type: "Conference",
-        location: "Washington, DC",
-        date: "Jun 10-12, 2026",
-        format: "Hybrid",
-        registered: false,
-        actionLabel: "Register",
-    },
-    {
-        id: "evt-6",
-        name: "Gartner IT Symposium",
-        type: "Conference",
-        location: "Barcelona, Spain",
-        date: "Nov 3-5, 2026",
-        format: "In Person",
-        registered: false,
-        actionLabel: "Register",
-    },
-    {
-        id: "evt-7",
-        name: "CompTIA ChannelCon",
-        type: "Trade Show",
-        location: "Chicago, IL",
-        date: "Aug 4-6, 2026",
-        format: "In Person",
-        registered: false,
-        actionLabel: "Register",
-    },
-    {
-        id: "evt-8",
-        name: "Cybersecurity Roundtable",
-        type: "Meeting",
-        location: "Virtual",
-        date: "Mar 22, 2026",
-        dateRange: [22, 22],
-        format: "Virtual",
-        registered: true,
-        actionLabel: "Join Link",
-    },
-];
-
-type Appointment = {
-    id: string;
-    title: string;
-    contact: string;
-    contactRole: string;
-    dateTime: string;
-    duration: string;
-    status: "Confirmed" | "Pending";
-};
-
-const mockAppointments: Appointment[] = [
-    {
-        id: "apt-1",
-        title: "Discovery Call - Acme Corp",
-        contact: "John Smith",
-        contactRole: "CEO",
-        dateTime: "Mar 10, 2026 2:00 PM",
-        duration: "30 min",
-        status: "Confirmed",
-    },
-    {
-        id: "apt-2",
-        title: "Demo - TechNexus",
-        contact: "Sarah Johnson",
-        contactRole: "CTO",
-        dateTime: "Mar 11, 2026 10:00 AM",
-        duration: "60 min",
-        status: "Confirmed",
-    },
-    {
-        id: "apt-3",
-        title: "Follow-up - GlobalLogistics",
-        contact: "Mike Chen",
-        contactRole: "IT Dir",
-        dateTime: "Mar 12, 2026 3:30 PM",
-        duration: "30 min",
-        status: "Pending",
-    },
-    {
-        id: "apt-4",
-        title: "Security Assessment Review - FinServe",
-        contact: "Emily Davis",
-        contactRole: "CISO",
-        dateTime: "Mar 14, 2026 11:00 AM",
-        duration: "45 min",
-        status: "Confirmed",
-    },
-    {
-        id: "apt-5",
-        title: "Proposal Review - CityGov",
-        contact: "Robert Wilson",
-        contactRole: "CIO",
-        dateTime: "Mar 18, 2026 1:00 PM",
-        duration: "60 min",
-        status: "Pending",
-    },
-];
-
-const calendarEvents: { day: number; endDay?: number; label: string; color: string }[] = [
-    { day: 15, endDay: 17, label: "Channel Partners", color: "bg-brand-500" },
-    { day: 20, label: "CyberTech Webinar", color: "bg-purple-500" },
-    { day: 22, label: "Cybersecurity Roundtable", color: "bg-success-500" },
+const CALENDAR_COLORS = [
+    "bg-brand-500",
+    "bg-purple-500",
+    "bg-success-500",
+    "bg-warning-500",
+    "bg-error-500",
+    "bg-blue-500",
 ];
 
 const typeFilterOptions = [
     { label: "All Types", value: "all" },
-    { label: "Conference", value: "Conference" },
-    { label: "Webinar", value: "Webinar" },
-    { label: "Meeting", value: "Meeting" },
-    { label: "Trade Show", value: "Trade Show" },
+    { label: "Conference", value: "conference" },
+    { label: "Webinar", value: "webinar" },
+    { label: "Meeting", value: "meeting" },
+    { label: "Appointment", value: "appointment" },
+    { label: "Call", value: "call" },
+    { label: "Other", value: "other" },
 ];
 
 const dateRangeOptions = [
@@ -205,47 +65,97 @@ const dateRangeOptions = [
 
 const locationFilterOptions = [
     { label: "All Locations", value: "all" },
-    { label: "In Person", value: "In Person" },
-    { label: "Virtual", value: "Virtual" },
-    { label: "Hybrid", value: "Hybrid" },
+    { label: "In Person", value: "in-person" },
+    { label: "Virtual", value: "virtual" },
 ];
 
-function getFormatColor(format: string): "brand" | "success" | "warning" | "gray" {
-    if (format === "Virtual") return "success";
-    if (format === "Hybrid") return "warning";
-    return "brand";
+const eventTypeOptions = [
+    { label: "Conference", value: "conference" },
+    { label: "Webinar", value: "webinar" },
+    { label: "Meeting", value: "meeting" },
+    { label: "Appointment", value: "appointment" },
+    { label: "Call", value: "call" },
+    { label: "Other", value: "other" },
+];
+
+function getFormatColor(isVirtual: boolean | undefined): "brand" | "success" {
+    return isVirtual ? "success" : "brand";
 }
 
 function getTypeColor(type: string): "brand" | "success" | "warning" | "gray" | "error" {
-    if (type === "Conference") return "brand";
-    if (type === "Webinar") return "success";
-    if (type === "Trade Show") return "warning";
-    if (type === "Meeting") return "gray";
-    return "gray";
+    if (type === "conference") return "brand";
+    if (type === "webinar") return "success";
+    if (type === "call") return "warning";
+    if (type === "meeting") return "gray";
+    if (type === "appointment") return "gray";
+    return "error";
 }
 
-function MarchCalendar() {
+function formatEventDate(startDate: number, endDate?: number): string {
+    const start = new Date(startDate);
+    const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
+    const startStr = start.toLocaleDateString("en-US", opts);
+    if (!endDate || endDate === startDate) return startStr;
+    const end = new Date(endDate);
+    if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+        return `${start.toLocaleDateString("en-US", { month: "short" })} ${start.getDate()}-${end.getDate()}, ${start.getFullYear()}`;
+    }
+    return `${startStr} - ${end.toLocaleDateString("en-US", opts)}`;
+}
+
+function formatAppointmentDateTime(startDate: number): string {
+    const d = new Date(startDate);
+    return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+    });
+}
+
+function EventCalendar({ events }: { events: Array<{ title: string; startDate: number; endDate?: number }> }) {
     const [monthOffset, setMonthOffset] = useState(0);
-    const baseYear = 2026;
-    const baseMonth = 2; // March = index 2
-    const currentMonth = baseMonth + monthOffset;
-    const date = new Date(baseYear, currentMonth, 1);
+    const now = new Date();
+    const currentMonth = now.getMonth() + monthOffset;
+    const date = new Date(now.getFullYear(), currentMonth, 1);
     const year = date.getFullYear();
     const month = date.getMonth();
     const monthName = date.toLocaleString("default", { month: "long" });
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const startDay = new Date(year, month, 1).getDay();
-    const today = month === 2 && year === 2026 ? 8 : -1;
+    const todayDate = new Date();
+    const isCurrentMonth = todayDate.getMonth() === month && todayDate.getFullYear() === year;
+    const todayDay = isCurrentMonth ? todayDate.getDate() : -1;
+
+    const calendarEvents = useMemo(() => {
+        return events
+            .filter((ev) => {
+                const evDate = new Date(ev.startDate);
+                const evEndDate = ev.endDate ? new Date(ev.endDate) : evDate;
+                const monthStart = new Date(year, month, 1).getTime();
+                const monthEnd = new Date(year, month + 1, 0, 23, 59, 59).getTime();
+                return evDate.getTime() <= monthEnd && evEndDate.getTime() >= monthStart;
+            })
+            .map((ev, i) => {
+                const evStart = new Date(ev.startDate);
+                const evEnd = ev.endDate ? new Date(ev.endDate) : evStart;
+                return {
+                    day: evStart.getMonth() === month ? evStart.getDate() : 1,
+                    endDay: evEnd.getMonth() === month ? evEnd.getDate() : daysInMonth,
+                    label: ev.title,
+                    color: CALENDAR_COLORS[i % CALENDAR_COLORS.length],
+                };
+            });
+    }, [events, year, month, daysInMonth]);
 
     const days: (number | null)[] = [];
     for (let i = 0; i < startDay; i++) days.push(null);
     for (let d = 1; d <= daysInMonth; d++) days.push(d);
     while (days.length % 7 !== 0) days.push(null);
 
-    const showEvents = month === 2 && year === 2026;
-
     return (
-        <div className="rounded-xl border border-secondary bg-primary p-6 shadow-sm">
+        <div className="rounded-xl border border-secondary bg-primary p-3 sm:p-6 shadow-sm overflow-x-auto">
             <div className="flex items-center justify-between mb-6">
                 <Button color="secondary" size="sm" iconLeading={ChevronLeft} onClick={() => setMonthOffset((p) => p - 1)}>
                     Prev
@@ -256,20 +166,20 @@ function MarchCalendar() {
                 </Button>
             </div>
 
-            <div className="grid grid-cols-7 gap-px">
+            <div className="grid grid-cols-7 gap-px min-w-[500px]">
                 {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
                     <div key={d} className="text-center text-xs font-medium text-tertiary py-2">{d}</div>
                 ))}
                 {days.map((day, i) => {
-                    const eventsForDay = showEvents ? calendarEvents.filter((e) => {
+                    const eventsForDay = calendarEvents.filter((e) => {
                         if (e.endDay) return day !== null && day >= e.day && day <= e.endDay;
                         return day === e.day;
-                    }) : [];
-                    const isToday = day === today;
+                    });
+                    const isToday = day === todayDay;
                     return (
                         <div
                             key={i}
-                            className={`min-h-[80px] border border-secondary/50 p-1.5 text-sm ${
+                            className={`min-h-[60px] sm:min-h-[80px] border border-secondary/50 p-1 sm:p-1.5 text-sm ${
                                 day === null ? "bg-secondary_subtle/50" : "bg-primary"
                             } ${isToday ? "ring-2 ring-brand-500 ring-inset rounded-md" : ""}`}
                         >
@@ -300,101 +210,141 @@ function MarchCalendar() {
     );
 }
 
-const eventTypeOptions = [
-    { label: "Conference", value: "Conference" },
-    { label: "Webinar", value: "Webinar" },
-    { label: "Meeting", value: "Meeting" },
-    { label: "Appointment", value: "Appointment" },
-    { label: "Custom", value: "Custom" },
-];
-
-const linkedLeadOptions = [
-    { label: "None", value: "none" },
-    { label: "Acme Corp", value: "Acme Corp" },
-    { label: "TechNexus", value: "TechNexus" },
-    { label: "GlobalLogistics", value: "GlobalLogistics" },
-    { label: "FinServe", value: "FinServe" },
-    { label: "Pacific Insurance", value: "Pacific Insurance" },
-    { label: "CityGov", value: "CityGov" },
-];
-
 export default function EventsPage() {
+    const userData = useQuery(api.users.getCurrentUserWithCompany);
+    const companyId = userData?.company?._id;
+    const userId = userData?.user?._id;
+
+    const allEvents = useQuery(
+        api.events.list,
+        companyId ? { companyId } : "skip"
+    );
+
+    const stats = useQuery(
+        api.events.getStats,
+        companyId ? { companyId } : "skip"
+    );
+
+    const createEvent = useMutation(api.events.create);
+
     const [evtSearch, setEvtSearch] = useState("");
     const [typeFilter, setTypeFilter] = useState("all");
     const [dateRange, setDateRange] = useState("all");
     const [locFilter, setLocFilter] = useState("all");
 
-    const [events, setEvents] = useState<EventItem[]>(mockEvents);
     const [evtTitle, setEvtTitle] = useState("");
-    const [evtType, setEvtType] = useState("Conference");
+    const [evtType, setEvtType] = useState("conference");
     const [evtStartDate, setEvtStartDate] = useState("");
     const [evtStartTime, setEvtStartTime] = useState("");
     const [evtEndDate, setEvtEndDate] = useState("");
     const [evtLocation, setEvtLocation] = useState("");
     const [evtIsVirtual, setEvtIsVirtual] = useState(false);
     const [evtDescription, setEvtDescription] = useState("");
-    const [evtLinkedLead, setEvtLinkedLead] = useState("none");
 
     const [aptTitle, setAptTitle] = useState("");
-    const [aptContact, setAptContact] = useState("");
     const [aptDate, setAptDate] = useState("");
     const [aptTime, setAptTime] = useState("");
     const [aptDuration, setAptDuration] = useState("30");
     const [aptNotes, setAptNotes] = useState("");
-    const [appointments, setAppointments] = useState(mockAppointments);
 
-    const handleCreateEvent = (close: () => void) => {
-        if (!evtTitle.trim() || !evtType || !evtStartDate) return;
-        const newEvt: EventItem = {
-            id: `evt-${Date.now()}`,
-            name: evtTitle,
-            type: evtType as EventItem["type"],
-            location: evtLocation || "TBD",
-            date: evtStartDate + (evtEndDate ? ` - ${evtEndDate}` : ""),
-            format: evtIsVirtual ? "Virtual" : "In Person",
-            registered: false,
-            actionLabel: "Register",
-        };
-        setEvents((prev) => [...prev, newEvt]);
+    if (!userData) {
+        return (
+            <div className="flex h-full w-full items-center justify-center bg-primary">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+                    <p className="text-sm text-tertiary">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
+    const events = allEvents ?? [];
+
+    const filteredEvents = events.filter((e) => {
+        if (evtSearch && !e.title.toLowerCase().includes(evtSearch.toLowerCase())) return false;
+        if (typeFilter !== "all" && e.type !== typeFilter) return false;
+        if (locFilter === "virtual" && !e.isVirtual) return false;
+        if (locFilter === "in-person" && e.isVirtual) return false;
+        if (dateRange !== "all") {
+            const now = Date.now();
+            if (dateRange === "week" && e.startDate > now + 7 * 24 * 60 * 60 * 1000) return false;
+            if (dateRange === "month" && e.startDate > now + 30 * 24 * 60 * 60 * 1000) return false;
+            if (dateRange === "30" && e.startDate > now + 30 * 24 * 60 * 60 * 1000) return false;
+            if (dateRange === "90" && e.startDate > now + 90 * 24 * 60 * 60 * 1000) return false;
+        }
+        return true;
+    });
+
+    const appointmentEvents = events.filter(
+        (e) => e.type === "meeting" || e.type === "appointment"
+    );
+
+    const handleCreateEvent = async (close: () => void) => {
+        if (!evtTitle.trim() || !evtType || !evtStartDate || !companyId || !userId) return;
+
+        const [y, m, d] = evtStartDate.split("-").map(Number);
+        const [hours, minutes] = evtStartTime ? evtStartTime.split(":").map(Number) : [0, 0];
+        const startMs = new Date(y, m - 1, d, hours, minutes).getTime();
+
+        let endMs: number | undefined;
+        if (evtEndDate) {
+            const [ey, em, ed] = evtEndDate.split("-").map(Number);
+            endMs = new Date(ey, em - 1, ed, 23, 59).getTime();
+        }
+
+        await createEvent({
+            companyId,
+            createdByUserId: userId,
+            title: evtTitle,
+            type: evtType as "meeting" | "appointment" | "conference" | "webinar" | "call" | "other",
+            startDate: startMs,
+            endDate: endMs,
+            location: evtLocation || undefined,
+            isVirtual: evtIsVirtual,
+            description: evtDescription || undefined,
+        });
+
         setEvtTitle("");
-        setEvtType("Conference");
+        setEvtType("conference");
         setEvtStartDate("");
         setEvtStartTime("");
         setEvtEndDate("");
         setEvtLocation("");
         setEvtIsVirtual(false);
         setEvtDescription("");
-        setEvtLinkedLead("none");
         close();
     };
 
-    const handleSchedule = (close: () => void) => {
-        if (!aptTitle.trim() || !aptContact.trim()) return;
-        const newApt: Appointment = {
-            id: `apt-${Date.now()}`,
+    const handleSchedule = async (close: () => void) => {
+        if (!aptTitle.trim() || !companyId || !userId) return;
+
+        let startMs = Date.now();
+        if (aptDate) {
+            const [y, m, d] = aptDate.split("-").map(Number);
+            const [hours, minutes] = aptTime ? aptTime.split(":").map(Number) : [0, 0];
+            startMs = new Date(y, m - 1, d, hours, minutes).getTime();
+        }
+
+        const durationMs = parseInt(aptDuration) * 60 * 1000;
+
+        await createEvent({
+            companyId,
+            createdByUserId: userId,
             title: aptTitle,
-            contact: aptContact,
-            contactRole: "",
-            dateTime: `${aptDate} ${aptTime}`,
-            duration: `${aptDuration} min`,
-            status: "Pending",
-        };
-        setAppointments((prev) => [...prev, newApt]);
+            type: "appointment",
+            startDate: startMs,
+            endDate: startMs + durationMs,
+            description: aptNotes || undefined,
+            isVirtual: true,
+        });
+
         setAptTitle("");
-        setAptContact("");
         setAptDate("");
         setAptTime("");
         setAptDuration("30");
         setAptNotes("");
         close();
     };
-
-    const filteredEvents = events.filter((e) => {
-        if (evtSearch && !e.name.toLowerCase().includes(evtSearch.toLowerCase())) return false;
-        if (typeFilter !== "all" && e.type !== typeFilter) return false;
-        if (locFilter !== "all" && e.format !== locFilter) return false;
-        return true;
-    });
 
     return (
         <div className="flex h-full w-full flex-col bg-primary relative">
@@ -493,16 +443,6 @@ export default function EventsPage() {
                                                         className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary resize-none"
                                                     />
                                                 </div>
-                                                <div>
-                                                    <label className="block text-sm font-medium text-secondary mb-1.5">Linked Lead</label>
-                                                    <NativeSelect
-                                                        options={linkedLeadOptions}
-                                                        value={evtLinkedLead}
-                                                        onChange={(e) => setEvtLinkedLead(e.target.value)}
-                                                        className="w-full"
-                                                        selectClassName="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500"
-                                                    />
-                                                </div>
                                             </div>
                                         </SlideoutMenu.Content>
                                         <SlideoutMenu.Footer>
@@ -536,15 +476,33 @@ export default function EventsPage() {
                         <Tabs.Panel id="upcoming">
                             <div className="flex flex-col gap-6">
                                 {/* Summary Stats */}
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <MetricsChart04 title="8" subtitle="Upcoming Events" change="3" changeTrend="positive" changeDescription="new this month" />
-                                    <MetricsChart04 title="3" subtitle="Events This Month" change="1" changeTrend="positive" changeDescription="more than last month" />
-                                    <MetricsChart04 title="5" subtitle="Registered" change="62%" changeTrend="positive" changeDescription="registration rate" />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    <MetricsChart04
+                                        title={String(stats?.total ?? 0)}
+                                        subtitle="Total Events"
+                                        change={String(stats?.upcoming ?? 0)}
+                                        changeTrend="positive"
+                                        changeDescription="upcoming"
+                                    />
+                                    <MetricsChart04
+                                        title={String(stats?.thisWeek ?? 0)}
+                                        subtitle="This Week"
+                                        change={String(stats?.upcoming ?? 0)}
+                                        changeTrend="positive"
+                                        changeDescription="upcoming total"
+                                    />
+                                    <MetricsChart04
+                                        title={String(stats?.upcoming ?? 0)}
+                                        subtitle="Upcoming"
+                                        change={String(Object.keys(stats?.byType ?? {}).length)}
+                                        changeTrend="positive"
+                                        changeDescription="event types"
+                                    />
                                 </div>
 
                                 {/* Filter Row */}
-                                <div className="flex items-center gap-3 rounded-xl border border-secondary bg-primary p-3">
-                                    <div className="min-w-0 flex-1">
+                                <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-3 rounded-xl border border-secondary bg-primary p-3">
+                                    <div className="min-w-0 w-full sm:w-auto sm:flex-1">
                                         <InputBase
                                             type="text"
                                             size="sm"
@@ -554,31 +512,33 @@ export default function EventsPage() {
                                             onChange={(value: string) => setEvtSearch(value)}
                                         />
                                     </div>
-                                    <div className="h-8 w-px shrink-0 bg-secondary" />
-                                    <FilterDropdown
-                                        aria-label="Type"
-                                        value={typeFilter}
-                                        onChange={(v) => setTypeFilter(v)}
-                                        options={typeFilterOptions}
-                                    />
-                                    <FilterDropdown
-                                        aria-label="Date range"
-                                        value={dateRange}
-                                        onChange={(v) => setDateRange(v)}
-                                        options={dateRangeOptions}
-                                    />
-                                    <FilterDropdown
-                                        aria-label="Location"
-                                        value={locFilter}
-                                        onChange={(v) => setLocFilter(v)}
-                                        options={locationFilterOptions}
-                                    />
+                                    <div className="hidden sm:block h-8 w-px shrink-0 bg-secondary" />
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <FilterDropdown
+                                            aria-label="Type"
+                                            value={typeFilter}
+                                            onChange={(v) => setTypeFilter(v)}
+                                            options={typeFilterOptions}
+                                        />
+                                        <FilterDropdown
+                                            aria-label="Date range"
+                                            value={dateRange}
+                                            onChange={(v) => setDateRange(v)}
+                                            options={dateRangeOptions}
+                                        />
+                                        <FilterDropdown
+                                            aria-label="Location"
+                                            value={locFilter}
+                                            onChange={(v) => setLocFilter(v)}
+                                            options={locationFilterOptions}
+                                        />
+                                    </div>
                                 </div>
 
                                 {/* Events Table */}
                                 <TableCard.Root>
                                     <TableCard.Header title="Upcoming Events" badge={`${filteredEvents.length} events`} />
-
+                                    <div className="overflow-x-auto">
                                     <Table aria-label="Events Schedule">
                                         <Table.Header>
                                             <Table.Row>
@@ -587,11 +547,10 @@ export default function EventsPage() {
                                                 <Table.Head id="location">Location</Table.Head>
                                                 <Table.Head id="date">Date</Table.Head>
                                                 <Table.Head id="format">Format</Table.Head>
-                                                <Table.Head id="status">Status</Table.Head>
                                                 <Table.Head id="actions" className="w-[140px]">Actions</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
-                                        <Table.Body items={filteredEvents}>
+                                        <Table.Body items={filteredEvents.map((e) => ({ ...e, id: e._id }))}>
                                             {(item) => (
                                                 <Table.Row id={item.id}>
                                                     <Table.Cell>
@@ -599,53 +558,55 @@ export default function EventsPage() {
                                                             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle">
                                                                 <Calendar className="w-5 h-5 text-tertiary" />
                                                             </div>
-                                                            <span className="font-medium text-primary">{item.name}</span>
+                                                            <span className="font-medium text-primary">{item.title}</span>
                                                         </div>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <Badge color={getTypeColor(item.type)} size="sm">{item.type}</Badge>
+                                                        <Badge color={getTypeColor(item.type)} size="sm">
+                                                            {TYPE_LABELS[item.type] ?? item.type}
+                                                        </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
                                                         <div className="flex items-center gap-2">
                                                             <MarkerPin01 className="w-4 h-4 text-tertiary" />
-                                                            <span className="text-secondary text-sm">{item.location}</span>
+                                                            <span className="text-secondary text-sm">
+                                                                {item.isVirtual ? "Virtual" : (item.location || "TBD")}
+                                                            </span>
                                                         </div>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <span className="text-secondary text-sm">{item.date}</span>
+                                                        <span className="text-secondary text-sm">
+                                                            {formatEventDate(item.startDate, item.endDate)}
+                                                        </span>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <Badge color={getFormatColor(item.format)} size="sm">{item.format}</Badge>
+                                                        <Badge color={getFormatColor(item.isVirtual)} size="sm">
+                                                            {item.isVirtual ? "Virtual" : "In Person"}
+                                                        </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        {item.registered ? (
-                                                            <Badge color="success" size="sm">Registered ✅</Badge>
-                                                        ) : (
-                                                            <Badge color="gray" size="sm">Not Registered</Badge>
-                                                        )}
-                                                    </Table.Cell>
-                                                    <Table.Cell>
-                                                        <Button size="sm" color={item.registered ? "secondary" : "primary"}>
-                                                            {item.actionLabel}
+                                                        <Button size="sm" color="secondary">
+                                                            View Details
                                                         </Button>
                                                     </Table.Cell>
                                                 </Table.Row>
                                             )}
                                         </Table.Body>
                                     </Table>
+                                    </div>
                                 </TableCard.Root>
                             </div>
                         </Tabs.Panel>
 
                         {/* =================== CALENDAR TAB =================== */}
                         <Tabs.Panel id="calendar">
-                            <MarchCalendar />
+                            <EventCalendar events={events} />
                         </Tabs.Panel>
 
                         {/* =================== APPOINTMENTS TAB =================== */}
                         <Tabs.Panel id="appointments">
                             <div className="flex flex-col gap-6">
-                                <div className="flex items-center justify-between">
+                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
                                         <h2 className="text-lg font-semibold text-primary">Appointments</h2>
                                         <p className="text-sm text-tertiary">Upcoming meetings and calls</p>
@@ -669,16 +630,6 @@ export default function EventsPage() {
                                                                     value={aptTitle}
                                                                     onChange={(e) => setAptTitle(e.target.value)}
                                                                     placeholder="Meeting title..."
-                                                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Contact Name *</label>
-                                                                <input
-                                                                    type="text"
-                                                                    value={aptContact}
-                                                                    onChange={(e) => setAptContact(e.target.value)}
-                                                                    placeholder="Contact name..."
                                                                     className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
                                                                 />
                                                             </div>
@@ -740,20 +691,19 @@ export default function EventsPage() {
 
                                 {/* Appointments Table */}
                                 <TableCard.Root>
-                                    <TableCard.Header title="Scheduled Appointments" badge={`${appointments.length} total`} />
-
+                                    <TableCard.Header title="Scheduled Appointments" badge={`${appointmentEvents.length} total`} />
+                                    <div className="overflow-x-auto">
                                     <Table aria-label="Appointments">
                                         <Table.Header>
                                             <Table.Row>
                                                 <Table.Head id="meeting" isRowHeader>Meeting</Table.Head>
-                                                <Table.Head id="contact">Contact</Table.Head>
                                                 <Table.Head id="datetime">Date/Time</Table.Head>
-                                                <Table.Head id="duration">Duration</Table.Head>
-                                                <Table.Head id="status">Status</Table.Head>
+                                                <Table.Head id="type">Type</Table.Head>
+                                                <Table.Head id="location">Location</Table.Head>
                                                 <Table.Head id="actions" className="w-[200px]">Actions</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
-                                        <Table.Body items={appointments}>
+                                        <Table.Body items={appointmentEvents.map((e) => ({ ...e, id: e._id }))}>
                                             {(item) => (
                                                 <Table.Row id={item.id}>
                                                     <Table.Cell>
@@ -765,40 +715,36 @@ export default function EventsPage() {
                                                         </div>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <div className="flex flex-col">
-                                                            <span className="text-sm text-primary">{item.contact}</span>
-                                                            {item.contactRole && (
-                                                                <span className="text-xs text-tertiary">{item.contactRole}</span>
-                                                            )}
-                                                        </div>
-                                                    </Table.Cell>
-                                                    <Table.Cell>
                                                         <div className="flex items-center gap-1.5">
                                                             <Clock className="w-4 h-4 text-tertiary" />
-                                                            <span className="text-sm text-secondary">{item.dateTime}</span>
+                                                            <span className="text-sm text-secondary">
+                                                                {formatAppointmentDateTime(item.startDate)}
+                                                            </span>
                                                         </div>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <span className="text-sm text-secondary">{item.duration}</span>
-                                                    </Table.Cell>
-                                                    <Table.Cell>
-                                                        <Badge
-                                                            color={item.status === "Confirmed" ? "success" : "warning"}
-                                                            size="sm"
-                                                        >
-                                                            {item.status === "Confirmed" ? "Confirmed ✅" : "Pending ⏳"}
+                                                        <Badge color={getTypeColor(item.type)} size="sm">
+                                                            {TYPE_LABELS[item.type] ?? item.type}
                                                         </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
+                                                        <span className="text-sm text-secondary">
+                                                            {item.isVirtual ? "Virtual" : (item.location || "TBD")}
+                                                        </span>
+                                                    </Table.Cell>
+                                                    <Table.Cell>
                                                         <div className="flex items-center gap-2">
-                                                            <Button size="sm" color="primary">Join</Button>
-                                                            <Button size="sm" color="secondary">Reschedule</Button>
+                                                            {item.meetingUrl && (
+                                                                <Button size="sm" color="primary">Join</Button>
+                                                            )}
+                                                            <Button size="sm" color="secondary">View Details</Button>
                                                         </div>
                                                     </Table.Cell>
                                                 </Table.Row>
                                             )}
                                         </Table.Body>
                                     </Table>
+                                    </div>
                                 </TableCard.Root>
                             </div>
                         </Tabs.Panel>

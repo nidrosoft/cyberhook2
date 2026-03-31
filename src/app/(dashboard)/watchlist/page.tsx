@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useQuery, useMutation } from "convex/react";
 import {
     Activity,
     AlertCircle,
@@ -10,6 +11,7 @@ import {
     Eye,
     Globe01,
     Hash01,
+    Loading02,
     Mail01,
     MessageSquare01,
     PauseCircle,
@@ -34,32 +36,31 @@ import { Input, InputBase } from "@/components/base/input/input";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 type AlertLevel = "Critical" | "Warning" | "Normal" | "Clean" | "Paused";
 
-interface WatchlistDomain {
-    id: string;
-    domain: string;
-    company: string;
-    industry: string;
-    status: "Active" | "Paused";
-    exposuresPrev: number;
-    exposuresCurr: number;
-    changeLabel: string;
-    lastChange: string;
-    alertLevel: AlertLevel;
+function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    
+    if (hours < 1) return "Just now";
+    if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
+    if (days === 1) return "1 day ago";
+    return `${days} days ago`;
 }
 
-const mockWatchlist: WatchlistDomain[] = [
-    { id: "wl-1", domain: "acmecorp.com", company: "Acme Corp", industry: "Technology", status: "Active", exposuresPrev: 7, exposuresCurr: 9, changeLabel: "+2 new", lastChange: "2 hours ago", alertLevel: "Critical" },
-    { id: "wl-2", domain: "globallogistics.com", company: "GlobalLogistics", industry: "Logistics", status: "Active", exposuresPrev: 15, exposuresCurr: 15, changeLabel: "no change", lastChange: "1 day ago", alertLevel: "Normal" },
-    { id: "wl-3", domain: "finserve.com", company: "FinServe Capital", industry: "Finance", status: "Active", exposuresPrev: 5, exposuresCurr: 7, changeLabel: "+2 new", lastChange: "4 hours ago", alertLevel: "Warning" },
-    { id: "wl-4", domain: "securehealth.org", company: "SecureHealth", industry: "Healthcare", status: "Active", exposuresPrev: 0, exposuresCurr: 0, changeLabel: "clean", lastChange: "3 days ago", alertLevel: "Clean" },
-    { id: "wl-5", domain: "educorp.edu", company: "EduCorp", industry: "Education", status: "Paused", exposuresPrev: 8, exposuresCurr: 8, changeLabel: "", lastChange: "5 days ago", alertLevel: "Paused" },
-    { id: "wl-6", domain: "retailmax.com", company: "RetailMax", industry: "Retail", status: "Active", exposuresPrev: 1, exposuresCurr: 3, changeLabel: "+2 new", lastChange: "6 hours ago", alertLevel: "Warning" },
-    { id: "wl-7", domain: "citygov.org", company: "CityGov", industry: "Government", status: "Active", exposuresPrev: 20, exposuresCurr: 22, changeLabel: "+2 new", lastChange: "1 hour ago", alertLevel: "Critical" },
-    { id: "wl-8", domain: "techforward.io", company: "TechForward", industry: "Technology", status: "Active", exposuresPrev: 3, exposuresCurr: 3, changeLabel: "no change", lastChange: "2 days ago", alertLevel: "Normal" },
-];
+function getAlertLevelFromItem(item: { hasNewExposures?: boolean; exposureCount?: number; isPaused?: boolean }): AlertLevel {
+    if (item.isPaused) return "Paused";
+    if (item.hasNewExposures) return "Critical";
+    if ((item.exposureCount ?? 0) === 0) return "Clean";
+    if ((item.exposureCount ?? 0) > 5) return "Warning";
+    return "Normal";
+}
 
 function getAlertBadge(level: AlertLevel) {
     switch (level) {
@@ -92,6 +93,24 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
 }
 
 export default function WatchlistPage() {
+    const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
+
+    // Fetch watchlist data from Convex
+    const watchlistItems = useQuery(
+        api.watchlist.list,
+        companyId ? { companyId } : "skip"
+    );
+    const watchlistStats = useQuery(
+        api.watchlist.getStats,
+        companyId ? { companyId } : "skip"
+    );
+
+    // Mutations
+    const addToWatchlist = useMutation(api.watchlist.add);
+    const removeFromWatchlist = useMutation(api.watchlist.remove);
+    const pauseWatchlist = useMutation(api.watchlist.pause);
+    const resumeWatchlist = useMutation(api.watchlist.resume);
+
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
         column: "domain",
         direction: "ascending",
@@ -101,10 +120,10 @@ export default function WatchlistPage() {
     const [monitorWindow, setMonitorWindow] = useState<"7" | "30" | "90">("30");
     const [emailAlerts, setEmailAlerts] = useState(true);
     const [alertThreshold, setAlertThreshold] = useState("Any Change");
+    const [isAdding, setIsAdding] = useState(false);
 
     const [filterStatus, setFilterStatus] = useState("all");
     const [filterAlertLevel, setFilterAlertLevel] = useState("all");
-    const [filterIndustry, setFilterIndustry] = useState("all");
     const [domainSearch, setDomainSearch] = useState("");
 
     const [emailNotif, setEmailNotif] = useState(true);
@@ -114,11 +133,84 @@ export default function WatchlistPage() {
     const [alertFrequency, setAlertFrequency] = useState("Instant");
     const [criticalOnly, setCriticalOnly] = useState(false);
 
-    const stats = {
-        monitored: 8,
-        newAlerts: 4,
-        criticalAlerts: 2,
-    };
+    // Filter watchlist items
+    const filteredItems = useMemo(() => {
+        if (!watchlistItems) return [];
+        return watchlistItems.filter((item) => {
+            // Search filter
+            if (domainSearch && !item.domain.toLowerCase().includes(domainSearch.toLowerCase())) {
+                return false;
+            }
+            // Status filter
+            if (filterStatus !== "all") {
+                const isActive = !item.isPaused;
+                if (filterStatus === "Active" && !isActive) return false;
+                if (filterStatus === "Paused" && isActive) return false;
+            }
+            // Alert level filter
+            if (filterAlertLevel !== "all") {
+                const alertLevel = getAlertLevelFromItem(item);
+                if (alertLevel !== filterAlertLevel) return false;
+            }
+            return true;
+        });
+    }, [watchlistItems, domainSearch, filterStatus, filterAlertLevel]);
+
+    async function handleAddDomain(close: () => void) {
+        if (!companyId || !user || !newDomain.trim()) return;
+        setIsAdding(true);
+        try {
+            await addToWatchlist({
+                companyId,
+                userId: user._id,
+                domain: newDomain.trim().toLowerCase(),
+                companyName: companyName.trim() || newDomain.split(".")[0].charAt(0).toUpperCase() + newDomain.split(".")[0].slice(1),
+                notifyByEmail: emailAlerts,
+                monitoringWindow: parseInt(monitorWindow),
+            });
+            setNewDomain("");
+            setCompanyName("");
+            close();
+        } catch (error) {
+            console.error("Failed to add domain:", error);
+            alert(error instanceof Error ? error.message : "Failed to add domain");
+        } finally {
+            setIsAdding(false);
+        }
+    }
+
+    async function handleRemove(id: Id<"watchlistItems">) {
+        if (!confirm("Are you sure you want to remove this domain from your watchlist?")) return;
+        try {
+            await removeFromWatchlist({ id });
+        } catch (error) {
+            console.error("Failed to remove:", error);
+        }
+    }
+
+    async function handlePause(id: Id<"watchlistItems">) {
+        try {
+            await pauseWatchlist({ id });
+        } catch (error) {
+            console.error("Failed to pause:", error);
+        }
+    }
+
+    async function handleResume(id: Id<"watchlistItems">) {
+        try {
+            await resumeWatchlist({ id });
+        } catch (error) {
+            console.error("Failed to resume:", error);
+        }
+    }
+
+    if (isUserLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <Loading02 className="h-8 w-8 animate-spin text-brand-600" />
+            </div>
+        );
+    }
 
     return (
         <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
@@ -228,13 +320,10 @@ export default function WatchlistPage() {
                                                 <Button color="secondary" onClick={close}>Cancel</Button>
                                                 <Button
                                                     color="primary"
-                                                    onClick={() => {
-                                                        setNewDomain("");
-                                                        setCompanyName("");
-                                                        close();
-                                                    }}
+                                                    onClick={() => handleAddDomain(close)}
+                                                    isDisabled={!newDomain.trim() || isAdding}
                                                 >
-                                                    Add to Watchlist
+                                                    {isAdding ? "Adding..." : "Add to Watchlist"}
                                                 </Button>
                                             </div>
                                         </SlideoutMenu.Footer>
@@ -247,14 +336,34 @@ export default function WatchlistPage() {
 
                 {/* Summary Stats */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <MetricsChart04 title="8" subtitle="Monitored Domains" change="2" changeTrend="positive" changeDescription="added this week" />
-                    <MetricsChart04 title="4" subtitle="New Alerts This Week" change="33%" changeTrend="negative" changeDescription="vs last week" chartColor="text-fg-warning-secondary" />
-                    <MetricsChart04 title="2" subtitle="Critical Alerts" change="2" changeTrend="negative" changeDescription="require attention" chartColor="text-fg-error-secondary" />
+                    <MetricsChart04 
+                        title={(watchlistStats?.total ?? 0).toString()} 
+                        subtitle="Monitored Domains" 
+                        change={(watchlistStats?.active ?? 0).toString()} 
+                        changeTrend="positive" 
+                        changeDescription="active" 
+                    />
+                    <MetricsChart04 
+                        title={(watchlistStats?.withAlerts ?? 0).toString()} 
+                        subtitle="New Alerts" 
+                        change={(watchlistStats?.withAlerts ?? 0).toString()} 
+                        changeTrend={(watchlistStats?.withAlerts ?? 0) > 0 ? "negative" : "positive"} 
+                        changeDescription="domains with new exposures" 
+                        chartColor="text-fg-warning-secondary" 
+                    />
+                    <MetricsChart04 
+                        title={(watchlistStats?.paused ?? 0).toString()} 
+                        subtitle="Paused" 
+                        change={(watchlistStats?.paused ?? 0).toString()} 
+                        changeTrend="positive" 
+                        changeDescription="monitoring paused" 
+                        chartColor="text-fg-error-secondary" 
+                    />
                 </div>
 
                 {/* Filter Bar */}
-                <div className="flex items-center gap-3 rounded-xl border border-secondary bg-primary p-3">
-                    <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-secondary bg-primary p-3">
+                    <div className="min-w-0 w-full sm:w-auto sm:flex-1">
                         <InputBase
                             size="sm"
                             type="search"
@@ -265,7 +374,7 @@ export default function WatchlistPage() {
                             onChange={(value: string) => setDomainSearch(value)}
                         />
                     </div>
-                    <div className="h-8 w-px shrink-0 bg-secondary" />
+                    <div className="hidden sm:block h-8 w-px shrink-0 bg-secondary" />
                     <FilterDropdown
                         aria-label="Status"
                         value={filterStatus}
@@ -288,20 +397,11 @@ export default function WatchlistPage() {
                             { label: "Clean", value: "Clean" },
                         ]}
                     />
-                    <FilterDropdown
-                        aria-label="Industry"
-                        value={filterIndustry}
-                        onChange={setFilterIndustry}
-                        options={[
-                            { label: "Industry: All", value: "all" },
-                            ...Array.from(new Set(mockWatchlist.map((d) => d.industry))).sort().map((ind) => ({ label: ind, value: ind })),
-                        ]}
-                    />
                 </div>
 
                 {/* Watchlist Table */}
-                <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary">
-                    <TableCard.Header title="Monitored Domains" badge={`${mockWatchlist.length} domains`} />
+                <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
+                    <TableCard.Header title="Monitored Domains" badge={`${filteredItems.length} domains`} />
 
                     <Table
                         aria-label="Watchlist Domains"
@@ -312,18 +412,19 @@ export default function WatchlistPage() {
                     >
                         <Table.Header className="bg-secondary_subtle">
                             <Table.Head id="domain" label="Domain" allowsSorting isRowHeader className="min-w-[180px]" />
-                            <Table.Head id="company" label="Company" allowsSorting className="min-w-[140px]" />
-                            <Table.Head id="industry" label="Industry" allowsSorting className="min-w-[110px]" />
+                            <Table.Head id="company" label="Company" allowsSorting className="min-w-[140px] hidden lg:table-cell" />
                             <Table.Head id="status" label="Status" allowsSorting className="min-w-[150px]" />
                             <Table.Head id="exposures" label="Exposures" allowsSorting className="min-w-[160px]" />
-                            <Table.Head id="lastChange" label="Last Change" allowsSorting className="min-w-[120px]" />
+                            <Table.Head id="lastChecked" label="Last Checked" allowsSorting className="min-w-[120px] hidden md:table-cell" />
                             <Table.Head id="alertLevel" label="Alert Level" allowsSorting className="min-w-[120px]" />
                             <Table.Head id="actions" label="Actions" className="min-w-[160px]" />
                         </Table.Header>
 
-                        <Table.Body items={mockWatchlist}>
+                        <Table.Body items={filteredItems.map((item) => ({ ...item, id: item._id }))}>
                             {(item) => {
-                                const alert = getAlertBadge(item.alertLevel);
+                                const alertLevel = getAlertLevelFromItem(item);
+                                const alert = getAlertBadge(alertLevel);
+                                const isActive = !item.isPaused;
                                 return (
                                     <Table.Row id={item.id}>
                                         <Table.Cell>
@@ -334,61 +435,72 @@ export default function WatchlistPage() {
                                                 <span className="font-medium text-primary">{item.domain}</span>
                                             </div>
                                         </Table.Cell>
-                                        <Table.Cell>
-                                            <span className="text-sm text-secondary">{item.company}</span>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Badge color="gray" size="sm">{item.industry}</Badge>
+                                        <Table.Cell className="hidden lg:table-cell">
+                                            <span className="text-sm text-secondary">{item.companyName || "-"}</span>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <div className="flex items-center gap-2">
-                                                {item.status === "Active" ? (
+                                                {isActive ? (
                                                     <>
                                                         <CheckCircle className="w-4 h-4 text-success-500" />
-                                                        <span className="text-sm text-success-700">Active Monitoring ✅</span>
+                                                        <span className="text-sm text-success-700">Active</span>
                                                     </>
                                                 ) : (
                                                     <>
                                                         <PauseCircle className="w-4 h-4 text-warning-500" />
-                                                        <span className="text-sm text-warning-700">Paused ⏸</span>
+                                                        <span className="text-sm text-warning-700">Paused</span>
                                                     </>
                                                 )}
                                             </div>
                                         </Table.Cell>
                                         <Table.Cell>
-                                            {item.status === "Paused" ? (
-                                                <span className="text-sm text-tertiary">{item.exposuresCurr}</span>
-                                            ) : item.changeLabel === "clean" ? (
-                                                <span className="text-sm text-success-700">0 → 0 (clean)</span>
-                                            ) : item.changeLabel === "no change" ? (
-                                                <span className="text-sm text-tertiary">
-                                                    {item.exposuresPrev} → {item.exposuresCurr} (no change)
-                                                </span>
-                                            ) : (
-                                                <span className="text-sm">
-                                                    <span className="text-secondary">{item.exposuresPrev} → {item.exposuresCurr}</span>{" "}
-                                                    <span className="text-error-600 font-medium">({item.changeLabel})</span>
-                                                </span>
-                                            )}
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm text-secondary">{item.exposureCount ?? 0}</span>
+                                                {item.hasNewExposures && (
+                                                    <Badge color="error" size="sm">New!</Badge>
+                                                )}
+                                            </div>
                                         </Table.Cell>
-                                        <Table.Cell>
-                                            <span className="text-sm text-tertiary">{item.lastChange}</span>
+                                        <Table.Cell className="hidden md:table-cell">
+                                            <span className="text-sm text-tertiary">
+                                                {item.lastCheckedAt ? formatRelativeTime(item.lastCheckedAt) : "Never"}
+                                            </span>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <div className="flex items-center gap-1.5">
                                                 <span className="text-xs leading-none">{alert.dot}</span>
-                                                <Badge color={alert.color} size="sm">{item.alertLevel}</Badge>
+                                                <Badge color={alert.color} size="sm">{alertLevel}</Badge>
                                             </div>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <div className="flex items-center gap-1">
                                                 <Button color="link-gray" size="sm" iconLeading={Eye}>View</Button>
-                                                {item.status === "Active" ? (
-                                                    <Button color="link-gray" size="sm" iconLeading={PauseCircle}>Pause</Button>
+                                                {isActive ? (
+                                                    <Button 
+                                                        color="link-gray" 
+                                                        size="sm" 
+                                                        iconLeading={PauseCircle}
+                                                        onClick={() => handlePause(item._id)}
+                                                    >
+                                                        Pause
+                                                    </Button>
                                                 ) : (
-                                                    <Button color="link-gray" size="sm" iconLeading={PlayCircle}>Resume</Button>
+                                                    <Button 
+                                                        color="link-gray" 
+                                                        size="sm" 
+                                                        iconLeading={PlayCircle}
+                                                        onClick={() => handleResume(item._id)}
+                                                    >
+                                                        Resume
+                                                    </Button>
                                                 )}
-                                                <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Remove" />
+                                                <ButtonUtility 
+                                                    size="sm" 
+                                                    color="tertiary" 
+                                                    icon={Trash01} 
+                                                    aria-label="Remove"
+                                                    onClick={() => handleRemove(item._id)}
+                                                />
                                             </div>
                                         </Table.Cell>
                                     </Table.Row>
@@ -396,6 +508,14 @@ export default function WatchlistPage() {
                             }}
                         </Table.Body>
                     </Table>
+                    {filteredItems.length === 0 && (
+                        <div className="px-5 py-8 text-center text-sm text-tertiary">
+                            {watchlistItems?.length === 0 
+                                ? "No domains in your watchlist yet. Add a domain to start monitoring."
+                                : "No domains match your filters."
+                            }
+                        </div>
+                    )}
                 </TableCard.Root>
 
                 {/* Alert Preferences */}

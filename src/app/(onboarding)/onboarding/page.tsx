@@ -1,6 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
+import { useMutation } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import { setOnboardingComplete } from "@/app/actions/clerk";
 import {
     ArrowLeft,
     ArrowRight,
@@ -149,7 +154,12 @@ interface FormData {
 }
 
 export default function OnboardingPage() {
+    const { user } = useUser();
+    const router = useRouter();
     const [step, setStep] = useState(1);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
     const [formData, setFormData] = useState<FormData>({
         companyName: "",
         phone: "",
@@ -206,7 +216,7 @@ export default function OnboardingPage() {
             </div>
 
             {/* Step Content Card */}
-            <div className={`w-full rounded-2xl border border-secondary bg-secondary_subtle p-6 shadow-lg lg:p-10 ${step === 4 ? "max-w-6xl" : "max-w-6xl"}`}>
+            <div className={`w-full max-w-6xl rounded-2xl border border-secondary bg-secondary_subtle p-4 shadow-lg sm:p-6 lg:p-10`}>
                 {/* Step 1 */}
                 {step === 1 && (
                     <div className="mx-auto flex max-w-xl flex-col gap-6">
@@ -397,13 +407,13 @@ export default function OnboardingPage() {
                     <div className="flex flex-col gap-8">
                         <div className="flex flex-col gap-1">
                             <p className="text-sm font-semibold text-brand-secondary md:text-md">Pricing</p>
-                            <h2 className="text-display-md font-semibold text-primary lg:text-display-lg">Simple, transparent pricing</h2>
-                            <p className="mt-2 text-lg text-tertiary">
+                            <h2 className="text-display-xs font-semibold text-primary sm:text-display-md lg:text-display-lg">Simple, transparent pricing</h2>
+                            <p className="mt-2 text-md text-tertiary sm:text-lg">
                                 All plans include a 5-day free trial. Cancel anytime.
                             </p>
                         </div>
 
-                        <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 md:gap-8 xl:grid-cols-3">
+                        <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 md:gap-8 xl:grid-cols-3">
                             {pricingPlans.map((plan) => (
                                 <PricingTierCardCallout key={plan.title} {...plan} checkItemTextColor="success" />
                             ))}
@@ -435,12 +445,69 @@ export default function OnboardingPage() {
                             </div>
                         </div>
 
-                        <div className="flex justify-between pt-2">
+                        {error && (
+                            <p className="text-sm text-error-primary">{error}</p>
+                        )}
+                        <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-between">
                             <Button color="secondary" size="lg" iconLeading={ArrowLeft} onClick={() => setStep(3)}>
                                 Back
                             </Button>
-                            <Button color="primary" size="lg" iconLeading={Zap}>
-                                Start 5-day Free Trial
+                            <Button 
+                                color="primary" 
+                                size="lg" 
+                                iconLeading={Zap}
+                                disabled={isSubmitting}
+                                onClick={async () => {
+                                    if (!user) return;
+                                    setIsSubmitting(true);
+                                    setError(null);
+                                    try {
+                                        // Parse team emails
+                                        const teamEmailsArray = formData.teamEmails
+                                            .split(",")
+                                            .map((e) => e.trim())
+                                            .filter((e) => e.length > 0);
+
+                                        // Save to Convex
+                                        const result = await completeOnboarding({
+                                            clerkId: user.id,
+                                            email: user.primaryEmailAddress?.emailAddress || "",
+                                            firstName: user.firstName || "",
+                                            lastName: user.lastName || "",
+                                            imageUrl: user.imageUrl,
+                                            companyName: formData.companyName,
+                                            phone: formData.phone,
+                                            website: formData.website,
+                                            primaryBusinessModel: formData.businessModel,
+                                            annualRevenue: formData.annualRevenue,
+                                            geographicCoverage: formData.geoCoverage,
+                                            targetCustomerBase: formData.targetCustomers,
+                                            totalEmployees: formData.totalEmployees,
+                                            totalSalesPeople: formData.totalSales,
+                                            teamEmails: teamEmailsArray,
+                                        });
+
+                                        if (result.success) {
+                                            // Update Clerk publicMetadata server-side (secure, not client-writable)
+                                            await setOnboardingComplete(
+                                                user.id,
+                                                result.userId,
+                                                result.companyId,
+                                            );
+                                            // Full page reload to pick up fresh session claims with onboardingComplete
+                                            window.location.href = "/dashboard";
+                                        } else {
+                                            setError("Failed to complete onboarding. Please try again.");
+                                            setIsSubmitting(false);
+                                        }
+                                    } catch (err) {
+                                        console.error("Error completing onboarding:", err);
+                                        setError(err instanceof Error ? err.message : "An error occurred");
+                                        setIsSubmitting(false);
+                                    }
+                                }}
+                            >
+                                {isSubmitting ? "Setting up..." : "Start 5-day Free Trial"}
                             </Button>
                         </div>
                     </div>

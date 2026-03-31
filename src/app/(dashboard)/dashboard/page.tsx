@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useMutation, useQuery } from "convex/react";
 import {
     SearchLg,
     Target05,
@@ -12,70 +13,67 @@ import {
     ArrowRight,
     ChevronRight,
     CheckCircle,
+    Loading02,
 } from "@untitledui/icons";
 
 import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { MetricsChart04, MetricsIcon04 } from "@/components/application/metrics/metrics";
+import { useDashboardData } from "@/hooks/use-dashboard-data";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
-// ─── Data ────────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const newsArticles = [
-    {
-        title: "Critical Zero-Day in FortiGate Firewalls Exploited",
-        source: "SecurityWeek",
-        time: "2h ago",
-        severity: "Critical",
-        severityColor: "error" as const,
-    },
-    {
-        title: "Ransomware Group 'BlackCat' Targets Healthcare Sector",
-        source: "DarkReading",
-        time: "4h ago",
-        severity: "High",
-        severityColor: "error" as const,
-    },
-    {
-        title: "NIST Releases Updated Cybersecurity Framework 2.1",
-        source: "NIST.gov",
-        time: "6h ago",
-        severity: "Info",
-        severityColor: "success" as const,
-    },
-    {
-        title: "Record $4.5M Average Cost of Data Breach in 2025",
-        source: "IBM",
-        time: "12h ago",
-        severity: "Medium",
-        severityColor: "warning" as const,
-    },
-    {
-        title: "New SEC Disclosure Rules Take Effect Next Month",
-        source: "Reuters",
-        time: "1d ago",
-        severity: "Info",
-        severityColor: "success" as const,
-    },
-];
+function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    
+    if (hours < 1) return "Just now";
+    if (hours < 24) return `${hours}h ago`;
+    if (days === 1) return "1d ago";
+    return `${days}d ago`;
+}
 
-const recentSearches = [
-    { domain: "acmecorp.com", exposures: 7, date: "Mar 7, 2026", status: "Complete" },
-    { domain: "globallogistics.com", exposures: 12, date: "Mar 6, 2026", status: "Complete" },
-    { domain: "techforward.io", exposures: 3, date: "Mar 5, 2026", status: "Complete" },
-    { domain: "securehealth.org", exposures: 0, date: "Mar 4, 2026", status: "Clean" },
-    { domain: "finserve.com", exposures: 5, date: "Mar 3, 2026", status: "Complete" },
-    { domain: "nexgenhealth.com", exposures: 8, date: "Mar 2, 2026", status: "Complete" },
-    { domain: "vaultpay.io", exposures: 2, date: "Mar 1, 2026", status: "Complete" },
-    { domain: "ironclad-mfg.com", exposures: 15, date: "Feb 28, 2026", status: "Complete" },
-    { domain: "cloudpeak.dev", exposures: 0, date: "Feb 27, 2026", status: "Clean" },
-];
+function formatDate(timestamp: number): string {
+    return new Date(timestamp).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+    });
+}
 
-const tasks = [
-    { label: "Follow up with Acme Corp", due: "Due today", priority: "High", priorityColor: "text-error-600", dotColor: "bg-error-500", done: false },
-    { label: "Send proposal to TechNexus", due: "Due today", priority: "Medium", priorityColor: "text-warning-600", dotColor: "bg-warning-500", done: false },
-    { label: "Review Q4 pipeline report", due: "Completed", priority: "", priorityColor: "", dotColor: "", done: true },
-    { label: "Schedule demo with GlobalLogistics", due: "Due tomorrow", priority: "Low", priorityColor: "text-success-600", dotColor: "bg-success-500", done: false },
-];
+function formatEventDates(startDate: number, endDate?: number): string {
+    const start = new Date(startDate);
+    const startStr = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    if (!endDate) return startStr;
+    const end = new Date(endDate);
+    const endStr = end.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return `${startStr}–${endStr}`;
+}
+
+function getPriorityStyles(priority: string): { color: string; dotColor: string } {
+    switch (priority) {
+        case "high":
+            return { color: "text-error-600", dotColor: "bg-error-500" };
+        case "medium":
+            return { color: "text-warning-600", dotColor: "bg-warning-500" };
+        case "low":
+            return { color: "text-success-600", dotColor: "bg-success-500" };
+        default:
+            return { color: "text-tertiary", dotColor: "bg-gray-400" };
+    }
+}
+
+function getIncidentSeverity(incidentType: string): { label: string; color: "error" | "warning" | "success" } {
+    if (incidentType === "ransomware") {
+        return { label: "Critical", color: "error" };
+    }
+    return { label: "Breach", color: "warning" };
+}
 
 const quickActions = [
     { label: "New Live Search", href: "/live-search", icon: SearchLg },
@@ -84,104 +82,195 @@ const quickActions = [
     { label: "Schedule Event", href: "/events", icon: Calendar },
 ];
 
-const upcomingEvents = [
-    { name: "Channel Partners Conference", location: "Las Vegas", dates: "Mar 15–17" },
-    { name: "RSAC 2026", location: "San Francisco", dates: "Apr 28–May 1" },
-    { name: "MSP Summit East", location: "Orlando", dates: "May 12–14" },
-];
-
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-    const [tasksDone, setTasksDone] = useState<Record<string, boolean>>(
-        Object.fromEntries(tasks.map((t) => [t.label, t.done]))
+    const {
+        user,
+        isLoading,
+        kpis,
+        recentSearches,
+        todaysTasks,
+        upcomingEvents,
+        recentIncidents,
+        tasksStats,
+        leadsStats,
+    } = useDashboardData();
+
+    const { companyId } = useCurrentUser();
+
+    const searchStats = useQuery(
+        api.searches.getStats,
+        companyId ? { companyId } : "skip"
     );
-    const toggleTask = (label: string) => setTasksDone((prev) => ({ ...prev, [label]: !prev[label] }));
+    const campaignStats = useQuery(
+        api.campaigns.getStats,
+        companyId ? { companyId } : "skip"
+    );
+
+    const bottomStatsLoading =
+        searchStats === undefined || campaignStats === undefined;
+
+    const searchesThisMonthTitle = bottomStatsLoading
+        ? "—"
+        : (searchStats.last30Days ?? 0).toLocaleString();
+    const searchesChange = bottomStatsLoading
+        ? "…"
+        : `${(searchStats?.last7Days ?? 0).toLocaleString()} in last 7 days`;
+
+    const emailsSentTitle = bottomStatsLoading
+        ? "—"
+        : (campaignStats?.totalEmailsSent ?? 0).toLocaleString();
+    const emailsSentChange = bottomStatsLoading
+        ? "…"
+        : (campaignStats?.totalEmailsSent ?? 0) === 0
+          ? "No sends recorded yet"
+          : "Total across campaigns";
+
+    const pipelineTitle = bottomStatsLoading
+        ? "—"
+        : (leadsStats?.total ?? 0).toLocaleString();
+    const pipelineChange = bottomStatsLoading
+        ? "…"
+        : "Live leads (no $ pipeline yet)";
+
+    const completeTask = useMutation(api.tasks.complete);
+    const reopenTask = useMutation(api.tasks.reopen);
+
+    const [completingTasks, setCompletingTasks] = useState<Set<string>>(new Set());
+
+    const toggleTask = async (taskId: Id<"tasks">, currentStatus: string) => {
+        setCompletingTasks((prev) => new Set(prev).add(taskId));
+        try {
+            if (currentStatus === "completed") {
+                await reopenTask({ id: taskId });
+            } else {
+                await completeTask({ id: taskId });
+            }
+        } finally {
+            setCompletingTasks((prev) => {
+                const next = new Set(prev);
+                next.delete(taskId);
+                return next;
+            });
+        }
+    };
+
+    const currentDate = useMemo(() => {
+        return new Date().toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+        });
+    }, []);
+
+    const greeting = useMemo(() => {
+        if (!user) return "Welcome back";
+        return `Welcome back, ${user.firstName}`;
+    }, [user]);
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <Loading02 className="h-8 w-8 animate-spin text-brand-600" />
+            </div>
+        );
+    }
     return (
-        <div className="pt-8 pb-12 w-full">
+        <div className="pt-6 pb-8 w-full sm:pt-8 sm:pb-12">
             <div className="flex flex-col gap-8">
 
                 {/* ── 1. Greeting ──────────────────────────── */}
-                <div className="px-4 lg:px-8">
+                <div className="px-4 sm:px-6 lg:px-8">
                     <div className="flex flex-col gap-1">
-                        <h1 className="text-display-sm font-semibold text-primary">
-                            Welcome back, Liron 👋
+                        <h1 className="text-display-xs font-semibold text-primary sm:text-display-sm">
+                            {greeting} 👋
                         </h1>
                         <p className="text-md text-secondary">
                             Here&apos;s what&apos;s happening with your pipeline today.
                         </p>
-                        <p className="text-sm text-tertiary">Saturday, March 8, 2026</p>
+                        <p className="text-sm text-tertiary">{currentDate}</p>
                     </div>
                 </div>
 
                 {/* ── 2. KPI Tiles ─────────────────────────── */}
-                <div className="grid grid-cols-1 gap-5 px-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6 lg:px-8">
+                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:gap-5 sm:px-6 lg:grid-cols-4 lg:gap-6 lg:px-8">
                     <MetricsChart04
-                        title="842"
+                        title={kpis.tokenBalance.value?.toLocaleString() ?? "0"}
                         subtitle="Token Balance"
-                        change="84%"
-                        changeTrend="positive"
-                        changeDescription="of 1,000 remaining"
+                        change={kpis.tokenBalance.total ? `${Math.round((kpis.tokenBalance.value ?? 0) / kpis.tokenBalance.total * 100)}%` : "0%"}
+                        changeTrend={kpis.tokenBalance.status === "critical" || kpis.tokenBalance.status === "warning" ? "negative" : "positive"}
+                        changeDescription={`of ${kpis.tokenBalance.total?.toLocaleString() ?? 0} remaining`}
                     />
                     <MetricsChart04
-                        title="1,204"
+                        title={kpis.liveLeads.value.toLocaleString()}
                         subtitle="Live-Leads"
-                        change="23"
+                        change={kpis.liveLeads.newThisWeek.toString()}
                         changeTrend="positive"
                         changeDescription="new this week"
                     />
                     <MetricsChart04
-                        title="5"
+                        title={kpis.activeCampaigns.value.toString()}
                         subtitle="Active Campaigns"
-                        change="3"
-                        changeTrend="negative"
+                        change="0"
+                        changeTrend="positive"
                         changeDescription="awaiting approval"
                     />
                     <MetricsChart04
-                        title="12"
+                        title={kpis.watchlistAlerts.value.toString()}
                         subtitle="Watchlist Alerts"
-                        change="4"
-                        changeTrend="negative"
-                        changeDescription="critical"
+                        change={kpis.watchlistAlerts.total.toString()}
+                        changeTrend={kpis.watchlistAlerts.value > 0 ? "negative" : "positive"}
+                        changeDescription="total monitored"
                     />
                 </div>
 
                 {/* ── 3. Two-Column Layout ─────────────────── */}
-                <div className="grid grid-cols-1 gap-8 px-4 lg:grid-cols-5 lg:px-8">
+                <div className="grid grid-cols-1 gap-6 px-4 sm:px-6 md:grid-cols-5 md:gap-6 lg:gap-8 lg:px-8">
 
                     {/* ── LEFT COLUMN (3/5 ≈ 60%) ─────────── */}
-                    <div className="lg:col-span-3 flex flex-col gap-8">
+                    <div className="md:col-span-3 flex flex-col gap-6 lg:gap-8">
 
-                        {/* News Feed */}
+                        {/* News Feed - Ransom Incidents */}
                         <div className="rounded-xl border border-secondary bg-primary shadow-xs">
                             <div className="flex items-center justify-between border-b border-secondary px-5 py-4">
                                 <div className="flex items-center gap-2">
                                     <Globe01 className="h-5 w-5 text-tertiary" />
                                     <h2 className="text-lg font-semibold text-primary">Cyber News Feed</h2>
                                 </div>
-                                <Link href="/news" className="text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors">
+                                <Link href="/ransom-hub" className="text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors">
                                     View All
                                 </Link>
                             </div>
                             <div className="divide-y divide-secondary">
-                                {newsArticles.map((article) => (
-                                    <div
-                                        key={article.title}
-                                        className="flex items-start justify-between gap-4 px-5 py-4 hover:bg-secondary_alt transition-colors"
-                                    >
-                                        <div className="flex flex-col gap-1 min-w-0">
-                                            <span className="text-sm font-semibold text-primary line-clamp-1">
-                                                {article.title}
-                                            </span>
-                                            <span className="text-xs text-tertiary">
-                                                {article.source} &middot; {article.time}
-                                            </span>
-                                        </div>
-                                        <Badge color={article.severityColor} size="sm">
-                                            {article.severity}
-                                        </Badge>
+                                {recentIncidents.length === 0 ? (
+                                    <div className="px-5 py-8 text-center text-sm text-tertiary">
+                                        No recent incidents to display
                                     </div>
-                                ))}
+                                ) : (
+                                    recentIncidents.slice(0, 5).map((incident) => {
+                                        const severity = getIncidentSeverity(incident.incidentType);
+                                        return (
+                                            <div
+                                                key={incident._id}
+                                                className="flex items-start justify-between gap-4 px-5 py-4 hover:bg-secondary_alt transition-colors"
+                                            >
+                                                <div className="flex flex-col gap-1 min-w-0">
+                                                    <span className="text-sm font-semibold text-primary line-clamp-1">
+                                                        {incident.companyName} - {incident.ransomwareGroup || incident.incidentType}
+                                                    </span>
+                                                    <span className="text-xs text-tertiary">
+                                                        {incident.industry || "Unknown"} &middot; {formatRelativeTime(incident.attackDate)}
+                                                    </span>
+                                                </div>
+                                                <Badge color={severity.color} size="sm">
+                                                    {severity.label}
+                                                </Badge>
+                                            </div>
+                                        );
+                                    })
+                                )}
                             </div>
                         </div>
 
@@ -207,22 +296,34 @@ export default function DashboardPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-secondary">
-                                        {recentSearches.map((row) => (
-                                            <tr key={row.domain} className="hover:bg-secondary_alt transition-colors">
-                                                <td className="px-5 py-3 font-medium text-primary">{row.domain}</td>
-                                                <td className="px-5 py-3 text-tertiary">{row.exposures}</td>
-                                                <td className="px-5 py-3 text-tertiary whitespace-nowrap">{row.date}</td>
-                                                <td className="px-5 py-3">
-                                                    {row.status === "Clean" ? (
-                                                        <span className="inline-flex items-center gap-1 text-success-600 font-medium">
-                                                            Clean <CheckCircle className="h-4 w-4" />
-                                                        </span>
-                                                    ) : (
-                                                        <Badge color="gray" size="sm">{row.status}</Badge>
-                                                    )}
+                                        {recentSearches.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="px-5 py-8 text-center text-sm text-tertiary">
+                                                    No searches yet. Start by searching a domain.
                                                 </td>
                                             </tr>
-                                        ))}
+                                        ) : (
+                                            recentSearches.map((search) => (
+                                                <tr key={search._id} className="hover:bg-secondary_alt transition-colors">
+                                                    <td className="px-5 py-3 font-medium text-primary">{search.domain}</td>
+                                                    <td className="px-5 py-3 text-tertiary">{search.totalExposures ?? 0}</td>
+                                                    <td className="px-5 py-3 text-tertiary whitespace-nowrap">{formatDate(search.createdAt)}</td>
+                                                    <td className="px-5 py-3">
+                                                        {search.status === "success" && (search.totalExposures ?? 0) === 0 ? (
+                                                            <span className="inline-flex items-center gap-1 text-success-600 font-medium">
+                                                                Clean <CheckCircle className="h-4 w-4" />
+                                                            </span>
+                                                        ) : search.status === "failed" ? (
+                                                            <Badge color="error" size="sm">Failed</Badge>
+                                                        ) : search.status === "pending" ? (
+                                                            <Badge color="warning" size="sm">Pending</Badge>
+                                                        ) : (
+                                                            <Badge color="gray" size="sm">Complete</Badge>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -230,7 +331,7 @@ export default function DashboardPage() {
                     </div>
 
                     {/* ── RIGHT COLUMN (2/5 ≈ 40%) ────────── */}
-                    <div className="lg:col-span-2 flex flex-col gap-8">
+                    <div className="md:col-span-2 flex flex-col gap-6 lg:gap-8">
 
                         {/* Today's Tasks */}
                         <div className="rounded-xl border border-secondary bg-primary shadow-xs">
@@ -238,38 +339,54 @@ export default function DashboardPage() {
                                 <div className="flex items-center gap-2">
                                     <Target05 className="h-5 w-5 text-tertiary" />
                                     <h2 className="text-lg font-semibold text-primary">Today&apos;s Tasks</h2>
-                                    <Badge color="brand" size="sm">4</Badge>
+                                    <Badge color="brand" size="sm">{tasksStats?.dueToday ?? 0}</Badge>
                                 </div>
+                                <Link href="/to-do-list" className="text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors">
+                                    View All
+                                </Link>
                             </div>
                             <div className="divide-y divide-secondary">
-                                {tasks.map((task) => {
-                                    const isDone = tasksDone[task.label] ?? task.done;
-                                    return (
-                                    <div key={task.label} className="flex items-start gap-3 px-5 py-4">
-                                        <button type="button" className="mt-0.5 cursor-pointer" onClick={() => toggleTask(task.label)}>
-                                            {isDone ? (
-                                                <CheckCircle className="h-5 w-5 text-success-500" />
-                                            ) : (
-                                                <div className="h-5 w-5 rounded-md border-2 border-secondary hover:border-brand-500 transition-colors" />
-                                            )}
-                                        </button>
-                                        <div className="flex flex-col gap-0.5 min-w-0">
-                                            <span className={`text-sm font-medium ${isDone ? "line-through text-tertiary" : "text-primary"}`}>
-                                                {task.label}
-                                            </span>
-                                            <div className="flex items-center gap-2 text-xs text-tertiary">
-                                                <span>{task.due}</span>
-                                                {task.priority && (
-                                                    <span className={`flex items-center gap-1 font-medium ${task.priorityColor}`}>
-                                                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${task.dotColor}`} />
-                                                        {task.priority}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
+                                {todaysTasks.length === 0 ? (
+                                    <div className="px-5 py-8 text-center text-sm text-tertiary">
+                                        No tasks due today. Great job! 🎉
                                     </div>
-                                    );
-                                })}
+                                ) : (
+                                    todaysTasks.map((task) => {
+                                        const isDone = task.status === "completed";
+                                        const isCompleting = completingTasks.has(task._id);
+                                        const priorityStyles = getPriorityStyles(task.priority);
+                                        return (
+                                            <div key={task._id} className="flex items-start gap-3 px-5 py-4">
+                                                <button 
+                                                    type="button" 
+                                                    className="mt-0.5 cursor-pointer disabled:opacity-50" 
+                                                    onClick={() => toggleTask(task._id, task.status)}
+                                                    disabled={isCompleting}
+                                                >
+                                                    {isCompleting ? (
+                                                        <Loading02 className="h-5 w-5 animate-spin text-brand-500" />
+                                                    ) : isDone ? (
+                                                        <CheckCircle className="h-5 w-5 text-success-500" />
+                                                    ) : (
+                                                        <div className="h-5 w-5 rounded-md border-2 border-secondary hover:border-brand-500 transition-colors" />
+                                                    )}
+                                                </button>
+                                                <div className="flex flex-col gap-0.5 min-w-0">
+                                                    <span className={`text-sm font-medium ${isDone ? "line-through text-tertiary" : "text-primary"}`}>
+                                                        {task.title}
+                                                    </span>
+                                                    <div className="flex items-center gap-2 text-xs text-tertiary">
+                                                        <span>Due today</span>
+                                                        <span className={`flex items-center gap-1 font-medium ${priorityStyles.color}`}>
+                                                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityStyles.dotColor}`} />
+                                                            {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
                             </div>
                         </div>
 
@@ -301,23 +418,29 @@ export default function DashboardPage() {
                                 <div className="flex items-center gap-2">
                                     <Calendar className="h-5 w-5 text-tertiary" />
                                     <h2 className="text-lg font-semibold text-primary">Upcoming Events</h2>
-                                    <Badge color="brand" size="sm">3</Badge>
+                                    <Badge color="brand" size="sm">{upcomingEvents.length}</Badge>
                                 </div>
                             </div>
                             <div className="divide-y divide-secondary">
-                                {upcomingEvents.map((event) => (
-                                    <div key={event.name} className="flex items-start gap-3 px-5 py-4">
-                                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50">
-                                            <Calendar className="h-4 w-4 text-brand-600" />
-                                        </div>
-                                        <div className="flex flex-col gap-0.5 min-w-0">
-                                            <span className="text-sm font-semibold text-primary">{event.name}</span>
-                                            <span className="text-xs text-tertiary">
-                                                {event.location} &middot; {event.dates}
-                                            </span>
-                                        </div>
+                                {upcomingEvents.length === 0 ? (
+                                    <div className="px-5 py-8 text-center text-sm text-tertiary">
+                                        No upcoming events scheduled
                                     </div>
-                                ))}
+                                ) : (
+                                    upcomingEvents.map((event) => (
+                                        <div key={event._id} className="flex items-start gap-3 px-5 py-4">
+                                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50">
+                                                <Calendar className="h-4 w-4 text-brand-600" />
+                                            </div>
+                                            <div className="flex flex-col gap-0.5 min-w-0">
+                                                <span className="text-sm font-semibold text-primary">{event.title}</span>
+                                                <span className="text-xs text-tertiary">
+                                                    {event.location || (event.isVirtual ? "Virtual" : "TBD")} &middot; {formatEventDates(event.startDate, event.endDate)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                             <div className="border-t border-secondary px-5 py-3 text-center">
                                 <Link
@@ -333,27 +456,39 @@ export default function DashboardPage() {
                 </div>
 
                 {/* ── 4. Bottom Quick Stats ─────────────────── */}
-                <div className="grid grid-cols-1 gap-5 px-4 sm:grid-cols-3 lg:px-8">
+                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-3 sm:gap-5 sm:px-6 lg:px-8">
                     <MetricsIcon04
                         icon={SearchLg}
-                        title="158"
-                        subtitle="Searches This Month"
-                        change="18%"
+                        title={searchesThisMonthTitle}
+                        subtitle="Searches (last 30 days)"
+                        change={searchesChange}
                         changeTrend="positive"
                     />
                     <MetricsIcon04
                         icon={Mail01}
-                        title="2,340"
-                        subtitle="Emails Sent This Month"
-                        change="24%"
-                        changeTrend="positive"
+                        title={emailsSentTitle}
+                        subtitle="Emails Sent (campaigns)"
+                        change={emailsSentChange}
+                        changeTrend={
+                            bottomStatsLoading
+                                ? "positive"
+                                : (campaignStats?.totalEmailsSent ?? 0) > 0
+                                  ? "positive"
+                                  : "negative"
+                        }
                     />
                     <MetricsIcon04
                         icon={Target05}
-                        title="$1.2M"
+                        title={pipelineTitle}
                         subtitle="Pipeline Value"
-                        change="22%"
-                        changeTrend="positive"
+                        change={pipelineChange}
+                        changeTrend={
+                            bottomStatsLoading
+                                ? "positive"
+                                : (leadsStats?.total ?? 0) > 0
+                                  ? "positive"
+                                  : "negative"
+                        }
                     />
                 </div>
             </div>

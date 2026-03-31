@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { SidebarNavigationSectionsSubheadings } from "@/components/application/app-navigation/sidebar-navigation/sidebar-sections-subheadings";
 import { HeaderNavigationBase } from "@/components/application/app-navigation/header-navigation";
+import { RouteGuard } from "@/components/auth/route-guard";
 import {
     Calendar,
     CheckDone01,
@@ -52,22 +53,24 @@ const headerItems: any[] = [];
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     return (
-        <div className="flex bg-secondary text-primary min-h-screen">
-            <SidebarNavigationSectionsSubheadings
-                items={navItemsWithSectionsSubheadings}
-                activeUrl={pathname}
-            />
-            {/* Main content with Header above it */}
-            <main className="flex flex-1 flex-col min-w-0 bg-primary h-screen overflow-hidden">
-                <HeaderNavigationBase
-                    items={headerItems}
-                    showAvatarDropdown={true}
-                    hideBorder={false}
+        <RouteGuard>
+            <div className="flex bg-secondary text-primary min-h-screen">
+                <SidebarNavigationSectionsSubheadings
+                    items={navItemsWithSectionsSubheadings}
+                    activeUrl={pathname}
                 />
-                <div className="flex-1 overflow-y-auto">
-                    {children}
-                </div>
-            </main>
-        </div>
+                {/* Main content with Header above it */}
+                <main className="flex flex-1 flex-col min-w-0 bg-primary h-screen overflow-hidden">
+                    <HeaderNavigationBase
+                        items={headerItems}
+                        showAvatarDropdown={true}
+                        hideBorder={false}
+                    />
+                    <div className="flex-1 overflow-y-auto">
+                        {children}
+                    </div>
+                </main>
+            </div>
+        </RouteGuard>
     );
 }

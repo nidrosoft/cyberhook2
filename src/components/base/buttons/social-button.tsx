@@ -4,7 +4,7 @@ import type { AnchorHTMLAttributes, ButtonHTMLAttributes, DetailedHTMLProps } fr
 import type { ButtonProps as AriaButtonProps, LinkProps as AriaLinkProps } from "react-aria-components";
 import { Button as AriaButton, Link as AriaLink } from "react-aria-components";
 import { cx, sortCx } from "@/utils/cx";
-import { AppleLogo, DribbleLogo, FacebookLogo, FigmaLogo, FigmaLogoOutlined, GoogleLogo, TwitterLogo } from "./social-logos";
+import { AppleLogo, DribbleLogo, FacebookLogo, FigmaLogo, FigmaLogoOutlined, GoogleLogo, TwitterLogo, LinkedInLogo, MicrosoftLogo } from "./social-logos";
 
 export const styles = sortCx({
     common: {
@@ -53,7 +53,7 @@ export const styles = sortCx({
 });
 
 interface CommonProps {
-    social: "google" | "facebook" | "apple" | "twitter" | "figma" | "dribble";
+    social: "google" | "facebook" | "apple" | "twitter" | "figma" | "dribble" | "linkedin" | "microsoft";
     disabled?: boolean;
     theme?: "brand" | "color" | "gray";
     size?: keyof typeof styles.sizes;
@@ -83,6 +83,8 @@ export const SocialButton = ({ size = "lg", theme = "brand", social, className, 
         twitter: "black",
         figma: "black",
         dribble: "dribble",
+        linkedin: "gray",
+        microsoft: "gray",
     } as const;
 
     const colorStyles = theme === "brand" ? styles.colors[socialToColor[social]] : styles.colors.gray;
@@ -94,6 +96,8 @@ export const SocialButton = ({ size = "lg", theme = "brand", social, className, 
         twitter: TwitterLogo,
         figma: theme === "gray" ? FigmaLogoOutlined : FigmaLogo,
         dribble: DribbleLogo,
+        linkedin: LinkedInLogo,
+        microsoft: MicrosoftLogo,
     };
 
     const Logo = logos[social];
@@ -139,8 +143,8 @@ export const SocialButton = ({ size = "lg", theme = "brand", social, className, 
                             : "",
                 )}
                 colorful={
-                    (theme === "brand" && (social === "google" || social === "figma")) ||
-                    (theme === "color" && (social === "google" || social === "facebook" || social === "figma" || social === "dribble")) ||
+                    (theme === "brand" && (social === "google" || social === "figma" || social === "linkedin" || social === "microsoft")) ||
+                    (theme === "color" && (social === "google" || social === "facebook" || social === "figma" || social === "dribble" || social === "linkedin" || social === "microsoft")) ||
                     undefined
                 }
             />

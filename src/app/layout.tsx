@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
+import { ConvexClientProvider } from "@/providers/convex-provider";
 import { RouteProvider } from "@/providers/router-provider";
 import { Theme } from "@/providers/theme";
 import "@/styles/globals.css";
@@ -27,12 +29,16 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <html lang="en" suppressHydrationWarning>
-            <body className={cx(inter.variable, "bg-primary antialiased")}>
-                <RouteProvider>
-                    <Theme>{children}</Theme>
-                </RouteProvider>
-            </body>
-        </html>
+        <ClerkProvider>
+            <ConvexClientProvider>
+                <html lang="en" suppressHydrationWarning>
+                    <body className={cx(inter.variable, "bg-primary antialiased")} suppressHydrationWarning>
+                        <RouteProvider>
+                            <Theme>{children}</Theme>
+                        </RouteProvider>
+                    </body>
+                </html>
+            </ConvexClientProvider>
+        </ClerkProvider>
     );
 }

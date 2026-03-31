@@ -1,25 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import { useCurrentUser, useCompany, useTokens } from "@/hooks";
 import {
     CreditCard02,
     DownloadCloud01,
     DotsVertical,
-    BarChartSquare02,
     CheckCircle,
     FilterLines,
     Link01,
     Mail01,
     Plus,
     SearchLg,
-    Settings01 as Settings01Icon,
-    Shield01,
-    UploadCloud02,
-    User01,
-    Users01,
     Zap,
 } from "@untitledui/icons";
-import type { FileListItemProps } from "@/components/application/file-upload/file-upload-base";
 import { FileUpload } from "@/components/application/file-upload/file-upload-base";
 import { TabList, Tabs } from "@/components/application/tabs/tabs";
 import { Avatar } from "@/components/base/avatar/avatar";
@@ -43,101 +39,251 @@ const tabs = [
     { id: "audit", label: "Audit Log" },
 ];
 
-const mockUsers = [
-    { id: "1", name: "Sarah Jenkins", email: "sarah@acme.com", role: "Sales Admin", status: "Active", lastActive: "Just now" },
-    { id: "2", name: "Mike Ross", email: "mike@acme.com", role: "Sales Rep", status: "Active", lastActive: "2 hours ago" },
-    { id: "3", name: "Jessica Pearson", email: "jessica@acme.com", role: "Billing", status: "Invited", lastActive: "Never" }
-];
-
-const mockInvoices = [
-    { id: "INV-2024-003", date: "Mar 01, 2024", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2024-002", date: "Feb 01, 2024", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2024-001", date: "Jan 01, 2024", amount: "$1,250.00", plan: "Enterprise", status: "Paid" }
-];
-
-const placeholderFiles: FileListItemProps[] = [
-    { name: "Tech design requirements.pdf", type: "pdf", size: 200 * 1024, progress: 100 },
-];
-
 const integrationCategories = [
     {
         label: "EMAIL",
         items: [
-            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", icon: "📧", connected: false },
-            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", icon: "📧", connected: false },
+            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", icon: "📧", provider: "outlook_email" as const },
+            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", icon: "📧", provider: "gmail" as const },
         ],
     },
     {
         label: "CALENDAR",
         items: [
-            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", icon: "📅", connected: false },
-            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", icon: "📅", connected: false },
+            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", icon: "📅", provider: "outlook_calendar" as const },
+            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", icon: "📅", provider: "google_calendar" as const },
         ],
     },
     {
         label: "CRM",
         items: [
-            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", icon: "🔶", connected: false },
-            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", icon: "🟢", connected: false },
+            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", icon: "🔶", provider: "hubspot" as const },
+            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", icon: "🟢", provider: "ghl" as const },
         ],
     },
     {
         label: "MESSAGING",
         items: [
-            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", icon: "💬", connected: false },
-            { name: "Slack", description: "Send notifications and alerts to Slack channels", icon: "💬", connected: false },
+            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", icon: "💬", provider: "teams" as const },
+            { name: "Slack", description: "Send notifications and alerts to Slack channels", icon: "💬", provider: "slack" as const },
         ],
     },
     {
         label: "SOCIAL",
         items: [
-            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", icon: "🔗", connected: false },
+            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", icon: "🔗", provider: "linkedin" as const },
         ],
     },
     {
         label: "PAYMENTS",
         items: [
-            { name: "Stripe", description: "Process payments and manage subscriptions", icon: "💳", connected: true },
+            { name: "Stripe", description: "Process payments and manage subscriptions", icon: "💳", provider: "stripe" as const },
         ],
     },
 ];
 
-const mockAuditLogs = [
-    { id: "1", event: "User Login", user: "Sarah Jenkins", details: "Successful login", ip: "192.168.1.1", date: "Mar 7, 2026 10:30 AM" },
-    { id: "2", event: "Live Search", user: "Mike Ross", details: "Searched: acmecorp.com", ip: "192.168.1.2", date: "Mar 7, 2026 10:15 AM" },
-    { id: "3", event: "Lead Created", user: "Sarah Jenkins", details: "Created lead: Acme Corp", ip: "192.168.1.1", date: "Mar 7, 2026 09:45 AM" },
-    { id: "4", event: "Campaign Launched", user: "Jessica Pearson", details: "Campaign: Q4 Outreach", ip: "192.168.1.3", date: "Mar 6, 2026 04:00 PM" },
-    { id: "5", event: "User Invited", user: "Sarah Jenkins", details: "Invited: john@company.com (Sales Rep)", ip: "192.168.1.1", date: "Mar 6, 2026 02:30 PM" },
-    { id: "6", event: "Integration Connected", user: "Sarah Jenkins", details: "Connected: HubSpot", ip: "192.168.1.1", date: "Mar 5, 2026 11:00 AM" },
-    { id: "7", event: "Settings Updated", user: "Sarah Jenkins", details: "Updated company profile", ip: "192.168.1.1", date: "Mar 5, 2026 10:00 AM" },
-    { id: "8", event: "Report Generated", user: "Mike Ross", details: "PDF report for globallogistics.com", ip: "192.168.1.2", date: "Mar 4, 2026 03:45 PM" },
-];
+function formatRole(role: string): string {
+    switch (role) {
+        case "sales_admin": return "Sales Admin";
+        case "sales_rep": return "Sales Rep";
+        case "billing": return "Billing";
+        default: return role;
+    }
+}
+
+function formatStatus(status: string): string {
+    switch (status) {
+        case "approved": return "Active";
+        case "pending": return "Invited";
+        case "deactivated": return "Deactivated";
+        case "rejected": return "Rejected";
+        default: return status;
+    }
+}
+
+function formatRelativeTime(timestamp?: number): string {
+    if (!timestamp) return "Never";
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function formatDate(timestamp: number): string {
+    return new Date(timestamp).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+    });
+}
+
+function getAuditEventColor(action: string): "brand" | "blue" | "success" | "purple" | "orange" | "gray" {
+    if (action.startsWith("user.login") || action.startsWith("user.logout")) return "brand";
+    if (action.startsWith("search.")) return "blue";
+    if (action.startsWith("lead.")) return "success";
+    if (action.startsWith("campaign.")) return "purple";
+    if (action.startsWith("user.")) return "orange";
+    if (action.startsWith("integration.")) return "success";
+    return "gray";
+}
+
+function getAuditEventLabel(action: string): string {
+    const labels: Record<string, string> = {
+        "user.login": "User Login",
+        "user.logout": "User Logout",
+        "user.created": "User Created",
+        "user.updated": "User Updated",
+        "user.deactivated": "User Deactivated",
+        "user.approved": "User Approved",
+        "user.rejected": "User Rejected",
+        "company.updated": "Company Updated",
+        "company.settings_changed": "Settings Updated",
+        "lead.created": "Lead Created",
+        "lead.updated": "Lead Updated",
+        "lead.deleted": "Lead Deleted",
+        "lead.status_changed": "Lead Status Changed",
+        "search.performed": "Live Search",
+        "watchlist.item_added": "Watchlist Added",
+        "watchlist.item_removed": "Watchlist Removed",
+        "campaign.created": "Campaign Created",
+        "campaign.started": "Campaign Launched",
+        "campaign.paused": "Campaign Paused",
+        "campaign.completed": "Campaign Completed",
+        "integration.connected": "Integration Connected",
+        "integration.disconnected": "Integration Disconnected",
+        "subscription.created": "Subscription Created",
+        "subscription.updated": "Subscription Updated",
+        "payment.succeeded": "Payment Succeeded",
+        "payment.failed": "Payment Failed",
+        "kb.entry_created": "KB Entry Created",
+        "rfp.created": "RFP Created",
+        "settings.updated": "Settings Updated",
+        "tokens.consumed": "Token Consumed",
+    };
+    return labels[action] ?? action;
+}
+
+function LoadingSpinner() {
+    return (
+        <div className="flex items-center justify-center py-12">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-border-secondary border-t-fg-brand-primary" />
+        </div>
+    );
+}
 
 export default function SettingsPage() {
     const [selectedTab, setSelectedTab] = useState<string>("profile");
     const [uploadedAvatar, setUploadedAvatar] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     const [userSort, setUserSort] = useState<SortDescriptor>({ column: "name", direction: "ascending" });
-    const [invoiceSort, setInvoiceSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
     const [auditSort, setAuditSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
+
+    const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
+    const { company, isLoading: isCompanyLoading } = useCompany();
+    const { tokensRemaining, tokenAllocation, tokenPercentage, resetDisplayText } = useTokens();
+
+    const updateUser = useMutation(api.users.update);
+    const updateCompany = useMutation(api.companies.update);
+
+    const teamMembers = useQuery(
+        api.users.getByCompanyId,
+        companyId ? { companyId } : "skip"
+    );
+
+    const auditLogs = useQuery(
+        api.audit.list,
+        companyId ? { companyId, limit: 50 } : "skip"
+    );
+
+    const auditUserMap = useQuery(
+        api.users.getByCompanyId,
+        companyId ? { companyId } : "skip"
+    );
 
     const handleAvatarUpload = (file: File) => {
         setUploadedAvatar(URL.createObjectURL(file));
     };
 
     const getStatusBadge = (status: string) => {
-        switch (status) {
+        const display = formatStatus(status);
+        switch (display) {
             case "Active": return <Badge color="success" size="sm">Active</Badge>;
             case "Invited": return <Badge color="gray" size="sm">Invited</Badge>;
-            default: return <Badge color="gray" size="sm">{status}</Badge>;
+            case "Deactivated": return <Badge color="error" size="sm">Deactivated</Badge>;
+            case "Rejected": return <Badge color="error" size="sm">Rejected</Badge>;
+            default: return <Badge color="gray" size="sm">{display}</Badge>;
         }
     };
+
+    const handleProfileSave = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (!user) return;
+        setIsSaving(true);
+        try {
+            const data = Object.fromEntries(new FormData(e.currentTarget));
+            await updateUser({
+                id: user._id,
+                firstName: data.firstName as string,
+                lastName: data.lastName as string,
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleCompanySave = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (!company) return;
+        setIsSaving(true);
+        try {
+            const data = Object.fromEntries(new FormData(e.currentTarget));
+            await updateCompany({
+                id: company._id,
+                name: data.companyName as string,
+                locationId: data.locationId as string,
+                companyType: data.companyType as string,
+                website: data.website as string,
+                phone: data.phone as string,
+                supportEmail: data.supportEmail as string,
+                supportPhone: data.supportPhone as string,
+                salesEmail: data.salesEmail as string,
+                salesPhone: data.salesPhone as string,
+                annualRevenue: data.revenue as string,
+                totalEmployees: data.companySize as string,
+                salesTeamSize: data.salesTeamSize as string,
+                mrrTarget: data.mrrTarget ? Number(data.mrrTarget) : undefined,
+                appointmentTarget: data.appointmentTarget ? Number(data.appointmentTarget) : undefined,
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const getUserName = (userId: string): string => {
+        const u = auditUserMap?.find((m) => m._id === userId);
+        return u ? `${u.firstName} ${u.lastName}` : "Unknown User";
+    };
+
+    const getUserInitial = (userId: string): string => {
+        const u = auditUserMap?.find((m) => m._id === userId);
+        return u?.firstName?.charAt(0) ?? "?";
+    };
+
+    const planLabel = company?.planId ?? "Enterprise";
+    const planPrice = company?.planId === "starter" ? "$99" : company?.planId === "pro" ? "$499" : "$1,250";
 
     return (
         <main className="min-w-0 flex-1 bg-primary pt-8 pb-12">
             <div className="flex flex-col gap-8">
                 <div className="flex flex-col gap-5 px-4 lg:px-8 max-w-[1600px] mx-auto w-full">
-                    {/* Page header */}
                     <div className="relative flex flex-col gap-5">
                         <div className="flex flex-col gap-0.5 lg:gap-1">
                             <h1 className="text-xl font-semibold text-primary lg:text-display-xs">Settings</h1>
@@ -152,22 +298,19 @@ export default function SettingsPage() {
                         onChange={(event) => setSelectedTab(event.target.value)}
                         options={tabs.map((tab) => ({ label: tab.label, value: tab.id }))}
                     />
-                    <div className="-mx-4 -my-1 scrollbar-hide flex overflow-auto px-4 py-1 lg:-mx-8 lg:px-8">
+                    <div className="-mx-4 -my-1 scrollbar-hide flex overflow-x-auto px-4 py-1 lg:-mx-8 lg:px-8">
                         <Tabs className="hidden md:flex xl:w-full border-b border-secondary pb-px" selectedKey={selectedTab} onSelectionChange={(value) => setSelectedTab(value as string)}>
-                            <TabList type="button-minimal" className="w-full gap-4" items={tabs} />
+                            <TabList type="button-minimal" className="w-full gap-4 min-w-max" items={tabs} />
                         </Tabs>
                     </div>
 
                     <div className="mt-4">
                         {/* Profile Tab */}
                         {selectedTab === "profile" && (
+                            isUserLoading ? <LoadingSpinner /> : (
                             <Form
                                 className="flex flex-col gap-6"
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    const data = Object.fromEntries(new FormData(e.currentTarget));
-                                    console.log("Form data:", data);
-                                }}
+                                onSubmit={handleProfileSave}
                             >
                                 <div>
                                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-5 border-b border-secondary">
@@ -178,7 +321,7 @@ export default function SettingsPage() {
 
                                         <div className="flex items-center gap-3 mt-4 sm:mt-0">
                                             <Button color="secondary" size="md">Cancel</Button>
-                                            <Button type="submit" color="primary" size="md">Save</Button>
+                                            <Button type="submit" color="primary" size="md" isLoading={isSaving}>Save</Button>
                                         </div>
                                     </div>
                                 </div>
@@ -189,11 +332,11 @@ export default function SettingsPage() {
                                             <Label>Name <span className="text-brand-tertiary">*</span></Label>
                                         </div>
                                         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
-                                            <TextField isRequired name="firstName" defaultValue="Liron">
+                                            <TextField isRequired name="firstName" defaultValue={user?.firstName ?? ""}>
                                                 <Label className="lg:hidden">First name</Label>
                                                 <InputBase size="md" />
                                             </TextField>
-                                            <TextField isRequired name="lastName" defaultValue="">
+                                            <TextField isRequired name="lastName" defaultValue={user?.lastName ?? ""}>
                                                 <Label className="lg:hidden">Last name</Label>
                                                 <InputBase size="md" />
                                             </TextField>
@@ -204,10 +347,19 @@ export default function SettingsPage() {
                                         <div className="max-lg:hidden">
                                             <Label>Email address <span className="text-brand-tertiary">*</span></Label>
                                         </div>
-                                        <TextField isRequired name="email" type="email" defaultValue="liron@cyberhook.com">
+                                        <TextField isRequired name="email" type="email" defaultValue={user?.email ?? ""} isDisabled>
                                             <Label className="lg:hidden">Email address</Label>
                                             <InputBase size="md" icon={Mail01} />
                                         </TextField>
+                                    </div>
+                                    <hr className="h-px w-full border-none bg-border-secondary" />
+                                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(200px,280px)_1fr] lg:gap-8">
+                                        <div className="max-lg:hidden">
+                                            <Label>Role</Label>
+                                        </div>
+                                        <div className="flex items-center">
+                                            <Badge size="md" color="brand">{formatRole(user?.role ?? "")}</Badge>
+                                        </div>
                                     </div>
                                     <hr className="h-px w-full border-none bg-border-secondary" />
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(200px,280px)_1fr] lg:gap-8">
@@ -216,25 +368,22 @@ export default function SettingsPage() {
                                             <p className="text-sm text-tertiary">This will be displayed on your profile.</p>
                                         </div>
                                         <div className="flex flex-col gap-5 lg:flex-row">
-                                            <Avatar size="2xl" src={uploadedAvatar || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face"} />
+                                            <Avatar size="2xl" src={uploadedAvatar || user?.imageUrl || undefined} initials={user ? `${user.firstName.charAt(0)}${user.lastName.charAt(0)}` : undefined} />
                                             <FileUpload.DropZone className="w-full" onDropFiles={(files) => handleAvatarUpload(files[0])} />
                                         </div>
                                     </div>
                                 </div>
                             </Form>
+                            )
                         )}
 
-                        {/* Company Settings Tab (V2) */}
+                        {/* Company Settings Tab */}
                         {selectedTab === "company" && (
+                            isCompanyLoading ? <LoadingSpinner /> : (
                             <Form
                                 className="flex flex-col gap-8"
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    const data = Object.fromEntries(new FormData(e.currentTarget));
-                                    console.log("Company Form data:", data);
-                                }}
+                                onSubmit={handleCompanySave}
                             >
-                                {/* Header */}
                                 <div>
                                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-5 border-b border-secondary">
                                         <div className="flex flex-1 flex-col justify-center gap-1 self-stretch">
@@ -244,7 +393,7 @@ export default function SettingsPage() {
 
                                         <div className="flex items-center gap-3 mt-4 sm:mt-0">
                                             <Button color="secondary" size="md">Cancel</Button>
-                                            <Button type="submit" color="primary" size="md">Save Changes</Button>
+                                            <Button type="submit" color="primary" size="md" isLoading={isSaving}>Save Changes</Button>
                                         </div>
                                     </div>
                                 </div>
@@ -253,24 +402,24 @@ export default function SettingsPage() {
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">GENERAL INFORMATION</h3>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
-                                        <TextField name="companyName" defaultValue="TechCo MSP">
+                                        <TextField name="companyName" defaultValue={company?.name ?? ""}>
                                             <Label>Company Name</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <TextField name="locationId" defaultValue="LOC-9821">
+                                        <TextField name="locationId" defaultValue={company?.locationId ?? ""}>
                                             <Label>Location ID</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <Select name="companyType" label="Company Type" defaultSelectedKey="msp">
+                                        <Select name="companyType" label="Company Type" defaultSelectedKey={company?.companyType ?? company?.primaryBusinessModel ?? "msp"}>
                                             <Select.Item id="msp">MSP/MSSP</Select.Item>
                                             <Select.Item id="var">Value Added Reseller</Select.Item>
                                             <Select.Item id="vendor">Vendor</Select.Item>
                                         </Select>
-                                        <TextField name="website" defaultValue="https://techcomsp.com">
+                                        <TextField name="website" defaultValue={company?.website ?? ""}>
                                             <Label>Website</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <TextField name="phone" defaultValue="+1 (555) 000-0000">
+                                        <TextField name="phone" defaultValue={company?.phone ?? ""}>
                                             <Label>Main Phone</Label>
                                             <InputBase size="md" />
                                         </TextField>
@@ -283,19 +432,19 @@ export default function SettingsPage() {
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">CONTACT INFORMATION</h3>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
-                                        <TextField name="supportEmail" type="email" defaultValue="support@techcomsp.com">
+                                        <TextField name="supportEmail" type="email" defaultValue={company?.supportEmail ?? ""}>
                                             <Label>Support Email</Label>
                                             <InputBase size="md" icon={Mail01} />
                                         </TextField>
-                                        <TextField name="supportPhone" defaultValue="+1 (555) 123-4567">
+                                        <TextField name="supportPhone" defaultValue={company?.supportPhone ?? ""}>
                                             <Label>Support Phone</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <TextField name="salesEmail" type="email" defaultValue="sales@techcomsp.com">
+                                        <TextField name="salesEmail" type="email" defaultValue={company?.salesEmail ?? ""}>
                                             <Label>Sales Email</Label>
                                             <InputBase size="md" icon={Mail01} />
                                         </TextField>
-                                        <TextField name="salesPhone" defaultValue="+1 (555) 987-6543">
+                                        <TextField name="salesPhone" defaultValue={company?.salesPhone ?? ""}>
                                             <Label>Sales Phone</Label>
                                             <InputBase size="md" />
                                         </TextField>
@@ -308,25 +457,25 @@ export default function SettingsPage() {
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">BUSINESS DETAILS</h3>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
-                                        <Select name="revenue" label="Annual Revenue" defaultSelectedKey="10-24">
+                                        <Select name="revenue" label="Annual Revenue" defaultSelectedKey={company?.annualRevenue ?? ""}>
                                             <Select.Item id="0-1">Under $1M</Select.Item>
                                             <Select.Item id="1-10">$1M - $10M</Select.Item>
                                             <Select.Item id="10-24">$10M - $24M</Select.Item>
                                             <Select.Item id="25+">$25M+</Select.Item>
                                         </Select>
-                                        <Select name="companySize" label="Company Size" defaultSelectedKey="51-100">
+                                        <Select name="companySize" label="Company Size" defaultSelectedKey={company?.totalEmployees ?? ""}>
                                             <Select.Item id="1-10">1-10 Employees</Select.Item>
                                             <Select.Item id="11-50">11-50 Employees</Select.Item>
                                             <Select.Item id="51-100">51-100 Employees</Select.Item>
                                             <Select.Item id="101+">101+ Employees</Select.Item>
                                         </Select>
-                                        <Select name="salesTeamSize" label="Sales Team Size" defaultSelectedKey="2-5">
+                                        <Select name="salesTeamSize" label="Sales Team Size" defaultSelectedKey={company?.salesTeamSize ?? company?.totalSalesPeople ?? ""}>
                                             <Select.Item id="1">1 Person</Select.Item>
                                             <Select.Item id="2-5">2-5 People</Select.Item>
                                             <Select.Item id="6-10">6-10 People</Select.Item>
                                             <Select.Item id="11+">11+ People</Select.Item>
                                         </Select>
-                                        <TextField name="geographicCoverage" defaultValue="North America">
+                                        <TextField name="geographicCoverage" defaultValue={company?.geographicCoverage?.join(", ") ?? ""}>
                                             <Label>Geographic Coverage</Label>
                                             <InputBase size="md" />
                                         </TextField>
@@ -342,31 +491,29 @@ export default function SettingsPage() {
                                         <Button size="sm" color="secondary" iconLeading={Plus}>Add Location</Button>
                                     </div>
                                     <div className="flex flex-col gap-3">
-                                        {/* Mock Location 1 */}
-                                        <div className="flex items-center justify-between p-4 border border-secondary rounded-lg bg-secondary_subtle">
-                                            <div className="flex flex-col gap-1">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-semibold text-primary">HQ</span>
-                                                    <Badge size="sm" color="brand">Primary</Badge>
+                                        {company?.locations && company.locations.length > 0 ? (
+                                            company.locations.map((loc) => (
+                                                <div key={loc.id} className="flex flex-col gap-3 p-4 border border-secondary rounded-lg bg-secondary_subtle sm:flex-row sm:items-center sm:justify-between">
+                                                    <div className="flex flex-col gap-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-semibold text-primary">{loc.label}</span>
+                                                            {loc.isHeadquarters && <Badge size="sm" color="brand">Primary</Badge>}
+                                                        </div>
+                                                        <span className="text-sm text-tertiary break-words">
+                                                            {[loc.address, loc.city, loc.state, loc.zipCode, loc.country].filter(Boolean).join(", ")}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-2 shrink-0">
+                                                        <Button size="sm" color="secondary">Edit</Button>
+                                                        <Button size="sm" color="secondary">Remove</Button>
+                                                    </div>
                                                 </div>
-                                                <span className="text-sm text-tertiary">123 Main St, Houston, TX 77002, US</span>
+                                            ))
+                                        ) : (
+                                            <div className="p-6 border border-dashed border-secondary rounded-lg text-center">
+                                                <p className="text-sm text-tertiary">No office locations added yet. Click "Add Location" to get started.</p>
                                             </div>
-                                            <div className="flex gap-2">
-                                                <Button size="sm" color="secondary">Edit</Button>
-                                                <Button size="sm" color="secondary">Remove</Button>
-                                            </div>
-                                        </div>
-                                        {/* Mock Location 2 */}
-                                        <div className="flex items-center justify-between p-4 border border-secondary rounded-lg bg-secondary_subtle">
-                                            <div className="flex flex-col gap-1">
-                                                <span className="font-semibold text-primary">West Coast Office</span>
-                                                <span className="text-sm text-tertiary">456 Oak Ave, Los Angeles, CA 90001, US</span>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <Button size="sm" color="secondary">Edit</Button>
-                                                <Button size="sm" color="secondary">Remove</Button>
-                                            </div>
-                                        </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -376,11 +523,11 @@ export default function SettingsPage() {
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">TARGETS & DEFAULTS</h3>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
-                                        <TextField name="mrrTarget" type="number" defaultValue="50000">
+                                        <TextField name="mrrTarget" type="number" defaultValue={company?.mrrTarget?.toString() ?? ""}>
                                             <Label>MRR Target ($)</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <TextField name="appointmentTarget" type="number" defaultValue="20">
+                                        <TextField name="appointmentTarget" type="number" defaultValue={company?.appointmentTarget?.toString() ?? ""}>
                                             <Label>Monthly Appointment Target</Label>
                                             <InputBase size="md" />
                                         </TextField>
@@ -388,6 +535,7 @@ export default function SettingsPage() {
                                 </div>
 
                             </Form>
+                            )
                         )}
 
                         {/* Team Tab */}
@@ -400,8 +548,10 @@ export default function SettingsPage() {
                                     <Button size="md" color="primary" iconLeading={Plus}>Invite User</Button>
                                 </div>
 
+                                {teamMembers === undefined ? <LoadingSpinner /> : (
                                 <TableCard.Root>
-                                    <TableCard.Header title="Platform Users" badge="3 Seats in Use" />
+                                    <TableCard.Header title="Platform Users" badge={`${teamMembers.length} Seat${teamMembers.length === 1 ? "" : "s"} in Use`} />
+                                    <div className="overflow-x-auto">
                                     <Table aria-label="Users Table" sortDescriptor={userSort} onSortChange={setUserSort}>
                                         <Table.Header>
                                             <Table.Row>
@@ -412,32 +562,35 @@ export default function SettingsPage() {
                                                 <Table.Head id="actions" className="w-12"></Table.Head>
                                             </Table.Row>
                                         </Table.Header>
-                                        <Table.Body items={mockUsers}>
+                                        <Table.Body items={teamMembers.map((m) => ({ ...m, id: m._id }))}>
                                             {(item) => (
-                                                <Table.Row id={item.id}>
+                                                <Table.Row id={item._id}>
                                                     <Table.Cell>
                                                         <div className="flex items-center gap-3">
-                                                            <Avatar size="sm" alt={item.name} />
+                                                            <Avatar size="sm" alt={`${item.firstName} ${item.lastName}`} src={item.imageUrl || undefined} initials={`${item.firstName.charAt(0)}${item.lastName.charAt(0)}`} />
                                                             <div className="flex flex-col">
-                                                                <span className="font-medium text-primary">{item.name}</span>
+                                                                <span className="font-medium text-primary">{item.firstName} {item.lastName}</span>
                                                                 <span className="text-sm text-tertiary">{item.email}</span>
                                                             </div>
                                                         </div>
                                                     </Table.Cell>
-                                                    <Table.Cell><Badge size="sm" color="gray">{item.role}</Badge></Table.Cell>
+                                                    <Table.Cell><Badge size="sm" color="gray">{formatRole(item.role)}</Badge></Table.Cell>
                                                     <Table.Cell>{getStatusBadge(item.status)}</Table.Cell>
-                                                    <Table.Cell><span className="text-secondary">{item.lastActive}</span></Table.Cell>
+                                                    <Table.Cell><span className="text-secondary">{formatRelativeTime(item.lastAccessedAt)}</span></Table.Cell>
                                                     <Table.Cell><ButtonUtility size="sm" icon={DotsVertical} aria-label="Row actions" /></Table.Cell>
                                                 </Table.Row>
                                             )}
                                         </Table.Body>
                                     </Table>
+                                    </div>
                                 </TableCard.Root>
+                                )}
                             </div>
                         )}
 
                         {/* Plan & Billing Tab */}
                         {selectedTab === "plan" && (
+                            isCompanyLoading ? <LoadingSpinner /> : (
                             <div className="flex flex-col gap-8">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
                                     <div className="flex flex-col gap-1">
@@ -453,10 +606,15 @@ export default function SettingsPage() {
                                     <div className="flex flex-col gap-6 p-6 border border-secondary rounded-2xl bg-secondary_subtle lg:col-span-2">
                                         <div className="flex justify-between items-start">
                                             <div className="flex flex-col gap-1">
-                                                <h3 className="text-lg font-semibold text-primary">Enterprise Plan</h3>
-                                                <p className="text-sm border-tertiary">Billed annually on January 1st.</p>
+                                                <h3 className="text-lg font-semibold text-primary capitalize">{planLabel} Plan</h3>
+                                                <p className="text-sm border-tertiary">
+                                                    {company?.planStatus === "trialing"
+                                                        ? `Trial ends ${company?.trialEndsAt ? new Date(company.trialEndsAt).toLocaleDateString() : "soon"}`
+                                                        : "Billed annually"
+                                                    }
+                                                </p>
                                             </div>
-                                            <h3 className="text-display-sm font-semibold text-primary">$1,250<span className="text-md text-tertiary font-normal">/mo</span></h3>
+                                            <h3 className="text-display-sm font-semibold text-primary">{planPrice}<span className="text-md text-tertiary font-normal">/mo</span></h3>
                                         </div>
 
                                         <div className="flex flex-col gap-3 mt-4">
@@ -484,53 +642,30 @@ export default function SettingsPage() {
                                         <div className="flex flex-col gap-1">
                                             <div className="flex items-center justify-between">
                                                 <h3 className="text-md font-semibold text-primary">Live Search Tokens</h3>
-                                                <BadgeWithIcon size="sm" color="gray" iconLeading={Zap}>Resets in 12 days</BadgeWithIcon>
+                                                <BadgeWithIcon size="sm" color="gray" iconLeading={Zap}>{resetDisplayText}</BadgeWithIcon>
                                             </div>
                                             <p className="text-sm text-tertiary">Used for Live Search and Web Scanning.</p>
                                         </div>
 
                                         <div className="flex flex-col gap-2 mt-4">
                                             <div className="flex items-end justify-between">
-                                                <span className="text-3xl font-semibold text-primary">842</span>
-                                                <span className="text-sm font-medium text-tertiary pb-1">/ 1,000</span>
+                                                <span className="text-3xl font-semibold text-primary">{tokensRemaining.toLocaleString()}</span>
+                                                <span className="text-sm font-medium text-tertiary pb-1">/ {tokenAllocation.toLocaleString()}</span>
                                             </div>
                                             <div className="w-full bg-secondary_subtle rounded-full h-2.5 overflow-hidden border border-secondary">
-                                                <div className="bg-brand-secondary h-2.5 rounded-full" style={{ width: "84.2%" }}></div>
+                                                <div className="bg-brand-secondary h-2.5 rounded-full transition-all duration-300" style={{ width: `${Math.min(tokenPercentage, 100)}%` }}></div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="flex flex-col gap-6 mt-4">
-                                    <TableCard.Root>
-                                        <TableCard.Header title="Billing History" />
-                                        <Table aria-label="Invoices" sortDescriptor={invoiceSort} onSortChange={setInvoiceSort}>
-                                            <Table.Header>
-                                                <Table.Row>
-                                                    <Table.Head id="id" isRowHeader allowsSorting>Invoice Number</Table.Head>
-                                                    <Table.Head id="date" allowsSorting>Date</Table.Head>
-                                                    <Table.Head id="amount" allowsSorting>Amount</Table.Head>
-                                                    <Table.Head id="plan" allowsSorting>Plan</Table.Head>
-                                                    <Table.Head id="status" allowsSorting>Status</Table.Head>
-                                                    <Table.Head id="actions" className="w-12"></Table.Head>
-                                                </Table.Row>
-                                            </Table.Header>
-                                            <Table.Body items={mockInvoices}>
-                                                {(item) => (
-                                                    <Table.Row id={item.id}>
-                                                        <Table.Cell><span className="font-medium text-primary">{item.id}</span></Table.Cell>
-                                                        <Table.Cell><span className="text-secondary">{item.date}</span></Table.Cell>
-                                                        <Table.Cell><span className="text-secondary font-medium">{item.amount}</span></Table.Cell>
-                                                        <Table.Cell><span className="text-secondary">{item.plan}</span></Table.Cell>
-                                                        <Table.Cell><Badge color="success" size="sm">{item.status}</Badge></Table.Cell>
-                                                        <Table.Cell><ButtonUtility size="sm" icon={DownloadCloud01} aria-label="Download PDF" /></Table.Cell>
-                                                    </Table.Row>
-                                                )}
-                                            </Table.Body>
-                                        </Table>
-                                    </TableCard.Root>
+                                    <div className="p-6 border border-dashed border-secondary rounded-xl text-center">
+                                        <p className="text-sm text-tertiary">Billing history is managed through your payment provider. Contact support for invoices.</p>
+                                    </div>
                                 </div>
                             </div>
+                            )
                         )}
 
                         {/* Integrations Tab */}
@@ -547,36 +682,39 @@ export default function SettingsPage() {
                                     <div key={category.label} className="flex flex-col gap-4">
                                         <h3 className="text-xs font-semibold text-tertiary tracking-wider uppercase">{category.label}</h3>
                                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                                            {category.items.map((item) => (
-                                                <div
-                                                    key={item.name}
-                                                    className="flex flex-col gap-4 p-5 border border-secondary rounded-xl bg-primary hover:border-brand-secondary transition-colors"
-                                                >
-                                                    <div className="flex items-start justify-between">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle text-lg">
-                                                                {item.icon}
-                                                            </div>
-                                                            <div className="flex flex-col gap-0.5">
-                                                                <span className="font-semibold text-primary">{item.name}</span>
-                                                                {item.connected ? (
-                                                                    <Badge color="success" size="sm">Connected ✓</Badge>
-                                                                ) : (
-                                                                    <Badge color="gray" size="sm">Not Connected</Badge>
-                                                                )}
+                                            {category.items.map((item) => {
+                                                const isConnected = item.provider === "stripe" && !!company?.stripeCustomerId;
+                                                return (
+                                                    <div
+                                                        key={item.name}
+                                                        className="flex flex-col gap-4 p-5 border border-secondary rounded-xl bg-primary hover:border-brand-secondary transition-colors"
+                                                    >
+                                                        <div className="flex items-start justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle text-lg">
+                                                                    {item.icon}
+                                                                </div>
+                                                                <div className="flex flex-col gap-0.5">
+                                                                    <span className="font-semibold text-primary">{item.name}</span>
+                                                                    {isConnected ? (
+                                                                        <Badge color="success" size="sm">Connected</Badge>
+                                                                    ) : (
+                                                                        <Badge color="gray" size="sm">Not Connected</Badge>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
+                                                        <p className="text-sm text-tertiary">{item.description}</p>
+                                                        <div className="mt-auto pt-2">
+                                                            {isConnected ? (
+                                                                <Button size="sm" color="secondary" className="w-full">Disconnect</Button>
+                                                            ) : (
+                                                                <Button size="sm" color="primary" className="w-full" iconLeading={Link01}>Connect</Button>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                    <p className="text-sm text-tertiary">{item.description}</p>
-                                                    <div className="mt-auto pt-2">
-                                                        {item.connected ? (
-                                                            <Button size="sm" color="secondary" className="w-full">Disconnect</Button>
-                                                        ) : (
-                                                            <Button size="sm" color="primary" className="w-full" iconLeading={Link01}>Connect</Button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 ))}
@@ -593,18 +731,20 @@ export default function SettingsPage() {
                                     </div>
                                 </div>
 
-                                <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                     <div className="relative w-full sm:max-w-md">
                                         <InputBase type="text" size="md" placeholder="Search audit events..." className="w-full shadow-sm" icon={SearchLg} />
                                     </div>
                                     <div className="flex items-center gap-3 w-full sm:w-auto">
-                                        <InputBase type="date" size="md" className="w-auto shadow-sm" />
+                                        <InputBase type="date" size="md" className="w-full sm:w-auto shadow-sm" />
                                         <Button size="md" color="secondary" iconLeading={FilterLines}>Filters</Button>
                                     </div>
                                 </div>
 
+                                {auditLogs === undefined ? <LoadingSpinner /> : (
                                 <TableCard.Root>
-                                    <TableCard.Header title="Activity Log" badge={`${mockAuditLogs.length} Events`} />
+                                    <TableCard.Header title="Activity Log" badge={`${auditLogs.length} Event${auditLogs.length === 1 ? "" : "s"}`} />
+                                    <div className="overflow-x-auto">
                                     <Table aria-label="Audit Log" sortDescriptor={auditSort} onSortChange={setAuditSort}>
                                         <Table.Header>
                                             <Table.Row>
@@ -615,34 +755,30 @@ export default function SettingsPage() {
                                                 <Table.Head id="date" allowsSorting>Date</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
-                                        <Table.Body items={mockAuditLogs}>
+                                        <Table.Body items={auditLogs.map((log) => ({ ...log, id: log._id }))}>
                                             {(item) => (
-                                                <Table.Row id={item.id}>
+                                                <Table.Row id={item._id}>
                                                     <Table.Cell>
-                                                        <Badge size="sm" color={
-                                                            item.event === "User Login" ? "brand" :
-                                                            item.event === "Live Search" ? "blue" :
-                                                            item.event === "Lead Created" ? "success" :
-                                                            item.event === "Campaign Launched" ? "purple" :
-                                                            item.event === "User Invited" ? "orange" :
-                                                            item.event === "Integration Connected" ? "success" :
-                                                            "gray"
-                                                        }>{item.event}</Badge>
+                                                        <Badge size="sm" color={getAuditEventColor(item.action)}>
+                                                            {getAuditEventLabel(item.action)}
+                                                        </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
                                                         <div className="flex items-center gap-2">
-                                                            <Avatar size="xs" initials={item.user.charAt(0)} />
-                                                            <span className="text-secondary">{item.user}</span>
+                                                            <Avatar size="xs" initials={getUserInitial(item.userId)} />
+                                                            <span className="text-secondary">{getUserName(item.userId)}</span>
                                                         </div>
                                                     </Table.Cell>
-                                                    <Table.Cell><span className="text-secondary">{item.details}</span></Table.Cell>
-                                                    <Table.Cell><span className="text-tertiary font-mono text-sm">{item.ip}</span></Table.Cell>
-                                                    <Table.Cell><span className="text-secondary">{item.date}</span></Table.Cell>
+                                                    <Table.Cell><span className="text-secondary">{item.details ?? "—"}</span></Table.Cell>
+                                                    <Table.Cell><span className="text-tertiary font-mono text-sm">{item.ipAddress ?? "—"}</span></Table.Cell>
+                                                    <Table.Cell><span className="text-secondary">{formatDate(item.createdAt)}</span></Table.Cell>
                                                 </Table.Row>
                                             )}
                                         </Table.Body>
                                     </Table>
+                                    </div>
                                 </TableCard.Root>
+                                )}
                             </div>
                         )}
 
