@@ -9,6 +9,7 @@ import { Button } from "@/components/base/buttons/button";
 import { Input } from "@/components/base/input/input";
 import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-menu";
 import { CyberHookLogo } from "@/components/foundations/logo/cyberhook-logo";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { cx } from "@/utils/cx";
 import { MobileNavigationHeader } from "./base-components/mobile-header";
 import { NavAccountCard, NavAccountMenu } from "./base-components/nav-account-card";
@@ -78,6 +79,9 @@ export const HeaderNavigationBase = ({
     showAvatarDropdown = true,
     hideBorder = false,
 }: HeaderNavigationBaseProps) => {
+    const { user, clerkUser } = useCurrentUser();
+    const avatarSrc = user?.imageUrl ?? clerkUser?.imageUrl ?? "";
+    const avatarAlt = user ? `${user.firstName} ${user.lastName}` : clerkUser?.fullName ?? "User";
     const activeSubNavItems = subItems || items.find((item) => item.current && item.items && item.items.length > 0)?.items;
 
     const showSecondaryNav = activeSubNavItems && activeSubNavItems.length > 0;
@@ -241,7 +245,7 @@ export const HeaderNavigationBase = ({
                                             )
                                         }
                                     >
-                                        <Avatar alt="Liron" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face" size="md" />
+                                        <Avatar alt={avatarAlt} src={avatarSrc} size="md" />
                                     </AriaButton>
                                     <Popover
                                         placement="bottom right"

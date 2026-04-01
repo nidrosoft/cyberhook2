@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,9 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let campaigns = await ctx.db
       .query("campaigns")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -45,7 +49,11 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("campaigns") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const currentUser = await requireAuth(ctx);
+    const campaign = await ctx.db.get(args.id);
+    if (!campaign) return null;
+    assertCompanyAccess(currentUser.companyId, campaign.companyId);
+    return campaign;
   },
 });
 
@@ -55,6 +63,9 @@ export const getStats = query({
     createdByUserId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let campaigns = await ctx.db
       .query("campaigns")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -118,6 +129,9 @@ export const create = mutation({
     knowledgeBaseEntryId: v.optional(v.id("knowledgeBaseEntries")),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     const now = Date.now();
     return await ctx.db.insert("campaigns", {
       ...args,
@@ -159,9 +173,11 @@ export const update = mutation({
     knowledgeBaseEntryId: v.optional(v.id("knowledgeBaseEntries")),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const { id, ...updates } = args;
     const campaign = await ctx.db.get(id);
     if (!campaign) throw new Error("Campaign not found");
+    assertCompanyAccess(currentUser.companyId, campaign.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -179,8 +195,10 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("campaigns") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const campaign = await ctx.db.get(args.id);
     if (!campaign) throw new Error("Campaign not found");
+    assertCompanyAccess(currentUser.companyId, campaign.companyId);
     await ctx.db.delete(args.id);
     return args.id;
   },
@@ -197,8 +215,10 @@ export const updateStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const campaign = await ctx.db.get(args.id);
     if (!campaign) throw new Error("Campaign not found");
+    assertCompanyAccess(currentUser.companyId, campaign.companyId);
 
     await ctx.db.patch(args.id, {
       status: args.status,

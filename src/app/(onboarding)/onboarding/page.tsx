@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useSession } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -155,6 +155,7 @@ interface FormData {
 
 export default function OnboardingPage() {
     const { user } = useUser();
+    const { session } = useSession();
     const router = useRouter();
     const [step, setStep] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -488,13 +489,18 @@ export default function OnboardingPage() {
                                         });
 
                                         if (result.success) {
-                                            // Update Clerk publicMetadata server-side (secure, not client-writable)
                                             await setOnboardingComplete(
                                                 user.id,
                                                 result.userId,
                                                 result.companyId,
                                             );
-                                            // Full page reload to pick up fresh session claims with onboardingComplete
+
+                                            // Force the Clerk session to refresh its JWT so the
+                                            // middleware sees the updated publicMetadata immediately.
+                                            if (session) {
+                                                await session.reload();
+                                            }
+
                                             window.location.href = "/dashboard";
                                         } else {
                                             setError("Failed to complete onboarding. Please try again.");

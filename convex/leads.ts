@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -12,28 +13,26 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let leads = await ctx.db
       .query("leads")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
       .collect();
 
-    // Apply filters
     if (args.createdByUserId) {
       leads = leads.filter((l) => l.createdByUserId === args.createdByUserId);
     }
-
     if (args.status) {
       leads = leads.filter((l) => l.status === args.status);
     }
-
     if (args.industry) {
       leads = leads.filter((l) => l.industry === args.industry);
     }
 
-    // Sort by most recent
     leads.sort((a, b) => b.createdAt - a.createdAt);
 
-    // Apply limit
     if (args.limit) {
       leads = leads.slice(0, args.limit);
     }
@@ -45,17 +44,26 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("leads") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const currentUser = await requireAuth(ctx);
+    const lead = await ctx.db.get(args.id);
+    if (!lead) return null;
+    assertCompanyAccess(currentUser.companyId, lead.companyId);
+    return lead;
   },
 });
 
 export const getByDomain = query({
-  args: { domain: v.string() },
+  args: { domain: v.string(), companyId: v.id("companies") },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
+    const leads = await ctx.db
       .query("leads")
       .withIndex("by_domain", (q) => q.eq("domain", args.domain))
-      .first();
+      .collect();
+
+    return leads.find((l) => l.companyId === args.companyId) ?? null;
   },
 });
 
@@ -65,6 +73,9 @@ export const getStats = query({
     createdByUserId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let leads = await ctx.db
       .query("leads")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -81,7 +92,6 @@ export const getStats = query({
       byStatus[status] = (byStatus[status] || 0) + 1;
     });
 
-    // New this week
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const newThisWeek = leads.filter((l) => l.createdAt > weekAgo).length;
 
@@ -113,6 +123,9 @@ export const create = mutation({
     status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     const leadId = await ctx.db.insert("leads", {
       companyId: args.companyId,
       createdByUserId: args.createdByUserId,
@@ -155,9 +168,11 @@ export const update = mutation({
     status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const { id, ...updates } = args;
     const lead = await ctx.db.get(id);
     if (!lead) throw new Error("Lead not found");
+    assertCompanyAccess(currentUser.companyId, lead.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -178,8 +193,10 @@ export const updateStatus = mutation({
     status: v.string(),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const lead = await ctx.db.get(args.id);
     if (!lead) throw new Error("Lead not found");
+    assertCompanyAccess(currentUser.companyId, lead.companyId);
 
     await ctx.db.patch(args.id, {
       status: args.status,
@@ -193,8 +210,10 @@ export const updateStatus = mutation({
 export const remove = mutation({
   args: { id: v.id("leads") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const lead = await ctx.db.get(args.id);
     if (!lead) throw new Error("Lead not found");
+    assertCompanyAccess(currentUser.companyId, lead.companyId);
 
     await ctx.db.delete(args.id);
     return args.id;

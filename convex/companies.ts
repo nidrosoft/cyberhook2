@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ============================================
 // QUERIES
@@ -8,6 +9,8 @@ import { mutation, query, internalMutation, internalQuery } from "./_generated/s
 export const getById = query({
   args: { id: v.id("companies") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.id);
     return await ctx.db.get(args.id);
   },
 });
@@ -193,6 +196,9 @@ export const update = mutation({
     appointmentTarget: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.id);
+
     const { id, ...updates } = args;
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -217,6 +223,9 @@ export const updateStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.id);
+
     await ctx.db.patch(args.id, {
       status: args.status,
       updatedAt: Date.now(),

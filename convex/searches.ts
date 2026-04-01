@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -11,22 +12,21 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let searches = await ctx.db
       .query("searches")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
       .order("desc")
       .collect();
 
-    // Apply filters
     if (args.userId) {
       searches = searches.filter((s) => s.userId === args.userId);
     }
-
     if (args.status) {
       searches = searches.filter((s) => s.status === args.status);
     }
-
-    // Apply limit
     if (args.limit) {
       searches = searches.slice(0, args.limit);
     }
@@ -38,7 +38,11 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("searches") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const currentUser = await requireAuth(ctx);
+    const search = await ctx.db.get(args.id);
+    if (!search) return null;
+    assertCompanyAccess(currentUser.companyId, search.companyId);
+    return search;
   },
 });
 
@@ -49,6 +53,9 @@ export const getRecent = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let searches = await ctx.db
       .query("searches")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -69,6 +76,9 @@ export const getStats = query({
     userId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     let searches = await ctx.db
       .query("searches")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -80,15 +90,12 @@ export const getStats = query({
 
     const total = searches.length;
 
-    // Last 7 days
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const last7Days = searches.filter((s) => s.createdAt > weekAgo).length;
 
-    // Last 30 days
     const monthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
     const last30Days = searches.filter((s) => s.createdAt > monthAgo).length;
 
-    // Total tokens consumed
     const tokensConsumed = searches.reduce((sum, s) => sum + (s.tokensConsumed || 0), 0);
 
     return { total, last7Days, last30Days, tokensConsumed };
@@ -104,7 +111,9 @@ export const create = mutation({
     domain: v.string(),
   },
   handler: async (ctx, args) => {
-    // Check token balance
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     const company = await ctx.db.get(args.companyId);
     if (!company) throw new Error("Company not found");
 
@@ -113,7 +122,6 @@ export const create = mutation({
       throw new Error("Insufficient tokens");
     }
 
-    // Create search record
     const searchId = await ctx.db.insert("searches", {
       companyId: args.companyId,
       userId: args.userId,
@@ -123,7 +131,6 @@ export const create = mutation({
       createdAt: Date.now(),
     });
 
-    // Deduct token
     await ctx.db.patch(args.companyId, {
       tokensUsed: company.tokensUsed + 1,
     });
@@ -141,9 +148,11 @@ export const updateStatus = mutation({
     errorMessage: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
     const { id, ...updates } = args;
     const search = await ctx.db.get(id);
     if (!search) throw new Error("Search not found");
+    assertCompanyAccess(currentUser.companyId, search.companyId);
 
     await ctx.db.patch(id, updates);
 

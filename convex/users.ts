@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ============================================
 // QUERIES
@@ -36,6 +37,9 @@ export const getByEmail = query({
 export const getByCompanyId = query({
   args: { companyId: v.id("companies") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
     return await ctx.db
       .query("users")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))

@@ -8,21 +8,29 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
-const isPendingRoute = createRouteMatcher(["/pending-approval(.*)"]);
-const isDeactivatedRoute = createRouteMatcher(["/deactivated(.*)"]);
-const isRejectedRoute = createRouteMatcher(["/rejected(.*)"]);
-const isAuthRoute = createRouteMatcher(["/"]);
 
 export default clerkMiddleware(async (auth, req) => {
-  const { userId } = await auth();
+  const { userId, sessionClaims } = await auth();
 
   if (isPublicRoute(req)) {
     return NextResponse.next();
   }
 
   if (!userId) {
-    const signInUrl = new URL("/", req.url);
-    return NextResponse.redirect(signInUrl);
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+
+  // Clerk session token must include: { "metadata": "{{user.public_metadata}}" }
+  // Configure this in Clerk Dashboard > Sessions > Edit session token
+  const metadata = sessionClaims?.metadata as Record<string, unknown> | undefined;
+  const onboardingComplete = metadata?.onboardingComplete === true;
+
+  if (!onboardingComplete && !isOnboardingRoute(req)) {
+    return NextResponse.redirect(new URL("/onboarding", req.url));
+  }
+
+  if (onboardingComplete && isOnboardingRoute(req)) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
   return NextResponse.next();

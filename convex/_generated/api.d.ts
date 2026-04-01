@@ -20,6 +20,7 @@ import type * as notifications from "../notifications.js";
 import type * as onboarding from "../onboarding.js";
 import type * as ransomHub from "../ransomHub.js";
 import type * as ransomwareLiveApi from "../ransomwareLiveApi.js";
+import type * as redrokApi from "../redrokApi.js";
 import type * as rfpHub from "../rfpHub.js";
 import type * as searches from "../searches.js";
 import type * as tasks from "../tasks.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   onboarding: typeof onboarding;
   ransomHub: typeof ransomHub;
   ransomwareLiveApi: typeof ransomwareLiveApi;
+  redrokApi: typeof redrokApi;
   rfpHub: typeof rfpHub;
   searches: typeof searches;
   tasks: typeof tasks;

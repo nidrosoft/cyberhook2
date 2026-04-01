@@ -5,6 +5,7 @@ import { CyberHookLogo, CyberHookLogoMinimal } from "@/components/foundations/lo
 import { ChevronLeft, ChevronRight } from "@untitledui/icons";
 import { Button as AriaButton, DialogTrigger as AriaDialogTrigger, Popover as AriaPopover } from "react-aria-components";
 import { Avatar } from "@/components/base/avatar/avatar";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { cx } from "@/utils/cx";
 import { MobileNavigationHeader } from "../base-components/mobile-header";
 import { NavAccountCard, NavAccountMenu } from "../base-components/nav-account-card";
@@ -21,6 +22,9 @@ interface SidebarNavigationSectionsSubheadingsProps {
 
 export const SidebarNavigationSectionsSubheadings = ({ activeUrl = "/", items }: SidebarNavigationSectionsSubheadingsProps) => {
     const [isExpanded, setIsExpanded] = useState(true);
+    const { user, clerkUser } = useCurrentUser();
+    const avatarSrc = user?.imageUrl ?? clerkUser?.imageUrl ?? "";
+    const avatarAlt = user ? `${user.firstName} ${user.lastName}` : clerkUser?.fullName ?? "User";
     const MAIN_SIDEBAR_WIDTH = isExpanded ? 292 : 80;
 
     const content = (
@@ -78,7 +82,7 @@ export const SidebarNavigationSectionsSubheadings = ({ activeUrl = "/", items }:
                                 cx("group relative inline-flex rounded-full", (isPressed || isFocused) && "outline-2 outline-offset-2 outline-focus-ring")
                             }
                         >
-                            <Avatar status="online" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face" size="md" alt="Liron" />
+                            <Avatar status="online" src={avatarSrc} size="md" alt={avatarAlt} />
                         </AriaButton>
                         <AriaPopover
                             placement="right bottom"

@@ -21,9 +21,11 @@ export function RouteGuard({ children }: RouteGuardProps) {
         // Not authenticated - middleware handles this
         if (!isAuthenticated) return;
 
-        // User is authenticated but has no Convex record - needs onboarding
-        // This is handled by middleware checking onboardingComplete metadata
-        if (!hasConvexUser) return;
+        // User is authenticated but has no Convex record — redirect to onboarding
+        if (!hasConvexUser) {
+            router.replace("/onboarding");
+            return;
+        }
 
         // Check user status
         if (user) {

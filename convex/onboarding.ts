@@ -35,18 +35,23 @@ export const completeOnboarding = mutation({
     teamEmails: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    // Verify the caller is the same user as the clerkId they're claiming
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity || identity.subject !== args.clerkId) {
+      throw new Error("Unauthorized: identity mismatch");
+    }
+
     const now = Date.now();
     const defaultTokenAllocation = 1000;
     const tokenResetDate = now + 30 * 24 * 60 * 60 * 1000;
 
-    // Check if user already exists
+    // Check if user already exists (idempotent — safe to re-call)
     const existingUser = await ctx.db
       .query("users")
       .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
       .first();
 
     if (existingUser) {
-      // User already completed onboarding
       return {
         success: true,
         userId: existingUser._id,
@@ -89,12 +94,12 @@ export const completeOnboarding = mutation({
       tokenAllocation: defaultTokenAllocation,
       tokensUsed: 0,
       tokenResetDate,
-      status: "pending_approval",
+      status: "trial",
       createdAt: now,
       updatedAt: now,
     });
 
-    // Create user as sales_admin (first user is always admin)
+    // Create user as sales_admin (first user / company owner is always admin + auto-approved)
     const userId = await ctx.db.insert("users", {
       clerkId: args.clerkId,
       email: args.email,
@@ -103,7 +108,7 @@ export const completeOnboarding = mutation({
       imageUrl: args.imageUrl,
       companyId,
       role: "sales_admin",
-      status: "pending",
+      status: "approved",
       createdAt: now,
       updatedAt: now,
     });
