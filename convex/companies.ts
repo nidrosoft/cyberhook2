@@ -18,6 +18,7 @@ export const getById = query({
 export const getByStripeCustomerId = query({
   args: { stripeCustomerId: v.string() },
   handler: async (ctx, args) => {
+    await requireAuth(ctx);
     return await ctx.db
       .query("companies")
       .withIndex("by_stripeCustomerId", (q) =>
@@ -233,7 +234,7 @@ export const updateStatus = mutation({
   },
 });
 
-export const updateStripeInfo = mutation({
+export const updateStripeInfo = internalMutation({
   args: {
     id: v.id("companies"),
     stripeCustomerId: v.optional(v.string()),
@@ -258,6 +259,9 @@ export const updateStripeInfo = mutation({
 export const consumeToken = mutation({
   args: { id: v.id("companies") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.id);
+
     const company = await ctx.db.get(args.id);
     if (!company) throw new Error("Company not found");
 
@@ -278,7 +282,7 @@ export const consumeToken = mutation({
   },
 });
 
-export const resetTokens = mutation({
+export const resetTokens = internalMutation({
   args: { id: v.id("companies") },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -292,7 +296,7 @@ export const resetTokens = mutation({
   },
 });
 
-export const setOwner = mutation({
+export const setOwner = internalMutation({
   args: {
     id: v.id("companies"),
     ownerId: v.id("users"),
@@ -349,6 +353,48 @@ export const internalCreate = internalMutation({
       status: args.status ?? "pending_approval",
       createdAt: now,
       updatedAt: now,
+    });
+  },
+});
+
+export const internalGetByStripeCustomerId = internalQuery({
+  args: { stripeCustomerId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("companies")
+      .withIndex("by_stripeCustomerId", (q) =>
+        q.eq("stripeCustomerId", args.stripeCustomerId)
+      )
+      .first();
+  },
+});
+
+export const internalUpdateStripeInfo = internalMutation({
+  args: {
+    id: v.id("companies"),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.optional(v.string()),
+    planId: v.optional(v.string()),
+    planStatus: v.optional(v.string()),
+    status: v.optional(
+      v.union(
+        v.literal("trial"),
+        v.literal("active"),
+        v.literal("past_due"),
+        v.literal("cancelled"),
+        v.literal("pending_approval")
+      )
+    ),
+    tokenAllocation: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...updates } = args;
+    const filteredUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([_, v]) => v !== undefined)
+    );
+    await ctx.db.patch(id, {
+      ...filteredUpdates,
+      updatedAt: Date.now(),
     });
   },
 });

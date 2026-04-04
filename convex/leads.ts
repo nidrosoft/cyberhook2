@@ -121,6 +121,9 @@ export const create = mutation({
     source: v.optional(v.string()),
     sourceId: v.optional(v.string()),
     status: v.optional(v.string()),
+    contactName: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const currentUser = await requireAuth(ctx);
@@ -148,6 +151,22 @@ export const create = mutation({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
+
+    if (args.contactName || args.contactEmail || args.contactPhone) {
+      const nameParts = (args.contactName || "").trim().split(/\s+/);
+      await ctx.db.insert("contacts", {
+        companyId: args.companyId,
+        leadId,
+        createdByUserId: args.createdByUserId,
+        firstName: nameParts[0] || "",
+        lastName: nameParts.slice(1).join(" ") || "",
+        email: args.contactEmail,
+        phone: args.contactPhone,
+        source: "manual",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
 
     return leadId;
   },

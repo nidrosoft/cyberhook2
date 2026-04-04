@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useAction } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
     Activity,
     AlertCircle,
@@ -25,6 +27,7 @@ import {
     Send01,
     Compass,
     RefreshCw01,
+    CheckCircle,
 } from "@untitledui/icons";
 import type { SortDescriptor } from "react-aria-components";
 
@@ -41,6 +44,8 @@ import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { TextArea } from "@/components/base/textarea/textarea";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { generateExposureReport } from "@/lib/pdf-report";
+import { ensureProtocol } from "@/utils/sanitize-url";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { RedrokCompany } from "../../../../convex/redrokApi";
@@ -84,7 +89,29 @@ function getSeverityIndicator(severity: ExposureSeverity) {
     return colors[severity] || colors.medium;
 }
 
-const addLeadIndustryOptions = ["Healthcare", "Finance", "Technology", "Construction", "Manufacturing", "Education", "Retail", "Government"];
+const addLeadIndustryOptions = [
+    "Accounting", "Airlines/Aviation", "Architecture & Planning", "Automotive", "Banking",
+    "Biotechnology", "Building Materials", "Capital Markets", "Chemicals", "Civil Engineering",
+    "Computer Hardware", "Computer Networking", "Computer Software", "Construction",
+    "Consumer Electronics", "Consumer Goods", "Defense & Space", "E-Learning",
+    "Education Management", "Electrical & Electronic Manufacturing", "Environmental Services",
+    "Events Services", "Financial Services", "Food & Beverages", "Government",
+    "Health, Wellness & Fitness", "Higher Education", "Hospital & Health Care", "Hospitality",
+    "Human Resources", "Import & Export", "Information Services", "Information Technology",
+    "Insurance", "Internet", "Investment Management", "Law Enforcement", "Law Practice",
+    "Legal Services", "Logistics & Supply Chain", "Management Consulting", "Manufacturing",
+    "Maritime", "Marketing & Advertising", "Mechanical & Industrial Engineering",
+    "Media Production", "Medical Devices", "Mining & Metals", "Motion Pictures",
+    "Museums & Institutions", "Music", "Nanotechnology", "Nonprofit", "Oil & Energy",
+    "Online Media", "Outsourcing", "Packaging", "Pharmaceuticals", "Photography",
+    "Political Organization", "Primary/Secondary Education", "Printing",
+    "Professional Training & Coaching", "Public Relations", "Publishing", "Real Estate",
+    "Renewables & Environment", "Research", "Restaurants", "Retail",
+    "Security & Investigations", "Semiconductors", "Staffing & Recruiting", "Supermarkets",
+    "Telecommunications", "Textiles", "Think Tanks", "Translation & Localization",
+    "Transportation", "Utilities", "Venture Capital & Private Equity", "Veterinary",
+    "Warehousing", "Wholesale", "Wine & Spirits", "Wireless",
+];
 const addLeadEmployeeOptions = ["1-50", "51-200", "201-500", "501-1000", "1000+"];
 const addLeadRevenueOptions = ["<$1M", "$1M-$5M", "$5M-$10M", "$10M-$50M", "$50M+"];
 
@@ -110,7 +137,7 @@ export default function LiveLeadsPage() {
     const fetchRegions = useAction(api.redrokApi.getRegions);
 
     // Tab: "my-leads" or "discover"
-    const [activeTab, setActiveTab] = useState<"my-leads" | "discover">("my-leads");
+    const [activeTab, setActiveTab] = useState<"my-leads" | "discover">("discover");
 
     // Discover state
     const [discoverDays, setDiscoverDays] = useState("7");
@@ -135,11 +162,123 @@ export default function LiveLeadsPage() {
     const [viewMode, setViewMode] = useState<Set<string>>(new Set(["list"]));
     const [openMenu, setOpenMenu] = useState<string | null>(null);
 
+    useEffect(() => {
+        if (!openMenu) return;
+        function handleClick() { setOpenMenu(null); }
+        document.addEventListener("click", handleClick);
+        return () => document.removeEventListener("click", handleClick);
+    }, [openMenu]);
+
+    // Import modal state
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importStep, setImportStep] = useState<"upload" | "preview" | "importing" | "done">("upload");
+    const [importFile, setImportFile] = useState<File | null>(null);
+    const [importParsedRows, setImportParsedRows] = useState<Array<Record<string, string>>>([]);
+    const [importHeaders, setImportHeaders] = useState<string[]>([]);
+    const [importProgress, setImportProgress] = useState(0);
+    const [importTotal, setImportTotal] = useState(0);
+    const [importSuccessCount, setImportSuccessCount] = useState(0);
+    const [importErrorCount, setImportErrorCount] = useState(0);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    function resetImport() {
+        setImportStep("upload");
+        setImportFile(null);
+        setImportParsedRows([]);
+        setImportHeaders([]);
+        setImportProgress(0);
+        setImportTotal(0);
+        setImportSuccessCount(0);
+        setImportErrorCount(0);
+    }
+
+    function handleImportFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setImportFile(file);
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const text = ev.target?.result as string;
+            if (!text) return;
+            const lines = text.split(/\r?\n/).filter(Boolean);
+            if (lines.length < 2) {
+                toast.error("CSV file must have a header row and at least one data row.");
+                return;
+            }
+            const headers = lines[0].split(",").map(h => h.replace(/^"|"$/g, "").trim());
+            setImportHeaders(headers);
+
+            const rows: Array<Record<string, string>> = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].match(/(".*?"|[^",]+|(?<=,)(?=,))/g)?.map(v => v.replace(/^"|"$/g, "").trim()) || [];
+                const row: Record<string, string> = {};
+                headers.forEach((h, idx) => { row[h] = values[idx] || ""; });
+                rows.push(row);
+            }
+            setImportParsedRows(rows);
+            setImportStep("preview");
+        };
+        reader.readAsText(file);
+    }
+
+    async function handleImportConfirm() {
+        if (!companyId || !user || importParsedRows.length === 0) return;
+        setImportStep("importing");
+        setImportTotal(importParsedRows.length);
+        setImportProgress(0);
+        setImportSuccessCount(0);
+        setImportErrorCount(0);
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        const nameCol = importHeaders.find(h => /company|name/i.test(h)) || importHeaders[0];
+        const domainCol = importHeaders.find(h => /domain|website|url/i.test(h));
+        const industryCol = importHeaders.find(h => /industry|sector/i.test(h));
+        const countryCol = importHeaders.find(h => /country|location/i.test(h));
+        const contactCol = importHeaders.find(h => /contact.*name|poc/i.test(h));
+        const emailCol = importHeaders.find(h => /email/i.test(h));
+        const phoneCol = importHeaders.find(h => /phone/i.test(h));
+
+        for (let i = 0; i < importParsedRows.length; i++) {
+            const row = importParsedRows[i];
+            const companyName = row[nameCol] || "";
+            if (!companyName.trim()) { errorCount++; setImportProgress(i + 1); setImportErrorCount(errorCount); continue; }
+
+            try {
+                await createLead({
+                    companyId,
+                    createdByUserId: user._id,
+                    name: companyName.trim(),
+                    domain: (domainCol ? row[domainCol] : "").trim() || companyName.trim().toLowerCase().replace(/\s+/g, "") + ".com",
+                    industry: industryCol ? row[industryCol]?.trim() || undefined : undefined,
+                    country: countryCol ? row[countryCol]?.trim() || undefined : undefined,
+                    contactName: contactCol ? row[contactCol]?.trim() || undefined : undefined,
+                    contactEmail: emailCol ? row[emailCol]?.trim() || undefined : undefined,
+                    contactPhone: phoneCol ? row[phoneCol]?.trim() || undefined : undefined,
+                    source: "csv_import",
+                });
+                successCount++;
+            } catch {
+                errorCount++;
+            }
+            setImportProgress(i + 1);
+            setImportSuccessCount(successCount);
+            setImportErrorCount(errorCount);
+        }
+
+        setImportStep("done");
+    }
+
     // Add Lead slideout state
     const [leadCompany, setLeadCompany] = useState("");
     const [leadDomain, setLeadDomain] = useState("");
     const [leadIndustry, setLeadIndustry] = useState("");
     const [leadNotes, setLeadNotes] = useState("");
+    const [leadContactName, setLeadContactName] = useState("");
+    const [leadContactEmail, setLeadContactEmail] = useState("");
+    const [leadContactPhone, setLeadContactPhone] = useState("");
     const [isCreating, setIsCreating] = useState(false);
 
     // Load countries when discover tab opens
@@ -152,7 +291,7 @@ export default function LiveLeadsPage() {
                 setCountriesLoaded(true);
             }
         } catch (e) {
-            console.error("Failed to load countries:", e);
+            devError("Failed to load countries:", e);
         }
     }, [companyId, countriesLoaded, fetchCountries]);
 
@@ -169,15 +308,30 @@ export default function LiveLeadsPage() {
                 const result = await fetchRegions({ companyId, country });
                 if (result.success) setRegionsList(result.regions);
             } catch (e) {
-                console.error("Failed to load regions:", e);
+                devError("Failed to load regions:", e);
             }
         }
+    }
+
+    function friendlyError(raw: string): string {
+        if (/authentication failed|401|unauthorized/i.test(raw))
+            return "Unable to connect to the data provider. Please check your API credentials in Settings or try again later.";
+        if (/token.*expired/i.test(raw))
+            return "Your session with the data provider has expired. Please try again.";
+        if (/credentials not configured/i.test(raw))
+            return "API credentials have not been configured yet. Please add them in Settings > Integrations.";
+        if (/timeout|timed out/i.test(raw))
+            return "The request took too long. Please try again with a narrower search.";
+        if (/network|fetch failed|ECONNREFUSED/i.test(raw))
+            return "Network error — unable to reach the data provider. Please check your connection.";
+        return raw;
     }
 
     async function handleDiscover() {
         if (!companyId) return;
         setIsDiscovering(true);
         setDiscoverError(null);
+        setDiscoveredLeads([]);
         try {
             const result = await fetchLiveLeads({
                 companyId,
@@ -192,10 +346,11 @@ export default function LiveLeadsPage() {
                     setDiscoverError("No leads found for the selected criteria. Try expanding your search.");
                 }
             } else {
-                setDiscoverError(result.error || "Search failed. Please try again.");
+                setDiscoverError(friendlyError(result.error || "Search failed. Please try again."));
             }
         } catch (error) {
-            setDiscoverError(error instanceof Error ? error.message : "Discovery failed");
+            const msg = error instanceof Error ? error.message : "Discovery failed";
+            setDiscoverError(friendlyError(msg));
         } finally {
             setIsDiscovering(false);
         }
@@ -216,9 +371,9 @@ export default function LiveLeadsPage() {
                 linkedinUrl: company.linkedin_url || undefined,
                 source: "live_leads",
             });
-            alert(`${company.name} saved to your leads!`);
+            toast.success(`${company.name} saved to your leads!`);
         } catch (error) {
-            alert(error instanceof Error ? error.message : "Failed to save lead");
+            toast.error(error instanceof Error ? error.message : "Failed to save lead");
         }
     }
 
@@ -260,26 +415,52 @@ export default function LiveLeadsPage() {
                 domain: leadDomain.trim() || leadCompany.trim().toLowerCase().replace(/\s+/g, "") + ".com",
                 industry: leadIndustry || undefined,
                 source: "manual",
+                contactName: leadContactName.trim() || undefined,
+                contactEmail: leadContactEmail.trim() || undefined,
+                contactPhone: leadContactPhone.trim() || undefined,
             });
             setLeadCompany("");
             setLeadDomain("");
             setLeadIndustry("");
             setLeadNotes("");
+            setLeadContactName("");
+            setLeadContactEmail("");
+            setLeadContactPhone("");
             close();
         } catch (error) {
-            console.error("Failed to create lead:", error);
-            alert(error instanceof Error ? error.message : "Failed to create lead");
+            devError("Failed to create lead:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to create lead");
         } finally {
             setIsCreating(false);
         }
     }
 
+    const [confirmDeleteId, setConfirmDeleteId] = useState<Id<"leads"> | null>(null);
+
     async function handleDelete(id: Id<"leads">) {
-        if (!confirm("Are you sure you want to delete this lead?")) return;
         try {
             await deleteLead({ id });
+            toast.success("Lead deleted");
         } catch (error) {
-            console.error("Failed to delete lead:", error);
+            devError("Failed to delete lead:", error);
+            toast.error("Failed to delete lead");
+        }
+    }
+
+    function handleGenerateReport(lead: typeof filteredLeads[0]) {
+        const domain = lead.domain?.trim() || lead.name.toLowerCase().replace(/\s+/g, "") + ".com";
+        toast.info(`Generating report for ${lead.name}...`);
+        try {
+            generateExposureReport({
+                domain,
+                companyName: lead.name,
+                credentials: [],
+                isTrial: false,
+                generatedAt: new Date(),
+            });
+            toast.success(`Report downloaded for ${lead.name}`);
+        } catch (error) {
+            toast.error("Failed to generate report");
         }
     }
 
@@ -292,10 +473,10 @@ export default function LiveLeadsPage() {
                 domain: domain.toLowerCase(),
                 companyName: name,
             });
-            alert(`${domain} added to watchlist!`);
+            toast.success(`${domain} added to watchlist!`);
         } catch (error) {
-            console.error("Failed to add to watchlist:", error);
-            alert(error instanceof Error ? error.message : "Failed to add to watchlist");
+            devError("Failed to add to watchlist:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to add to watchlist");
         }
     }
 
@@ -319,6 +500,163 @@ export default function LiveLeadsPage() {
 
     return (
         <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
+            {confirmDeleteId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-primary border border-secondary rounded-xl p-6 shadow-xl max-w-sm w-full mx-4">
+                        <h3 className="text-md font-semibold text-primary mb-2">Delete Lead</h3>
+                        <p className="text-sm text-secondary mb-6">Are you sure you want to delete this lead? This action cannot be undone.</p>
+                        <div className="flex items-center justify-end gap-3">
+                            <Button color="secondary" size="sm" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+                            <Button color="primary-destructive" size="sm" onClick={() => { handleDelete(confirmDeleteId); setConfirmDeleteId(null); }}>Delete</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Import Modal */}
+            {showImportModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-primary border border-secondary rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
+                        <div className="flex items-center justify-between border-b border-secondary px-6 py-4">
+                            <div>
+                                <h3 className="text-lg font-semibold text-primary">Import Leads</h3>
+                                <p className="text-sm text-tertiary mt-0.5">
+                                    {importStep === "upload" && "Upload a CSV file to import leads in bulk"}
+                                    {importStep === "preview" && `Preview ${importParsedRows.length} leads from ${importFile?.name}`}
+                                    {importStep === "importing" && "Importing leads..."}
+                                    {importStep === "done" && "Import complete"}
+                                </p>
+                            </div>
+                            <button onClick={() => setShowImportModal(false)} className="text-tertiary hover:text-primary transition-colors">
+                                <XClose className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto px-6 py-5">
+                            {importStep === "upload" && (
+                                <div className="flex flex-col items-center gap-5">
+                                    <div
+                                        className="w-full border-2 border-dashed border-secondary rounded-xl p-10 flex flex-col items-center gap-4 cursor-pointer hover:border-brand-400 hover:bg-secondary_subtle transition-colors"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <div className="w-12 h-12 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
+                                            <Upload01 className="w-6 h-6 text-brand-600" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-sm font-medium text-primary">Click to upload or drag & drop</p>
+                                            <p className="text-xs text-tertiary mt-1">CSV files only (.csv)</p>
+                                        </div>
+                                    </div>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".csv"
+                                        className="hidden"
+                                        onChange={handleImportFileSelect}
+                                    />
+                                    <div className="w-full rounded-lg bg-secondary_subtle border border-secondary p-4">
+                                        <p className="text-xs font-medium text-secondary mb-2">Expected CSV format:</p>
+                                        <code className="text-xs text-tertiary block whitespace-pre-wrap">Company Name, Domain, Industry, Country, Contact Name, Email, Phone</code>
+                                    </div>
+                                </div>
+                            )}
+
+                            {importStep === "preview" && (
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex items-center gap-3">
+                                        <Badge color="brand" size="sm">{importParsedRows.length} rows</Badge>
+                                        <Badge color="gray" size="sm">{importHeaders.length} columns</Badge>
+                                        <span className="text-xs text-tertiary">{importFile?.name}</span>
+                                    </div>
+                                    <div className="rounded-lg border border-secondary overflow-x-auto max-h-[340px] overflow-y-auto">
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-secondary_subtle sticky top-0">
+                                                <tr>
+                                                    <th className="text-left px-3 py-2 text-xs font-medium text-tertiary">#</th>
+                                                    {importHeaders.map(h => (
+                                                        <th key={h} className="text-left px-3 py-2 text-xs font-medium text-tertiary whitespace-nowrap">{h}</th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {importParsedRows.slice(0, 50).map((row, i) => (
+                                                    <tr key={i} className="border-t border-secondary">
+                                                        <td className="px-3 py-2 text-xs text-quaternary">{i + 1}</td>
+                                                        {importHeaders.map(h => (
+                                                            <td key={h} className="px-3 py-2 text-xs text-secondary whitespace-nowrap max-w-[200px] truncate">{row[h] || "—"}</td>
+                                                        ))}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {importParsedRows.length > 50 && (
+                                        <p className="text-xs text-tertiary text-center">Showing first 50 of {importParsedRows.length} rows</p>
+                                    )}
+                                </div>
+                            )}
+
+                            {importStep === "importing" && (
+                                <div className="flex flex-col items-center gap-6 py-6">
+                                    <Loading02 className="w-10 h-10 animate-spin text-brand-600" />
+                                    <div className="w-full max-w-md">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-sm font-medium text-secondary">Importing leads...</span>
+                                            <span className="text-sm text-tertiary">{importProgress} / {importTotal}</span>
+                                        </div>
+                                        <div className="w-full h-2.5 bg-secondary rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-brand-600 rounded-full transition-all duration-300"
+                                                style={{ width: `${importTotal > 0 ? (importProgress / importTotal) * 100 : 0}%` }}
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-4 mt-3 text-xs text-tertiary">
+                                            <span className="text-success-600">{importSuccessCount} imported</span>
+                                            {importErrorCount > 0 && <span className="text-error-600">{importErrorCount} failed</span>}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {importStep === "done" && (
+                                <div className="flex flex-col items-center gap-5 py-6">
+                                    <div className="w-14 h-14 rounded-full bg-success-100 dark:bg-success-900/30 flex items-center justify-center">
+                                        <CheckCircle className="w-7 h-7 text-success-600" />
+                                    </div>
+                                    <div className="text-center">
+                                        <h4 className="text-md font-semibold text-primary">Import Complete</h4>
+                                        <p className="text-sm text-tertiary mt-1">
+                                            Successfully imported <span className="font-semibold text-success-600">{importSuccessCount}</span> leads
+                                            {importErrorCount > 0 && <> ({importErrorCount} failed)</>}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-3 border-t border-secondary px-6 py-4">
+                            {importStep === "upload" && (
+                                <Button color="secondary" size="md" onClick={() => setShowImportModal(false)}>Cancel</Button>
+                            )}
+                            {importStep === "preview" && (
+                                <>
+                                    <Button color="secondary" size="md" onClick={() => { resetImport(); }}>Back</Button>
+                                    <Button color="primary" size="md" onClick={handleImportConfirm}>
+                                        Import {importParsedRows.length} Leads
+                                    </Button>
+                                </>
+                            )}
+                            {importStep === "importing" && (
+                                <Button color="secondary" size="md" isDisabled>Importing...</Button>
+                            )}
+                            {importStep === "done" && (
+                                <Button color="primary" size="md" onClick={() => { setShowImportModal(false); setActiveTab("my-leads"); }}>
+                                    View My Leads
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="flex flex-col gap-8">
                 {/* Page Header */}
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
@@ -334,10 +672,31 @@ export default function LiveLeadsPage() {
                         </p>
                     </div>
                     <div className="flex items-center gap-3 mt-4 sm:mt-0">
-                        <Button color="secondary" iconLeading={Download01}>
+                        <Button color="secondary" iconLeading={Download01} onClick={() => {
+                            if (filteredLeads.length === 0) { toast.error("No leads to export"); return; }
+                            const headers = ["Company Name", "Domain", "Industry", "Country", "Source", "Exposures"];
+                            const rows = filteredLeads.map(l => [
+                                l.name,
+                                l.domain || "",
+                                l.industry || "",
+                                l.country || "",
+                                l.source || "manual",
+                                String(l.exposureCount ?? 0),
+                            ]);
+                            const csv = [headers, ...rows].map(r => r.map(v => `"${(v || "").replace(/"/g, '""')}"`).join(",")).join("\n");
+                            const blob = new Blob([csv], { type: "text/csv" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            const dateStr = new Date().toISOString().slice(0, 10);
+                            a.download = `CyberHook_All_Leads_Export_${dateStr}.csv`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                            toast.success(`Exported ${filteredLeads.length} lead(s) to CSV`);
+                        }}>
                             Export CSV
                         </Button>
-                        <Button color="secondary" iconLeading={Upload01}>
+                        <Button color="secondary" iconLeading={Upload01} onClick={() => { resetImport(); setShowImportModal(true); }}>
                             Import
                         </Button>
                         <SlideoutMenu.Trigger>
@@ -368,21 +727,43 @@ export default function LiveLeadsPage() {
                                                     onChange={setLeadDomain}
                                                 />
                                                 <div className="flex flex-col gap-1.5">
-                                                    <label className="block text-sm font-medium text-secondary">
+                                                    <label className="block text-sm font-medium text-secondary" htmlFor="lead-industry-input">
                                                         Industry
                                                     </label>
-                                                    <NativeSelect
-                                                        aria-label="Industry"
+                                                    <input
+                                                        id="lead-industry-input"
+                                                        list="lead-industry-list"
+                                                        className="w-full rounded-lg border border-primary bg-primary px-3 py-2 text-sm text-primary placeholder:text-placeholder focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand-600"
+                                                        placeholder="Type or select an industry"
                                                         value={leadIndustry}
                                                         onChange={(e) => setLeadIndustry(e.target.value)}
-                                                        options={[
-                                                            { label: "Select industry", value: "" },
-                                                            ...addLeadIndustryOptions.map((opt) => ({ label: opt, value: opt })),
-                                                        ]}
-                                                        className="w-full"
-                                                        selectClassName="text-sm"
                                                     />
+                                                    <datalist id="lead-industry-list">
+                                                        {addLeadIndustryOptions.map((opt) => (
+                                                            <option key={opt} value={opt} />
+                                                        ))}
+                                                    </datalist>
                                                 </div>
+                                                <Input
+                                                    label="Contact Name"
+                                                    placeholder="e.g. Jane Smith"
+                                                    value={leadContactName}
+                                                    onChange={setLeadContactName}
+                                                />
+                                                <Input
+                                                    label="Contact Email"
+                                                    placeholder="e.g. jane@acme.com"
+                                                    icon={Mail01}
+                                                    value={leadContactEmail}
+                                                    onChange={setLeadContactEmail}
+                                                    hint="Optional — email for the primary contact"
+                                                />
+                                                <Input
+                                                    label="Contact Phone"
+                                                    placeholder="e.g. +1 555-123-4567"
+                                                    value={leadContactPhone}
+                                                    onChange={setLeadContactPhone}
+                                                />
                                                 <TextArea
                                                     label="Notes"
                                                     placeholder="Optional notes about this lead"
@@ -414,17 +795,17 @@ export default function LiveLeadsPage() {
                 {/* Tabs */}
                 <div className="flex items-center gap-1 border-b border-secondary">
                     <button
-                        className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "my-leads" ? "border-brand-600 text-brand-700" : "border-transparent text-tertiary hover:text-secondary"}`}
-                        onClick={() => setActiveTab("my-leads")}
-                    >
-                        My Leads ({leads?.length ?? 0})
-                    </button>
-                    <button
                         className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === "discover" ? "border-brand-600 text-brand-700" : "border-transparent text-tertiary hover:text-secondary"}`}
                         onClick={() => setActiveTab("discover")}
                     >
                         <Compass className="w-4 h-4" />
                         Discover New Leads
+                    </button>
+                    <button
+                        className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === "my-leads" ? "border-brand-600 text-brand-700" : "border-transparent text-tertiary hover:text-secondary"}`}
+                        onClick={() => setActiveTab("my-leads")}
+                    >
+                        My Leads ({leads?.length ?? 0})
                     </button>
                 </div>
 
@@ -437,34 +818,47 @@ export default function LiveLeadsPage() {
                                 <Compass className="w-5 h-5 text-brand-600" />
                                 <h3 className="text-md font-semibold text-primary">Discover Companies with Recent Exposures</h3>
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                                <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-secondary">Time Range</label>
+                            <div className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] items-end gap-4 xl:gap-5">
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-medium text-tertiary">Time Range</label>
                                     <NativeSelect
                                         aria-label="Time range"
                                         value={discoverDays}
                                         onChange={(e) => setDiscoverDays(e.target.value)}
                                         options={daysOptions}
-                                        className="w-full"
                                         selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-secondary">Country</label>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-medium text-tertiary">Country</label>
                                     <NativeSelect
                                         aria-label="Country"
                                         value={discoverCountry}
                                         onChange={(e) => handleCountryChange(e.target.value)}
                                         options={[
                                             { label: "All Countries", value: "" },
-                                            ...countriesList.map(c => ({ label: c.val.charAt(0).toUpperCase() + c.val.slice(1), value: c.val })),
+                                            ...(() => {
+                                                const priority = countriesList.filter(c => 
+                                                    c.val.toLowerCase() === "united states" || c.val.toLowerCase() === "canada"
+                                                ).sort((a, b) => {
+                                                    if (a.val.toLowerCase() === "united states") return -1;
+                                                    if (b.val.toLowerCase() === "united states") return 1;
+                                                    return 0;
+                                                });
+                                                const rest = countriesList
+                                                    .filter(c => c.val.toLowerCase() !== "united states" && c.val.toLowerCase() !== "canada")
+                                                    .sort((a, b) => a.val.localeCompare(b.val));
+                                                return [...priority, ...rest].map(c => ({
+                                                    label: c.val.charAt(0).toUpperCase() + c.val.slice(1).toLowerCase(),
+                                                    value: c.val,
+                                                }));
+                                            })(),
                                         ]}
-                                        className="w-full"
                                         selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-secondary">Region</label>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-medium text-tertiary">Region</label>
                                     <NativeSelect
                                         aria-label="Region"
                                         value={discoverRegion}
@@ -473,12 +867,11 @@ export default function LiveLeadsPage() {
                                             { label: "All Regions", value: "" },
                                             ...regionsList.map(r => ({ label: typeof r === "string" ? r : "", value: typeof r === "string" ? r : "" })),
                                         ]}
-                                        className="w-full"
                                         selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex flex-col gap-1.5">
-                                    <label className="text-sm font-medium text-secondary">City</label>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-medium text-tertiary">City</label>
                                     <InputBase
                                         size="sm"
                                         type="text"
@@ -487,21 +880,23 @@ export default function LiveLeadsPage() {
                                         onChange={(value: string) => setDiscoverCity(value)}
                                     />
                                 </div>
-                            </div>
-                            <div className="flex items-center gap-3 pt-2">
-                                <Button
-                                    color="primary"
-                                    iconLeading={SearchLg}
-                                    onClick={handleDiscover}
-                                    isDisabled={isDiscovering}
-                                >
-                                    {isDiscovering ? "Searching..." : "Discover Leads"}
-                                </Button>
-                                {discoveredLeads.length > 0 && (
-                                    <span className="text-sm text-tertiary">
-                                        Found <span className="font-semibold text-secondary">{discoveredLeads.length}</span> companies
-                                    </span>
-                                )}
+                                <div className="flex items-center gap-4">
+                                    <Button
+                                        color="primary"
+                                        size="md"
+                                        iconLeading={SearchLg}
+                                        onClick={handleDiscover}
+                                        isDisabled={isDiscovering}
+                                        className="shrink-0 whitespace-nowrap"
+                                    >
+                                        {isDiscovering ? "Searching..." : "Discover Leads"}
+                                    </Button>
+                                    {discoveredLeads.length > 0 && (
+                                        <span className="text-sm text-tertiary whitespace-nowrap shrink-0">
+                                            Found <span className="font-semibold text-secondary">{discoveredLeads.length}</span> companies
+                                        </span>
+                                    )}
+                                </div>
                             </div>
 
                             {discoverError && (
@@ -512,8 +907,21 @@ export default function LiveLeadsPage() {
                             )}
                         </div>
 
+                        {/* Loading state while discovering */}
+                        {isDiscovering && (
+                            <div className="flex flex-col items-center justify-center py-16 gap-5 rounded-xl border border-secondary bg-secondary_subtle">
+                                <Loading02 className="w-10 h-10 animate-spin text-brand-600" />
+                                <div className="text-center">
+                                    <h3 className="text-md font-semibold text-primary">Scanning for leads...</h3>
+                                    <p className="text-sm text-tertiary mt-1 max-w-md">
+                                        Searching companies with recent breach exposures. This may take a moment.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Discovered Results Table */}
-                        {discoveredLeads.length > 0 && (
+                        {!isDiscovering && discoveredLeads.length > 0 && (
                             <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
                                 <Table
                                     aria-label="Discovered Leads"
@@ -539,7 +947,7 @@ export default function LiveLeadsPage() {
                                                         <div className="flex flex-col">
                                                             <span className="font-medium text-primary text-sm">{item.name}</span>
                                                             {item.linkedin_url && (
-                                                                <a href={item.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline">LinkedIn</a>
+                                                                <a href={ensureProtocol(item.linkedin_url)} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline">LinkedIn</a>
                                                             )}
                                                         </div>
                                                     </div>
@@ -652,16 +1060,64 @@ export default function LiveLeadsPage() {
                         <span className="text-sm font-semibold text-brand-700">{selectedCount} selected</span>
                         <div className="hidden sm:block h-5 w-px bg-brand-200" />
                         <div className="flex flex-wrap items-center gap-2">
-                            <Button color="secondary" size="sm" iconLeading={BookmarkCheck}>Add to Watchlist</Button>
-                            <Button color="secondary" size="sm" iconLeading={Send01}>Start Campaign</Button>
-                            <Button color="secondary" size="sm" iconLeading={Download01}>Export Selected</Button>
+                            <Button color="secondary" size="sm" iconLeading={BookmarkCheck} onClick={async () => {
+                                if (!companyId || !user) return;
+                                const selected = filteredLeads.filter(l => selectedKeys.has(l._id));
+                                let added = 0;
+                                for (const lead of selected) {
+                                    if (lead.domain) {
+                                        try {
+                                            await addToWatchlist({
+                                                companyId,
+                                                userId: user._id,
+                                                domain: lead.domain.toLowerCase(),
+                                                companyName: lead.name,
+                                            });
+                                            added++;
+                                        } catch (e) {
+                                            devError("Failed to add to watchlist:", e);
+                                        }
+                                    }
+                                }
+                                toast.success(`${added} lead(s) added to watchlist!`);
+                                setSelectedKeys(new Set());
+                            }}>Add to Watchlist</Button>
+                            <Button color="secondary" size="sm" iconLeading={Send01} onClick={() => {
+                                const selected = filteredLeads.filter(l => selectedKeys.has(l._id));
+                                if (selected.length === 0) return;
+                                const ids = selected.map(l => l._id).join(",");
+                                window.location.href = `/ai-agents/new?leads=${encodeURIComponent(ids)}`;
+                            }}>Start Campaign</Button>
+                            <Button color="secondary" size="sm" iconLeading={Download01} onClick={() => {
+                                const selected = filteredLeads.filter(l => selectedKeys.has(l._id));
+                                if (selected.length === 0) { toast.error("No leads selected"); return; }
+                                const headers = ["Company Name", "Domain", "Industry", "Country", "Source", "Exposures"];
+                                const rows = selected.map(l => [
+                                    l.name,
+                                    l.domain || "",
+                                    l.industry || "",
+                                    l.country || "",
+                                    l.source || "manual",
+                                    String(l.exposureCount ?? 0),
+                                ]);
+                                const csv = [headers, ...rows].map(r => r.map(v => `"${(v || "").replace(/"/g, '""')}"`).join(",")).join("\n");
+                                const blob = new Blob([csv], { type: "text/csv" });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                const dateStr = new Date().toISOString().slice(0, 10);
+                                a.download = `CyberHook_Leads_Export_${dateStr}.csv`;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                                toast.success(`Exported ${selected.length} lead(s) to CSV`);
+                            }}>Export Selected</Button>
                         </div>
                     </div>
                 )}
 
                 {/* Main Table - List View */}
                 {Array.from(viewMode).includes("list") && (
-                <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
+                <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-visible">
                     <Table
                         aria-label="Live Leads List"
                         selectionMode="multiple"
@@ -709,10 +1165,22 @@ export default function LiveLeadsPage() {
                                         </Table.Cell>
                                         <Table.Cell>
                                             <div className="flex items-center gap-2">
-                                                <span className={`inline-block w-2 h-2 rounded-full ${sev.dot}`} />
-                                                <Badge color={sev.color} size="sm">
-                                                    {item.exposureCount ?? 0} {sev.label}
-                                                </Badge>
+                                                {item.lastScanDate != null && (item.exposureCount ?? 0) > 0 ? (
+                                                    <>
+                                                        <span className={`inline-block w-2 h-2 rounded-full ${sev.dot}`} />
+                                                        <Badge color={sev.color} size="sm">
+                                                            {item.exposureCount} {sev.label}
+                                                        </Badge>
+                                                    </>
+                                                ) : item.lastScanDate != null && (item.exposureCount ?? 0) === 0 ? (
+                                                    <>
+                                                        <span className="inline-block w-2 h-2 rounded-full bg-success-500" />
+                                                        <span className="text-sm text-secondary">0 Exposures</span>
+                                                        <span className="text-xs text-success-600">(Scanned)</span>
+                                                    </>
+                                                ) : (
+                                                    <span className="text-sm text-quaternary">Not Scanned</span>
+                                                )}
                                             </div>
                                         </Table.Cell>
                                         <Table.Cell className="hidden lg:table-cell">
@@ -722,7 +1190,7 @@ export default function LiveLeadsPage() {
                                             <span className="text-sm text-tertiary">{formatDate(item.createdAt)}</span>
                                         </Table.Cell>
                                         <Table.Cell className="px-4">
-                                            <div className="relative">
+                                            <div className="relative" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
                                                 <ButtonUtility
                                                     size="sm"
                                                     icon={DotsVertical}
@@ -731,10 +1199,22 @@ export default function LiveLeadsPage() {
                                                 />
                                                 {openMenu === item._id && (
                                                     <div className="absolute right-0 top-8 z-50 min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg">
+                                                        <button
+                                                            type="button"
+                                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleGenerateReport(item);
+                                                                setOpenMenu(null);
+                                                            }}
+                                                        >
+                                                            Generate Report
+                                                        </button>
                                                         {item.domain && (
                                                             <button 
                                                                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle" 
-                                                                onClick={() => {
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
                                                                     handleAddToWatchlist(item.domain!, item.name);
                                                                     setOpenMenu(null);
                                                                 }}
@@ -744,8 +1224,9 @@ export default function LiveLeadsPage() {
                                                         )}
                                                         <button 
                                                             className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error-600 hover:bg-secondary_subtle" 
-                                                            onClick={() => {
-                                                                handleDelete(item._id);
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setConfirmDeleteId(item._id);
                                                                 setOpenMenu(null);
                                                             }}
                                                         >
@@ -807,12 +1288,16 @@ export default function LiveLeadsPage() {
                                     <div className="flex items-center justify-between pt-2 border-t border-secondary">
                                         <div className="flex items-center gap-1.5">
                                             <span className={`inline-block w-2 h-2 rounded-full ${indicator.dot}`} />
-                                            <span className="text-sm text-secondary">{lead.exposureCount ?? 0} exposures</span>
+                                            <span className="text-sm text-secondary">
+                                                {lead.lastScanDate != null
+                                                    ? `${lead.exposureCount ?? 0} Exposures Scanned`
+                                                    : "Not Scanned"}
+                                            </span>
                                         </div>
                                         <Button 
                                             size="sm" 
                                             color="secondary-destructive"
-                                            onClick={() => handleDelete(lead._id)}
+                                            onClick={() => setConfirmDeleteId(lead._id)}
                                         >
                                             Delete
                                         </Button>

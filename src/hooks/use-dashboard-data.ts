@@ -44,6 +44,18 @@ export function useDashboardData() {
         companyId ? { companyId, userId: user?._id } : "skip"
     );
 
+    // Fetch overdue tasks
+    const overdueTasks = useQuery(
+        api.tasks.getOverdue,
+        companyId ? { companyId, userId: user?._id } : "skip"
+    );
+
+    // Fetch upcoming tasks (next 3 days)
+    const upcomingTasks = useQuery(
+        api.tasks.getUpcoming,
+        companyId ? { companyId, userId: user?._id, days: 3 } : "skip"
+    );
+
     // Fetch upcoming events
     const upcomingEvents = useQuery(
         api.events.getUpcoming,
@@ -89,6 +101,8 @@ export function useDashboardData() {
         kpis,
         recentSearches: recentSearches ?? [],
         todaysTasks: todaysTasks ?? [],
+        overdueTasks: overdueTasks ?? [],
+        upcomingTasks: upcomingTasks ?? [],
         upcomingEvents: upcomingEvents ?? [],
         recentIncidents: recentIncidents ?? [],
         tasksStats,

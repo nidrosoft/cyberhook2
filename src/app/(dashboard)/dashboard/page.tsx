@@ -68,6 +68,21 @@ function getPriorityStyles(priority: string): { color: string; dotColor: string 
     }
 }
 
+function formatDueLabel(dueDate: number | undefined): string {
+    if (!dueDate) return "";
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const diff = dueDate - startOfToday;
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days < 0) {
+        const overdueDays = Math.abs(days);
+        return overdueDays === 1 ? "1 day overdue" : `${overdueDays} days overdue`;
+    }
+    if (days === 0) return "Due today";
+    if (days === 1) return "Due tomorrow";
+    return `Due in ${days} days`;
+}
+
 function getIncidentSeverity(incidentType: string): { label: string; color: "error" | "warning" | "success" } {
     if (incidentType === "ransomware") {
         return { label: "Critical", color: "error" };
@@ -91,10 +106,11 @@ export default function DashboardPage() {
         kpis,
         recentSearches,
         todaysTasks,
+        overdueTasks,
+        upcomingTasks,
         upcomingEvents,
         recentIncidents,
         tasksStats,
-        leadsStats,
     } = useDashboardData();
 
     const { companyId } = useCurrentUser();
@@ -126,13 +142,6 @@ export default function DashboardPage() {
         : (campaignStats?.totalEmailsSent ?? 0) === 0
           ? "No sends recorded yet"
           : "Total across campaigns";
-
-    const pipelineTitle = bottomStatsLoading
-        ? "—"
-        : (leadsStats?.total ?? 0).toLocaleString();
-    const pipelineChange = bottomStatsLoading
-        ? "…"
-        : "Live leads (no $ pipeline yet)";
 
     const completeTask = useMutation(api.tasks.complete);
     const reopenTask = useMutation(api.tasks.reopen);
@@ -195,13 +204,14 @@ export default function DashboardPage() {
                 </div>
 
                 {/* ── 2. KPI Tiles ─────────────────────────── */}
-                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:gap-5 sm:px-6 lg:grid-cols-4 lg:gap-6 lg:px-8">
+                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:gap-5 sm:px-6 lg:grid-cols-4 lg:gap-6 lg:px-8 items-stretch">
                     <MetricsChart04
                         title={kpis.tokenBalance.value?.toLocaleString() ?? "0"}
                         subtitle="Token Balance"
                         change={kpis.tokenBalance.total ? `${Math.round((kpis.tokenBalance.value ?? 0) / kpis.tokenBalance.total * 100)}%` : "0%"}
                         changeTrend={kpis.tokenBalance.status === "critical" || kpis.tokenBalance.status === "warning" ? "negative" : "positive"}
                         changeDescription={`of ${kpis.tokenBalance.total?.toLocaleString() ?? 0} remaining`}
+                        actions={false}
                     />
                     <MetricsChart04
                         title={kpis.liveLeads.value.toLocaleString()}
@@ -209,6 +219,7 @@ export default function DashboardPage() {
                         change={kpis.liveLeads.newThisWeek.toString()}
                         changeTrend="positive"
                         changeDescription="new this week"
+                        actions={false}
                     />
                     <MetricsChart04
                         title={kpis.activeCampaigns.value.toString()}
@@ -216,6 +227,7 @@ export default function DashboardPage() {
                         change="0"
                         changeTrend="positive"
                         changeDescription="awaiting approval"
+                        actions={false}
                     />
                     <MetricsChart04
                         title={kpis.watchlistAlerts.value.toString()}
@@ -223,6 +235,7 @@ export default function DashboardPage() {
                         change={kpis.watchlistAlerts.total.toString()}
                         changeTrend={kpis.watchlistAlerts.value > 0 ? "negative" : "positive"}
                         changeDescription="total monitored"
+                        actions={false}
                     />
                 </div>
 
@@ -333,59 +346,165 @@ export default function DashboardPage() {
                     {/* ── RIGHT COLUMN (2/5 ≈ 40%) ────────── */}
                     <div className="md:col-span-2 flex flex-col gap-6 lg:gap-8">
 
-                        {/* Today's Tasks */}
+                        {/* Tasks */}
                         <div className="rounded-xl border border-secondary bg-primary shadow-xs">
                             <div className="flex items-center justify-between border-b border-secondary px-5 py-4">
                                 <div className="flex items-center gap-2">
                                     <Target05 className="h-5 w-5 text-tertiary" />
-                                    <h2 className="text-lg font-semibold text-primary">Today&apos;s Tasks</h2>
-                                    <Badge color="brand" size="sm">{tasksStats?.dueToday ?? 0}</Badge>
+                                    <h2 className="text-lg font-semibold text-primary">Tasks</h2>
+                                    <Badge color="brand" size="sm">
+                                        {(todaysTasks?.length ?? 0) + (overdueTasks?.length ?? 0)}
+                                    </Badge>
                                 </div>
-                                <Link href="/to-do-list" className="text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors">
+                                <Link href="/todos" className="text-sm font-semibold text-brand-700 hover:text-brand-800 transition-colors">
                                     View All
                                 </Link>
                             </div>
                             <div className="divide-y divide-secondary">
-                                {todaysTasks.length === 0 ? (
+                                {overdueTasks.length === 0 && todaysTasks.length === 0 && upcomingTasks.length === 0 ? (
                                     <div className="px-5 py-8 text-center text-sm text-tertiary">
-                                        No tasks due today. Great job! 🎉
+                                        No tasks due soon.
                                     </div>
                                 ) : (
-                                    todaysTasks.map((task) => {
-                                        const isDone = task.status === "completed";
-                                        const isCompleting = completingTasks.has(task._id);
-                                        const priorityStyles = getPriorityStyles(task.priority);
-                                        return (
-                                            <div key={task._id} className="flex items-start gap-3 px-5 py-4">
-                                                <button 
-                                                    type="button" 
-                                                    className="mt-0.5 cursor-pointer disabled:opacity-50" 
-                                                    onClick={() => toggleTask(task._id, task.status)}
-                                                    disabled={isCompleting}
-                                                >
-                                                    {isCompleting ? (
-                                                        <Loading02 className="h-5 w-5 animate-spin text-brand-500" />
-                                                    ) : isDone ? (
-                                                        <CheckCircle className="h-5 w-5 text-success-500" />
-                                                    ) : (
-                                                        <div className="h-5 w-5 rounded-md border-2 border-secondary hover:border-brand-500 transition-colors" />
-                                                    )}
-                                                </button>
-                                                <div className="flex flex-col gap-0.5 min-w-0">
-                                                    <span className={`text-sm font-medium ${isDone ? "line-through text-tertiary" : "text-primary"}`}>
-                                                        {task.title}
+                                    <>
+                                        {overdueTasks.length > 0 && (
+                                            <div>
+                                                <div className="flex items-center gap-2 px-5 pt-4 pb-2">
+                                                    <span className="text-xs font-semibold text-error-primary uppercase tracking-wide">
+                                                        Overdue
                                                     </span>
-                                                    <div className="flex items-center gap-2 text-xs text-tertiary">
-                                                        <span>Due today</span>
-                                                        <span className={`flex items-center gap-1 font-medium ${priorityStyles.color}`}>
-                                                            <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityStyles.dotColor}`} />
-                                                            {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                                                        </span>
-                                                    </div>
+                                                    <Badge color="error" size="sm">{overdueTasks.length}</Badge>
                                                 </div>
+                                                {overdueTasks.map((task) => {
+                                                    const isDone = task.status === "completed";
+                                                    const isCompleting = completingTasks.has(task._id);
+                                                    const priorityStyles = getPriorityStyles(task.priority);
+                                                    return (
+                                                        <Link key={task._id} href="/todos" className="flex items-start gap-3 px-5 py-3 hover:bg-secondary_alt transition-colors">
+                                                            <button
+                                                                type="button"
+                                                                className="mt-0.5 cursor-pointer disabled:opacity-50"
+                                                                onClick={(e) => { e.preventDefault(); toggleTask(task._id, task.status); }}
+                                                                disabled={isCompleting}
+                                                            >
+                                                                {isCompleting ? (
+                                                                    <Loading02 className="h-5 w-5 animate-spin text-brand-500" />
+                                                                ) : isDone ? (
+                                                                    <CheckCircle className="h-5 w-5 text-success-500" />
+                                                                ) : (
+                                                                    <div className="h-5 w-5 rounded-md border-2 border-error-300 hover:border-error-500 transition-colors" />
+                                                                )}
+                                                            </button>
+                                                            <div className="flex flex-col gap-0.5 min-w-0">
+                                                                <span className={`text-sm font-medium ${isDone ? "line-through text-tertiary" : "text-primary"}`}>
+                                                                    {task.title}
+                                                                </span>
+                                                                <div className="flex items-center gap-2 text-xs text-tertiary">
+                                                                    <span className="text-error-primary font-medium">{formatDueLabel(task.dueDate)}</span>
+                                                                    <span className={`flex items-center gap-1 font-medium ${priorityStyles.color}`}>
+                                                                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityStyles.dotColor}`} />
+                                                                        {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </Link>
+                                                    );
+                                                })}
                                             </div>
-                                        );
-                                    })
+                                        )}
+
+                                        {todaysTasks.length > 0 && (
+                                            <div>
+                                                <div className="flex items-center gap-2 px-5 pt-4 pb-2">
+                                                    <span className="text-xs font-semibold text-primary uppercase tracking-wide">
+                                                        Due Today
+                                                    </span>
+                                                    <Badge color="brand" size="sm">{todaysTasks.length}</Badge>
+                                                </div>
+                                                {todaysTasks.map((task) => {
+                                                    const isDone = task.status === "completed";
+                                                    const isCompleting = completingTasks.has(task._id);
+                                                    const priorityStyles = getPriorityStyles(task.priority);
+                                                    return (
+                                                        <Link key={task._id} href="/todos" className="flex items-start gap-3 px-5 py-3 hover:bg-secondary_alt transition-colors">
+                                                            <button
+                                                                type="button"
+                                                                className="mt-0.5 cursor-pointer disabled:opacity-50"
+                                                                onClick={(e) => { e.preventDefault(); toggleTask(task._id, task.status); }}
+                                                                disabled={isCompleting}
+                                                            >
+                                                                {isCompleting ? (
+                                                                    <Loading02 className="h-5 w-5 animate-spin text-brand-500" />
+                                                                ) : isDone ? (
+                                                                    <CheckCircle className="h-5 w-5 text-success-500" />
+                                                                ) : (
+                                                                    <div className="h-5 w-5 rounded-md border-2 border-secondary hover:border-brand-500 transition-colors" />
+                                                                )}
+                                                            </button>
+                                                            <div className="flex flex-col gap-0.5 min-w-0">
+                                                                <span className={`text-sm font-medium ${isDone ? "line-through text-tertiary" : "text-primary"}`}>
+                                                                    {task.title}
+                                                                </span>
+                                                                <div className="flex items-center gap-2 text-xs text-tertiary">
+                                                                    <span>Due today</span>
+                                                                    <span className={`flex items-center gap-1 font-medium ${priorityStyles.color}`}>
+                                                                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityStyles.dotColor}`} />
+                                                                        {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </Link>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+
+                                        {upcomingTasks.length > 0 && (
+                                            <div>
+                                                <div className="flex items-center gap-2 px-5 pt-4 pb-2">
+                                                    <span className="text-xs font-semibold text-tertiary uppercase tracking-wide">
+                                                        Upcoming
+                                                    </span>
+                                                    <Badge color="gray" size="sm">{upcomingTasks.length}</Badge>
+                                                </div>
+                                                {upcomingTasks.map((task) => {
+                                                    const isDone = task.status === "completed";
+                                                    const isCompleting = completingTasks.has(task._id);
+                                                    const priorityStyles = getPriorityStyles(task.priority);
+                                                    return (
+                                                        <Link key={task._id} href="/todos" className="flex items-start gap-3 px-5 py-3 hover:bg-secondary_alt transition-colors">
+                                                            <button
+                                                                type="button"
+                                                                className="mt-0.5 cursor-pointer disabled:opacity-50"
+                                                                onClick={(e) => { e.preventDefault(); toggleTask(task._id, task.status); }}
+                                                                disabled={isCompleting}
+                                                            >
+                                                                {isCompleting ? (
+                                                                    <Loading02 className="h-5 w-5 animate-spin text-brand-500" />
+                                                                ) : isDone ? (
+                                                                    <CheckCircle className="h-5 w-5 text-success-500" />
+                                                                ) : (
+                                                                    <div className="h-5 w-5 rounded-md border-2 border-secondary hover:border-brand-500 transition-colors" />
+                                                                )}
+                                                            </button>
+                                                            <div className="flex flex-col gap-0.5 min-w-0">
+                                                                <span className={`text-sm font-medium ${isDone ? "line-through text-tertiary" : "text-primary"}`}>
+                                                                    {task.title}
+                                                                </span>
+                                                                <div className="flex items-center gap-2 text-xs text-tertiary">
+                                                                    <span>{formatDueLabel(task.dueDate)}</span>
+                                                                    <span className={`flex items-center gap-1 font-medium ${priorityStyles.color}`}>
+                                                                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityStyles.dotColor}`} />
+                                                                        {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </Link>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -456,13 +575,14 @@ export default function DashboardPage() {
                 </div>
 
                 {/* ── 4. Bottom Quick Stats ─────────────────── */}
-                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-3 sm:gap-5 sm:px-6 lg:px-8">
+                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:gap-5 sm:px-6 lg:px-8 items-stretch">
                     <MetricsIcon04
                         icon={SearchLg}
                         title={searchesThisMonthTitle}
                         subtitle="Searches (last 30 days)"
                         change={searchesChange}
                         changeTrend="positive"
+                        actions={false}
                     />
                     <MetricsIcon04
                         icon={Mail01}
@@ -476,19 +596,7 @@ export default function DashboardPage() {
                                   ? "positive"
                                   : "negative"
                         }
-                    />
-                    <MetricsIcon04
-                        icon={Target05}
-                        title={pipelineTitle}
-                        subtitle="Pipeline Value"
-                        change={pipelineChange}
-                        changeTrend={
-                            bottomStatsLoading
-                                ? "positive"
-                                : (leadsStats?.total ?? 0) > 0
-                                  ? "positive"
-                                  : "negative"
-                        }
+                        actions={false}
                     />
                 </div>
             </div>

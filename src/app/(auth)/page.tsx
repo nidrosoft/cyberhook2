@@ -8,6 +8,11 @@ import { Mail01 } from "@untitledui/icons";
 import { Shield01 } from "@untitledui/icons";
 
 import { Input } from "@/components/base/input/input";
+
+const isDev = process.env.NODE_ENV === "development";
+function logError(label: string, detail: unknown) {
+    if (isDev) console.error(label, detail);
+}
 import { Button } from "@/components/base/buttons/button";
 import { SocialButton } from "@/components/base/buttons/social-button";
 import { Form } from "@/components/base/form/form";
@@ -20,6 +25,7 @@ export default function AuthPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [pendingVerification, setPendingVerification] = useState(false);
+    const [pendingSecondFactor, setPendingSecondFactor] = useState(false);
     const [verificationCode, setVerificationCode] = useState("");
     
     const { signIn, setActive, isLoaded: signInLoaded } = useSignIn();
@@ -45,7 +51,7 @@ export default function AuthPage() {
                 redirectUrlComplete: "/dashboard",
             });
         } catch (err: any) {
-            console.error("OAuth error:", err);
+            logError("OAuth error:", err);
             setError(err.errors?.[0]?.message || "An error occurred during sign in");
             setIsLoading(false);
         }
@@ -63,7 +69,7 @@ export default function AuthPage() {
                 redirectUrlComplete: "/onboarding",
             });
         } catch (err: any) {
-            console.error("OAuth error:", err);
+            logError("OAuth error:", err);
             setError(err.errors?.[0]?.message || "An error occurred during sign up");
             setIsLoading(false);
         }
@@ -89,13 +95,26 @@ export default function AuthPage() {
             if (result.status === "complete") {
                 await setActive({ session: result.createdSessionId });
                 router.push("/dashboard");
+            } else if (result.status === "needs_second_factor") {
+                const secondFactors = result.supportedSecondFactors;
+                const emailFactor = secondFactors?.find(
+                    (f: any) => f.strategy === "email_code"
+                );
+                if (emailFactor) {
+                    await signIn.prepareSecondFactor({
+                        strategy: "email_code",
+                    });
+                    setPendingSecondFactor(true);
+                } else {
+                    setError("Unsupported second factor method. Please contact support.");
+                }
             } else if (result.status === "needs_first_factor") {
                 setError("Please complete additional verification");
             } else {
-                console.error("Sign-in incomplete:", result);
+                logError("Sign-in incomplete:", result?.status);
             }
         } catch (err: any) {
-            console.error("Sign-in error:", err);
+            logError("Sign-in error:", err);
             setError(err.errors?.[0]?.message || "Invalid email or password");
         } finally {
             setIsLoading(false);
@@ -125,8 +144,36 @@ export default function AuthPage() {
             await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
             setPendingVerification(true);
         } catch (err: any) {
-            console.error("Sign-up error:", err);
+            logError("Sign-up error:", err);
             setError(err.errors?.[0]?.message || "An error occurred during sign up");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSecondFactor = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (!signInLoaded || !signIn) return;
+
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            const result = await signIn.attemptSecondFactor({
+                strategy: "email_code",
+                code: verificationCode,
+            });
+
+            if (result.status === "complete") {
+                await setActive({ session: result.createdSessionId });
+                router.push("/dashboard");
+            } else {
+                logError("Second factor incomplete:", result?.status);
+                setError("Verification incomplete. Please try again.");
+            }
+        } catch (err: any) {
+            logError("Second factor error:", err);
+            setError(err.errors?.[0]?.message || "Invalid verification code");
         } finally {
             setIsLoading(false);
         }
@@ -148,11 +195,11 @@ export default function AuthPage() {
                 await setSignUpActive({ session: result.createdSessionId });
                 router.push("/onboarding");
             } else {
-                console.error("Verification incomplete:", result);
+                logError("Verification incomplete:", result?.status);
                 setError("Verification incomplete. Please try again.");
             }
         } catch (err: any) {
-            console.error("Verification error:", err);
+            logError("Verification error:", err);
             setError(err.errors?.[0]?.message || "Invalid verification code");
         } finally {
             setIsLoading(false);
@@ -217,8 +264,40 @@ export default function AuthPage() {
                             </div>
                         )}
 
-                        {/* Verification form */}
-                        {pendingVerification ? (
+                        {/* Second factor verification form (2FA on sign-in) */}
+                        {pendingSecondFactor ? (
+                            <Form onSubmit={handleSecondFactor} className="flex flex-col gap-4">
+                                <div className="flex flex-col gap-2">
+                                    <p className="text-sm text-tertiary">
+                                        A verification code has been sent to your email. Please enter it below to complete sign-in.
+                                    </p>
+                                    <Input
+                                        isRequired
+                                        hideRequiredIndicator
+                                        label="Verification Code"
+                                        name="code"
+                                        placeholder="Enter 6-digit code"
+                                        size="md"
+                                        value={verificationCode}
+                                        onChange={(value) => setVerificationCode(value)}
+                                    />
+                                </div>
+                                <Button type="submit" size="lg" disabled={isLoading}>
+                                    {isLoading ? "Verifying..." : "Verify & Sign In"}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    color="secondary"
+                                    size="md"
+                                    onClick={() => {
+                                        setPendingSecondFactor(false);
+                                        setVerificationCode("");
+                                    }}
+                                >
+                                    Back to sign in
+                                </Button>
+                            </Form>
+                        ) : pendingVerification ? (
                             <Form onSubmit={handleVerification} className="flex flex-col gap-4">
                                 <div className="flex flex-col gap-2">
                                     <p className="text-sm text-tertiary">

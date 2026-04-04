@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Toaster } from "sonner";
 import { ConvexClientProvider } from "@/providers/convex-provider";
 import { RouteProvider } from "@/providers/router-provider";
 import { Theme } from "@/providers/theme";
@@ -36,6 +37,7 @@ export default function RootLayout({
                         <RouteProvider>
                             <Theme>{children}</Theme>
                         </RouteProvider>
+                        <Toaster position="bottom-center" richColors closeButton duration={4000} />
                     </body>
                 </html>
             </ConvexClientProvider>

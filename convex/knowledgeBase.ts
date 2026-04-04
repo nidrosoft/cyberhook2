@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, action } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,9 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let entries = await ctx.db
       .query("knowledgeBaseEntries")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -50,7 +54,11 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("knowledgeBaseEntries") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const user = await requireAuth(ctx);
+    const entry = await ctx.db.get(args.id);
+    if (!entry) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, entry.companyId);
+    return entry;
   },
 });
 
@@ -61,6 +69,9 @@ export const search = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     // Use search index
     const results = await ctx.db
       .query("knowledgeBaseEntries")
@@ -77,6 +88,9 @@ export const getStats = query({
     companyId: v.id("companies"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const entries = await ctx.db
       .query("knowledgeBaseEntries")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -127,6 +141,9 @@ export const create = mutation({
     fileMimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const entryId = await ctx.db.insert("knowledgeBaseEntries", {
       companyId: args.companyId,
       createdByUserId: args.createdByUserId,
@@ -171,9 +188,11 @@ export const update = mutation({
     fileMimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const entry = await ctx.db.get(id);
     if (!entry) throw new Error("Knowledge base entry not found");
+    assertCompanyAccess(user.companyId, entry.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -191,8 +210,10 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("knowledgeBaseEntries") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const entry = await ctx.db.get(args.id);
     if (!entry) throw new Error("Knowledge base entry not found");
+    assertCompanyAccess(user.companyId, entry.companyId);
 
     await ctx.db.delete(args.id);
     return args.id;
@@ -205,8 +226,10 @@ export const updateCrawledContent = mutation({
     crawledContent: v.string(),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const entry = await ctx.db.get(args.id);
     if (!entry) throw new Error("Knowledge base entry not found");
+    assertCompanyAccess(user.companyId, entry.companyId);
 
     await ctx.db.patch(args.id, {
       crawledContent: args.crawledContent,
@@ -215,5 +238,73 @@ export const updateCrawledContent = mutation({
     });
 
     return args.id;
+  },
+});
+
+export const extractFromUrl = action({
+  args: { url: v.string() },
+  handler: async (ctx, args): Promise<{ success: boolean; content: string; error?: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { success: false, content: "", error: "Unauthorized" };
+    }
+
+    const url = args.url.trim();
+    if (!url.startsWith("https://") && !url.startsWith("http://")) {
+      return { success: false, content: "", error: "URL must use https:// or http://" };
+    }
+
+    try {
+      const parsed = new URL(url);
+      const blockedHosts = ["localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254", "[::1]"];
+      if (blockedHosts.includes(parsed.hostname) || parsed.hostname.startsWith("10.") || parsed.hostname.startsWith("192.168.") || parsed.hostname.startsWith("172.")) {
+        return { success: false, content: "", error: "URL targets a private/internal address" };
+      }
+    } catch {
+      return { success: false, content: "", error: "Invalid URL" };
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "CyberHook-Bot/1.0",
+          Accept: "text/html,application/xhtml+xml,text/plain",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!response.ok) {
+        return { success: false, content: "", error: `Failed to fetch URL (${response.status})` };
+      }
+
+      const html = await response.text();
+
+      const text = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+        .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
+        .replace(/<[^>]+>/g, "\n")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/[ \t]+/g, " ")
+        .split("\n")
+        .map((line: string) => line.trim())
+        .filter((line: string) => line.length > 0)
+        .join("\n");
+
+      const truncated = text.slice(0, 15000);
+
+      return { success: true, content: truncated };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      return { success: false, content: "", error: msg };
+    }
   },
 });

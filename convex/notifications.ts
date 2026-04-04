@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -10,6 +11,9 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    if (user._id !== args.userId) throw new Error("Forbidden: access denied");
+
     let notifications = await ctx.db
       .query("notifications")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -33,6 +37,9 @@ export const getUnreadCount = query({
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    if (user._id !== args.userId) throw new Error("Forbidden: access denied");
+
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -48,6 +55,9 @@ export const getRecent = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    if (user._id !== args.userId) throw new Error("Forbidden: access denied");
+
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -65,8 +75,11 @@ export const markAsRead = mutation({
     id: v.id("notifications"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const notification = await ctx.db.get(args.id);
     if (!notification) throw new Error("Notification not found");
+    assertCompanyAccess(user.companyId, notification.companyId);
+    if (user._id !== notification.userId) throw new Error("Forbidden: access denied");
 
     await ctx.db.patch(args.id, { isRead: true });
     return args.id;
@@ -78,6 +91,9 @@ export const markAllAsRead = mutation({
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    if (user._id !== args.userId) throw new Error("Forbidden: access denied");
+
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -98,8 +114,11 @@ export const remove = mutation({
     id: v.id("notifications"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const notification = await ctx.db.get(args.id);
     if (!notification) throw new Error("Notification not found");
+    assertCompanyAccess(user.companyId, notification.companyId);
+    if (user._id !== notification.userId) throw new Error("Forbidden: access denied");
 
     await ctx.db.delete(args.id);
     return args.id;
@@ -111,6 +130,9 @@ export const clearAll = mutation({
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    if (user._id !== args.userId) throw new Error("Forbidden: access denied");
+
     const notifications = await ctx.db
       .query("notifications")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))

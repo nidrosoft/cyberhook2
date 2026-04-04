@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useUser, useSession } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useMutation } from "convex/react";
@@ -153,27 +153,69 @@ interface FormData {
     selectedPlan: string;
 }
 
+const STORAGE_KEY_STEP = "cyberhook_onboarding_step";
+const STORAGE_KEY_FORM = "cyberhook_onboarding_form";
+
+const defaultFormData: FormData = {
+    companyName: "",
+    phone: "",
+    website: "",
+    businessModel: "",
+    annualRevenue: "",
+    geoCoverage: [],
+    targetCustomers: [],
+    totalEmployees: "",
+    totalSales: "",
+    teamEmails: "",
+    selectedPlan: "",
+};
+
+function loadSavedStep(): number {
+    if (typeof window === "undefined") return 1;
+    try {
+        const saved = sessionStorage.getItem(STORAGE_KEY_STEP);
+        if (saved) {
+            const parsed = parseInt(saved, 10);
+            if (parsed >= 1 && parsed <= 4) return parsed;
+        }
+    } catch {}
+    return 1;
+}
+
+function loadSavedForm(): FormData {
+    if (typeof window === "undefined") return defaultFormData;
+    try {
+        const saved = sessionStorage.getItem(STORAGE_KEY_FORM);
+        if (saved) return { ...defaultFormData, ...JSON.parse(saved) };
+    } catch {}
+    return defaultFormData;
+}
+
 export default function OnboardingPage() {
     const { user } = useUser();
     const { session } = useSession();
     const router = useRouter();
-    const [step, setStep] = useState(1);
+    const [step, setStepRaw] = useState(loadSavedStep);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
-    const [formData, setFormData] = useState<FormData>({
-        companyName: "",
-        phone: "",
-        website: "",
-        businessModel: "",
-        annualRevenue: "",
-        geoCoverage: [],
-        targetCustomers: [],
-        totalEmployees: "",
-        totalSales: "",
-        teamEmails: "",
-        selectedPlan: "",
-    });
+    const [formData, setFormData] = useState<FormData>(loadSavedForm);
+
+    const setStep = useCallback((s: number) => {
+        setStepRaw(s);
+        try { sessionStorage.setItem(STORAGE_KEY_STEP, String(s)); } catch {}
+    }, []);
+
+    useEffect(() => {
+        try { sessionStorage.setItem(STORAGE_KEY_FORM, JSON.stringify(formData)); } catch {}
+    }, [formData]);
+
+    const clearSavedProgress = useCallback(() => {
+        try {
+            sessionStorage.removeItem(STORAGE_KEY_STEP);
+            sessionStorage.removeItem(STORAGE_KEY_FORM);
+        } catch {}
+    }, []);
 
     const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
         setFormData((prev) => ({ ...prev, [key]: value }));
@@ -495,6 +537,8 @@ export default function OnboardingPage() {
                                                 result.companyId,
                                             );
 
+                                            clearSavedProgress();
+
                                             // Force the Clerk session to refresh its JWT so the
                                             // middleware sees the updated publicMetadata immediately.
                                             if (session) {
@@ -507,7 +551,7 @@ export default function OnboardingPage() {
                                             setIsSubmitting(false);
                                         }
                                     } catch (err) {
-                                        console.error("Error completing onboarding:", err);
+                                        if (process.env.NODE_ENV === "development") console.error("Error completing onboarding:", err);
                                         setError(err instanceof Error ? err.message : "An error occurred");
                                         setIsSubmitting(false);
                                     }

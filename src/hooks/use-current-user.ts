@@ -17,6 +17,11 @@ export interface CurrentUser {
     status: "pending" | "approved" | "rejected" | "deactivated";
     timezone?: string;
     emailNotifications?: boolean;
+    inAppNotifications?: boolean;
+    slackNotifications?: boolean;
+    teamsNotifications?: boolean;
+    notificationFrequency?: string;
+    criticalAlertsOnly?: boolean;
     guidedTourCompleted?: boolean;
     createdAt: number;
     updatedAt: number;

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // USE CASES
@@ -13,6 +14,8 @@ export const listUseCases = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     let useCases = await ctx.db
       .query("useCases")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -39,7 +42,11 @@ export const listUseCases = query({
 export const getUseCaseById = query({
   args: { id: v.id("useCases") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
+    return item;
   },
 });
 
@@ -66,6 +73,8 @@ export const createUseCase = mutation({
     referenceProjectsSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const useCaseId = await ctx.db.insert("useCases", {
       ...args,
       isApprovedReference: args.isApprovedReference ?? false,
@@ -98,9 +107,11 @@ export const updateUseCase = mutation({
     referenceProjectsSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const useCase = await ctx.db.get(id);
-    if (!useCase) throw new Error("Use case not found");
+    if (!useCase) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, useCase.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -114,6 +125,10 @@ export const updateUseCase = mutation({
 export const removeUseCase = mutation({
   args: { id: v.id("useCases") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
     await ctx.db.delete(args.id);
     return args.id;
   },
@@ -131,6 +146,8 @@ export const listCertifications = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     let certs = await ctx.db
       .query("certifications")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -157,7 +174,11 @@ export const listCertifications = query({
 export const getCertificationById = query({
   args: { id: v.id("certifications") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
+    return item;
   },
 });
 
@@ -167,6 +188,8 @@ export const getExpiringCertifications = query({
     daysAhead: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const daysAhead = args.daysAhead || 30;
     const futureDate = Date.now() + daysAhead * 24 * 60 * 60 * 1000;
 
@@ -209,6 +232,8 @@ export const createCertification = mutation({
     tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const certId = await ctx.db.insert("certifications", {
       ...args,
       createdAt: Date.now(),
@@ -245,9 +270,11 @@ export const updateCertification = mutation({
     tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const cert = await ctx.db.get(id);
-    if (!cert) throw new Error("Certification not found");
+    if (!cert) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, cert.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -261,6 +288,10 @@ export const updateCertification = mutation({
 export const removeCertification = mutation({
   args: { id: v.id("certifications") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
     await ctx.db.delete(args.id);
     return args.id;
   },
@@ -278,6 +309,8 @@ export const listRfpEntries = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     let entries = await ctx.db
       .query("rfpEntries")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -305,7 +338,11 @@ export const listRfpEntries = query({
 export const getRfpEntryById = query({
   args: { id: v.id("rfpEntries") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
+    return item;
   },
 });
 
@@ -315,6 +352,8 @@ export const getUpcomingDeadlines = query({
     daysAhead: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const daysAhead = args.daysAhead || 14;
     const futureDate = Date.now() + daysAhead * 24 * 60 * 60 * 1000;
 
@@ -348,11 +387,15 @@ export const createRfpEntry = mutation({
       v.literal("no_bid")
     ),
     assignedToUserId: v.optional(v.id("users")),
+    assigneeName: v.optional(v.string()),
     estimatedValue: v.optional(v.number()),
+    rfpLink: v.optional(v.string()),
     notes: v.optional(v.string()),
     linkedUseCaseId: v.optional(v.id("useCases")),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const entryId = await ctx.db.insert("rfpEntries", {
       ...args,
       createdAt: Date.now(),
@@ -377,14 +420,18 @@ export const updateRfpEntry = mutation({
       v.literal("no_bid")
     )),
     assignedToUserId: v.optional(v.id("users")),
+    assigneeName: v.optional(v.string()),
     estimatedValue: v.optional(v.number()),
+    rfpLink: v.optional(v.string()),
     notes: v.optional(v.string()),
     linkedUseCaseId: v.optional(v.id("useCases")),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const entry = await ctx.db.get(id);
-    if (!entry) throw new Error("RFP entry not found");
+    if (!entry) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, entry.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -398,6 +445,10 @@ export const updateRfpEntry = mutation({
 export const removeRfpEntry = mutation({
   args: { id: v.id("rfpEntries") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
     await ctx.db.delete(args.id);
     return args.id;
   },
@@ -414,6 +465,8 @@ export const listRfpAnswers = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     let answers = await ctx.db
       .query("rfpAnswers")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -442,6 +495,8 @@ export const createRfpAnswer = mutation({
     tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const answerId = await ctx.db.insert("rfpAnswers", {
       ...args,
       createdAt: Date.now(),
@@ -459,9 +514,11 @@ export const updateRfpAnswer = mutation({
     tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const answer = await ctx.db.get(id);
-    if (!answer) throw new Error("RFP answer not found");
+    if (!answer) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, answer.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -475,6 +532,10 @@ export const updateRfpAnswer = mutation({
 export const removeRfpAnswer = mutation({
   args: { id: v.id("rfpAnswers") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
     await ctx.db.delete(args.id);
     return args.id;
   },
@@ -491,6 +552,8 @@ export const listRfpDownloads = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     let downloads = await ctx.db
       .query("rfpDownloads")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -531,6 +594,8 @@ export const createRfpDownload = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
     const downloadId = await ctx.db.insert("rfpDownloads", {
       ...args,
       createdAt: Date.now(),
@@ -543,6 +608,10 @@ export const createRfpDownload = mutation({
 export const removeRfpDownload = mutation({
   args: { id: v.id("rfpDownloads") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, item.companyId);
     await ctx.db.delete(args.id);
     return args.id;
   },

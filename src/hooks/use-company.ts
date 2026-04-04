@@ -64,10 +64,7 @@ export interface Company {
 export function useCompany() {
     const { companyId, isLoading: isUserLoading } = useCurrentUser();
 
-    const company = useQuery(
-        api.companies.getById,
-        companyId ? { id: companyId } : "skip"
-    );
+    const company = useQuery(api.companies.getCurrentCompany);
 
     const isLoading = isUserLoading || company === undefined;
 

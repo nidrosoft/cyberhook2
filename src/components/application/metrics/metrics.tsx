@@ -591,6 +591,7 @@ export const MetricsChart04 = ({
     chartData = lineData3,
     footer,
     className,
+    actions = true,
 }: {
     title: string;
     subtitle: string;
@@ -604,6 +605,7 @@ export const MetricsChart04 = ({
     chartData?: { value: number }[];
     footer?: ReactNode;
     className?: string;
+    actions?: boolean;
 }) => {
     const id = useId();
 
@@ -656,9 +658,11 @@ export const MetricsChart04 = ({
                     </AreaChart>
                 </ResponsiveContainer>
 
-                <div className="absolute top-4 right-4 md:top-5 md:right-5">
-                    <ActionsDropdown />
-                </div>
+                {actions && (
+                    <div className="absolute top-4 right-4 md:top-5 md:right-5">
+                        <ActionsDropdown />
+                    </div>
+                )}
             </div>
             {footer && <div className="flex items-center justify-end py-3 pr-4 pl-3 md:pr-5 md:pl-4">{footer}</div>}
         </div>

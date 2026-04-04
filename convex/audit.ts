@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess, requireRole } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,10 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    requireRole(user.role, "sales_admin");
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let logs = await ctx.db
       .query("auditLogs")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -56,6 +61,12 @@ export const getByUser = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    requireRole(user.role, "sales_admin");
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, targetUser.companyId);
+
     const logs = await ctx.db
       .query("auditLogs")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -72,6 +83,10 @@ export const getRecent = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    requireRole(user.role, "sales_admin");
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const logs = await ctx.db
       .query("auditLogs")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -89,6 +104,10 @@ export const getStats = query({
     dateTo: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    requireRole(user.role, "sales_admin");
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let logs = await ctx.db
       .query("auditLogs")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -149,6 +168,10 @@ export const create = mutation({
     userAgent: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+    if (user._id !== args.userId) throw new Error("Forbidden: access denied");
+
     const logId = await ctx.db.insert("auditLogs", {
       ...args,
       createdAt: Date.now(),

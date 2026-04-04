@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
     ArrowLeft,
     Globe01,
@@ -19,6 +21,7 @@ import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { ensureProtocol, sanitizeUrl } from "@/utils/sanitize-url";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
@@ -60,6 +63,7 @@ export default function KnowledgeBaseDetailPage() {
     const [editAnswer, setEditAnswer] = useState("");
     const [editRichContent, setEditRichContent] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     function startEditing() {
         if (!entry) return;
@@ -68,7 +72,7 @@ export default function KnowledgeBaseDetailPage() {
         setEditUrl(entry.url || "");
         setEditQuestion(entry.question || "");
         setEditAnswer(entry.answer || "");
-        setEditRichContent(entry.richTextContent || "");
+        setEditRichContent(entry.richTextContent || entry.crawledContent || "");
         setIsEditing(true);
     }
 
@@ -88,23 +92,28 @@ export default function KnowledgeBaseDetailPage() {
                 ...(entry.type === "rich_text" && {
                     richTextContent: editRichContent,
                 }),
+                ...(entry.type === "file_upload" && {
+                    richTextContent: editRichContent,
+                }),
             });
+            toast.success("Entry updated");
             setIsEditing(false);
         } catch (error) {
-            console.error("Failed to save:", error);
-            alert(error instanceof Error ? error.message : "Failed to save");
+            devError("Failed to save:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to save");
         } finally {
             setIsSaving(false);
         }
     }
 
     async function handleDelete() {
-        if (!entry || !confirm("Are you sure you want to delete this entry?")) return;
+        if (!entry) return;
         try {
             await removeEntry({ id: entry._id });
             router.push("/knowledge-base");
         } catch (error) {
-            console.error("Failed to delete:", error);
+            devError("Failed to delete:", error);
+            toast.error("Failed to delete entry");
         }
     }
 
@@ -128,7 +137,19 @@ export default function KnowledgeBaseDetailPage() {
     }
 
     return (
-        <div className="flex h-full w-full flex-col bg-primary">
+        <div className="flex h-full w-full flex-col bg-primary relative">
+            {showDeleteConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-primary border border-secondary rounded-xl p-6 shadow-xl max-w-sm w-full mx-4">
+                        <h3 className="text-md font-semibold text-primary mb-2">Delete Entry</h3>
+                        <p className="text-sm text-secondary mb-6">Are you sure you want to delete this knowledge base entry?</p>
+                        <div className="flex items-center justify-end gap-3">
+                            <Button color="secondary" size="sm" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+                            <Button color="primary-destructive" size="sm" onClick={() => { handleDelete(); setShowDeleteConfirm(false); }}>Delete</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="flex-1 overflow-y-auto w-full">
                 <div className="mx-auto w-full max-w-[900px] px-4 sm:px-8 py-8 flex flex-col gap-8">
 
@@ -181,30 +202,12 @@ export default function KnowledgeBaseDetailPage() {
                                 ) : (
                                     <>
                                         <Button color="secondary" size="sm" iconLeading={Edit01} onClick={startEditing}>Edit</Button>
-                                        <Button color="secondary" size="sm" iconLeading={Trash01} onClick={handleDelete}>Delete</Button>
+                                        <Button color="secondary" size="sm" iconLeading={Trash01} onClick={() => setShowDeleteConfirm(true)}>Delete</Button>
                                     </>
                                 )}
                             </div>
                         </div>
                     </div>
-
-                    {/* Scope Editor (when editing) */}
-                    {isEditing && (
-                        <div className="rounded-xl border border-secondary bg-primary p-6">
-                            <label className="block text-sm font-medium text-secondary mb-1.5">Scope</label>
-                            <NativeSelect
-                                aria-label="Scope"
-                                value={editScope}
-                                onChange={(e) => setEditScope(e.target.value as "global" | "personal")}
-                                options={[
-                                    { label: "Global (all team members)", value: "global" },
-                                    { label: "Personal (only me)", value: "personal" },
-                                ]}
-                                className="max-w-xs"
-                                selectClassName="text-sm"
-                            />
-                        </div>
-                    )}
 
                     {/* Type-specific content */}
                     <div className="rounded-xl border border-secondary bg-primary p-6 flex flex-col gap-6">
@@ -220,14 +223,14 @@ export default function KnowledgeBaseDetailPage() {
                                             className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500"
                                         />
                                     ) : (
-                                        <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600 text-sm underline">
+                                        <a href={ensureProtocol(entry.url)} target="_blank" rel="noopener noreferrer" className="text-brand-500 hover:text-brand-600 text-sm underline">
                                             {entry.url}
                                         </a>
                                     )}
                                 </div>
                                 {entry.crawledContent && (
                                     <div>
-                                        <h3 className="text-sm font-medium text-secondary mb-2">Crawled Content</h3>
+                                        <h3 className="text-sm font-medium text-secondary mb-2">Extracted Content</h3>
                                         <div className="rounded-lg border border-secondary bg-secondary_subtle p-4 text-sm text-secondary whitespace-pre-wrap max-h-[400px] overflow-y-auto">
                                             {entry.crawledContent}
                                         </div>
@@ -308,13 +311,43 @@ export default function KnowledgeBaseDetailPage() {
                                             color="secondary"
                                             size="sm"
                                             className="ml-auto"
-                                            onClick={() => window.open(entry.fileUrl!, "_blank")}
+                                            onClick={() => window.open(sanitizeUrl(entry.fileUrl), "_blank")}
                                         >
                                             Download
                                         </Button>
                                     )}
                                 </div>
+                                {entry.richTextContent && (
+                                    <div>
+                                        <h3 className="text-sm font-medium text-secondary mb-2">File Content</h3>
+                                        <div className="rounded-lg border border-secondary bg-secondary_subtle p-4 text-sm text-secondary whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+                                            {entry.richTextContent}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
+                        )}
+                    </div>
+
+                    {/* Scope — always last per client requirement */}
+                    <div className="rounded-xl border border-secondary bg-primary p-6">
+                        <h3 className="text-sm font-medium text-secondary mb-2">Scope</h3>
+                        {isEditing ? (
+                            <NativeSelect
+                                aria-label="Scope"
+                                value={editScope}
+                                onChange={(e) => setEditScope(e.target.value as "global" | "personal")}
+                                options={[
+                                    { label: "Global (all team members)", value: "global" },
+                                    { label: "Personal (only me)", value: "personal" },
+                                ]}
+                                className="max-w-xs"
+                                selectClassName="text-sm"
+                            />
+                        ) : (
+                            <Badge color={entry.scope === "global" ? "brand" : "gray"} size="md">
+                                {entry.scope === "global" ? "Global (all team members)" : "Personal (only me)"}
+                            </Badge>
                         )}
                     </div>
                 </div>

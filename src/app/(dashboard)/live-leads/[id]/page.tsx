@@ -29,6 +29,7 @@ import {
 import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { Tabs } from "@/components/application/tabs/tabs";
+import { ensureProtocol } from "@/utils/sanitize-url";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
@@ -211,7 +212,7 @@ function OverviewTab({ lead }: { lead: LeadData }) {
                             <span className="text-sm text-tertiary">Website</span>
                             {websiteUrl ? (
                                 <a
-                                    href={websiteUrl.startsWith("http") ? websiteUrl : `https://${websiteUrl}`}
+                                    href={ensureProtocol(websiteUrl)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-sm font-medium text-brand-secondary hover:underline inline-flex items-center gap-1"
@@ -230,7 +231,7 @@ function OverviewTab({ lead }: { lead: LeadData }) {
                             <span className="text-sm text-tertiary">LinkedIn</span>
                             {linkedinUrl ? (
                                 <a
-                                    href={linkedinUrl.startsWith("http") ? linkedinUrl : `https://${linkedinUrl}`}
+                                    href={ensureProtocol(linkedinUrl)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-sm font-medium text-brand-secondary hover:underline inline-flex items-center gap-1"
@@ -349,7 +350,7 @@ function KeyContactsTab({ contacts }: { contacts: ContactData[] }) {
                             </div>
                             {contact.linkedinUrl && (
                                 <a
-                                    href={contact.linkedinUrl.startsWith("http") ? contact.linkedinUrl : `https://${contact.linkedinUrl}`}
+                                    href={ensureProtocol(contact.linkedinUrl)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-xs text-brand-secondary hover:underline inline-flex items-center gap-1"

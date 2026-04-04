@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
-import { requireAuth, assertCompanyAccess } from "./lib/auth";
+import { requireAuth, assertCompanyAccess, requireRole } from "./lib/auth";
 
 // ============================================
 // QUERIES
@@ -20,17 +20,25 @@ export const getByClerkId = query({
 export const getById = query({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const currentUser = await requireAuth(ctx);
+    const targetUser = await ctx.db.get(args.id);
+    if (!targetUser) return null;
+    assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+    return targetUser;
   },
 });
 
 export const getByEmail = query({
   args: { email: v.string() },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const currentUser = await requireAuth(ctx);
+    const targetUser = await ctx.db
       .query("users")
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .first();
+    if (!targetUser) return null;
+    assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+    return targetUser;
   },
 });
 
@@ -84,10 +92,17 @@ export const getCurrentUserWithCompany = query({
 export const getPendingUsers = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db
+    const currentUser = await requireAuth(ctx);
+    requireRole(currentUser.role, "sales_admin");
+
+    const pendingUsers = await ctx.db
       .query("users")
       .withIndex("by_status", (q) => q.eq("status", "pending"))
       .collect();
+
+    return pendingUsers.filter(
+      (u) => u.companyId === currentUser.companyId
+    );
   },
 });
 
@@ -171,8 +186,23 @@ export const update = mutation({
     ),
     timezone: v.optional(v.string()),
     emailNotifications: v.optional(v.boolean()),
+    inAppNotifications: v.optional(v.boolean()),
+    slackNotifications: v.optional(v.boolean()),
+    teamsNotifications: v.optional(v.boolean()),
+    notificationFrequency: v.optional(v.string()),
+    criticalAlertsOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+
+    const isSelf = currentUser._id === args.id;
+    if (!isSelf) {
+      requireRole(currentUser.role, "sales_admin");
+      const targetUser = await ctx.db.get(args.id);
+      if (!targetUser) throw new Error("User not found");
+      assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+    }
+
     const { id, ...updates } = args;
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -188,6 +218,10 @@ export const update = mutation({
 export const updateLastAccessed = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    if (currentUser._id !== args.id) {
+      throw new Error("Forbidden: can only update your own last accessed time");
+    }
     await ctx.db.patch(args.id, {
       lastAccessedAt: Date.now(),
     });
@@ -197,6 +231,12 @@ export const updateLastAccessed = mutation({
 export const approveUser = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    requireRole(currentUser.role, "sales_admin");
+    const targetUser = await ctx.db.get(args.id);
+    if (!targetUser) throw new Error("User not found");
+    assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+
     await ctx.db.patch(args.id, {
       status: "approved",
       updatedAt: Date.now(),
@@ -207,6 +247,12 @@ export const approveUser = mutation({
 export const rejectUser = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    requireRole(currentUser.role, "sales_admin");
+    const targetUser = await ctx.db.get(args.id);
+    if (!targetUser) throw new Error("User not found");
+    assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+
     await ctx.db.patch(args.id, {
       status: "rejected",
       updatedAt: Date.now(),
@@ -217,6 +263,12 @@ export const rejectUser = mutation({
 export const deactivateUser = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    requireRole(currentUser.role, "sales_admin");
+    const targetUser = await ctx.db.get(args.id);
+    if (!targetUser) throw new Error("User not found");
+    assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+
     await ctx.db.patch(args.id, {
       status: "deactivated",
       updatedAt: Date.now(),
@@ -227,6 +279,10 @@ export const deactivateUser = mutation({
 export const completeGuidedTour = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    if (currentUser._id !== args.id) {
+      throw new Error("Forbidden: can only complete your own guided tour");
+    }
     await ctx.db.patch(args.id, {
       guidedTourCompleted: true,
       guidedTourCompletedAt: Date.now(),

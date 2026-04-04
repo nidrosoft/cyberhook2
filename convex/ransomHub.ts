@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { requireAuth } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -14,12 +15,13 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireAuth(ctx);
+
     let incidents = await ctx.db
       .query("ransomIncidents")
       .order("desc")
       .collect();
 
-    // Apply filters
     if (args.incidentType) {
       incidents = incidents.filter((i) => i.incidentType === args.incidentType);
     }
@@ -44,10 +46,8 @@ export const list = query({
       incidents = incidents.filter((i) => i.attackDate <= args.dateTo!);
     }
 
-    // Sort by attack date (most recent first)
     incidents.sort((a, b) => b.attackDate - a.attackDate);
 
-    // Apply limit
     if (args.limit) {
       incidents = incidents.slice(0, args.limit);
     }
@@ -59,6 +59,7 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("ransomIncidents") },
   handler: async (ctx, args) => {
+    await requireAuth(ctx);
     return await ctx.db.get(args.id);
   },
 });
@@ -69,6 +70,7 @@ export const getRecent = query({
     incidentType: v.optional(v.union(v.literal("ransomware"), v.literal("breach_notification"))),
   },
   handler: async (ctx, args) => {
+    await requireAuth(ctx);
     let incidents = await ctx.db
       .query("ransomIncidents")
       .withIndex("by_attackDate")
@@ -89,6 +91,7 @@ export const getStats = query({
     dateTo: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireAuth(ctx);
     let incidents = await ctx.db
       .query("ransomIncidents")
       .collect();
@@ -153,6 +156,7 @@ export const search = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireAuth(ctx);
     const searchTerm = args.query.toLowerCase();
     
     let incidents = await ctx.db

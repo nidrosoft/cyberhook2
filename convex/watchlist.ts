@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -11,6 +12,9 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let items = await ctx.db
       .query("watchlistItems")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -40,7 +44,11 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("watchlistItems") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const user = await requireAuth(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) return null;
+    assertCompanyAccess(user.companyId, item.companyId);
+    return item;
   },
 });
 
@@ -50,11 +58,14 @@ export const getByDomain = query({
     domain: v.string(),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const items = await ctx.db
       .query("watchlistItems")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
       .collect();
-    
+
     return items.find((item) => item.domain === args.domain) || null;
   },
 });
@@ -65,6 +76,9 @@ export const getStats = query({
     userId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let items = await ctx.db
       .query("watchlistItems")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -90,6 +104,9 @@ export const getAlerts = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let items = await ctx.db
       .query("watchlistItems")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -125,6 +142,9 @@ export const add = mutation({
     monitoringWindow: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     // Check if already in watchlist
     const existing = await ctx.db
       .query("watchlistItems")
@@ -160,9 +180,11 @@ export const update = mutation({
     monitoringWindow: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const item = await ctx.db.get(id);
     if (!item) throw new Error("Watchlist item not found");
+    assertCompanyAccess(user.companyId, item.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -179,8 +201,10 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("watchlistItems") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Watchlist item not found");
+    assertCompanyAccess(user.companyId, item.companyId);
 
     await ctx.db.delete(args.id);
     return args.id;
@@ -190,8 +214,10 @@ export const remove = mutation({
 export const clearAlert = mutation({
   args: { id: v.id("watchlistItems") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Watchlist item not found");
+    assertCompanyAccess(user.companyId, item.companyId);
 
     await ctx.db.patch(args.id, { 
       hasNewExposures: false,
@@ -204,8 +230,10 @@ export const clearAlert = mutation({
 export const pause = mutation({
   args: { id: v.id("watchlistItems") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Watchlist item not found");
+    assertCompanyAccess(user.companyId, item.companyId);
 
     await ctx.db.patch(args.id, { 
       isPaused: true,
@@ -218,8 +246,10 @@ export const pause = mutation({
 export const resume = mutation({
   args: { id: v.id("watchlistItems") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Watchlist item not found");
+    assertCompanyAccess(user.companyId, item.companyId);
 
     await ctx.db.patch(args.id, { 
       isPaused: false,

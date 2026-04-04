@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
     Plus,
     SearchLg,
@@ -30,6 +32,7 @@ import { NativeSelect } from "@/components/base/select/select-native";
 import { Tabs } from "@/components/application/tabs/tabs";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { sanitizeUrl } from "@/utils/sanitize-url";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -37,6 +40,10 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 
 function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatDateTime(timestamp: number): string {
+    return new Date(timestamp).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 function getDeadlineIndicator(deadline: number) {
@@ -98,6 +105,8 @@ export default function RfpHubPage() {
     const createRfpAnswer = useMutation(api.rfpHub.createRfpAnswer);
     const removeRfpAnswer = useMutation(api.rfpHub.removeRfpAnswer);
     const removeRfpDownload = useMutation(api.rfpHub.removeRfpDownload);
+    const createRfpDownload = useMutation(api.rfpHub.createRfpDownload);
+    const downloadFileRef = useRef<HTMLInputElement>(null);
 
     // ─── Local state ─────────────────────────────────────
     const [rfpSort, setRfpSort] = useState<SortDescriptor>({ column: "submissionDeadline", direction: "ascending" });
@@ -135,6 +144,8 @@ export default function RfpHubPage() {
     const [rfpDeadline, setRfpDeadline] = useState("");
     const [rfpStatus, setRfpStatus] = useState<typeof rfpStatuses[number]>("draft");
     const [rfpValue, setRfpValue] = useState("");
+    const [rfpAssignee, setRfpAssignee] = useState("");
+    const [rfpLink, setRfpLink] = useState("");
     const [isRfpSubmitting, setIsRfpSubmitting] = useState(false);
 
     // Slideout form state — Answer Bank
@@ -207,9 +218,10 @@ export default function RfpHubPage() {
                 problemStatement: ucProblem || undefined, scopeOfWork: ucScope || undefined,
                 howWeHelp: ucHelp || undefined, isApprovedReference: ucApproved,
             });
+            toast.success("Use case created");
             setUcTitle(""); setUcIndustry(""); setUcProblem(""); setUcScope(""); setUcHelp(""); setUcApproved(false);
             close();
-        } catch (e) { console.error(e); } finally { setIsUcSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error("Failed to create use case"); } finally { setIsUcSubmitting(false); }
     }
 
     async function handleCreateCert(close: () => void) {
@@ -221,9 +233,10 @@ export default function RfpHubPage() {
                 name: certName.trim(), category: certCategory, status: certStatus,
                 issuingAuthority: certAuthority || undefined, description: certDesc || undefined,
             });
+            toast.success("Certification added");
             setCertName(""); setCertCategory("certification"); setCertStatus("active"); setCertAuthority(""); setCertDesc("");
             close();
-        } catch (e) { console.error(e); } finally { setIsCertSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error("Failed to add certification"); } finally { setIsCertSubmitting(false); }
     }
 
     async function handleCreateRfpEntry(close: () => void) {
@@ -235,10 +248,13 @@ export default function RfpHubPage() {
                 title: rfpTitle.trim(), clientProspect: rfpClient.trim(),
                 submissionDeadline: new Date(rfpDeadline).getTime(), status: rfpStatus,
                 estimatedValue: rfpValue ? parseFloat(rfpValue) : undefined,
+                assigneeName: rfpAssignee.trim() || undefined,
+                rfpLink: rfpLink.trim() || undefined,
             });
-            setRfpTitle(""); setRfpClient(""); setRfpDeadline(""); setRfpStatus("draft"); setRfpValue("");
+            toast.success("RFP entry created");
+            setRfpTitle(""); setRfpClient(""); setRfpDeadline(""); setRfpStatus("draft"); setRfpValue(""); setRfpAssignee(""); setRfpLink("");
             close();
-        } catch (e) { console.error(e); } finally { setIsRfpSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error("Failed to create RFP entry"); } finally { setIsRfpSubmitting(false); }
     }
 
     async function handleCreateAnswer(close: () => void) {
@@ -249,34 +265,60 @@ export default function RfpHubPage() {
                 companyId, createdByUserId: user._id,
                 questionCategory: ansCategory.trim(), answer: ansAnswer.trim(),
             });
+            toast.success("Answer added to bank");
             setAnsCategory(""); setAnsAnswer("");
             close();
-        } catch (e) { console.error(e); } finally { setIsAnsSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error("Failed to add answer"); } finally { setIsAnsSubmitting(false); }
     }
 
+    const [pendingDelete, setPendingDelete] = useState<{ label: string; action: () => void } | null>(null);
+
+    const confirmAndDelete = useCallback((label: string, action: () => void) => {
+        setPendingDelete({ label, action });
+    }, []);
+
     async function handleDeleteUseCase(id: Id<"useCases">) {
-        if (!confirm("Delete this use case?")) return;
-        try { await removeUseCase({ id }); } catch (e) { console.error(e); }
+        try { await removeUseCase({ id }); toast.success("Use case deleted"); } catch (e) { devError("rfp:", e); toast.error("Failed to delete"); }
     }
 
     async function handleDeleteCert(id: Id<"certifications">) {
-        if (!confirm("Delete this certification?")) return;
-        try { await removeCertification({ id }); } catch (e) { console.error(e); }
+        try { await removeCertification({ id }); toast.success("Certification deleted"); } catch (e) { devError("rfp:", e); toast.error("Failed to delete"); }
     }
 
     async function handleDeleteRfp(id: Id<"rfpEntries">) {
-        if (!confirm("Delete this RFP entry?")) return;
-        try { await removeRfpEntry({ id }); } catch (e) { console.error(e); }
+        try { await removeRfpEntry({ id }); toast.success("RFP entry deleted"); } catch (e) { devError("rfp:", e); toast.error("Failed to delete"); }
     }
 
     async function handleDeleteAnswer(id: Id<"rfpAnswers">) {
-        if (!confirm("Delete this answer?")) return;
-        try { await removeRfpAnswer({ id }); } catch (e) { console.error(e); }
+        try { await removeRfpAnswer({ id }); toast.success("Answer deleted"); } catch (e) { devError("rfp:", e); toast.error("Failed to delete"); }
     }
 
     async function handleDeleteDownload(id: Id<"rfpDownloads">) {
-        if (!confirm("Delete this download?")) return;
-        try { await removeRfpDownload({ id }); } catch (e) { console.error(e); }
+        try { await removeRfpDownload({ id }); toast.success("Download removed"); } catch (e) { devError("rfp:", e); toast.error("Failed to delete"); }
+    }
+
+    async function handleUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (!file || !companyId || !user) return;
+        const maxSize = 10 * 1024 * 1024;
+        if (file.size > maxSize) { toast.error("File too large. Max 10 MB."); return; }
+        try {
+            await createRfpDownload({
+                companyId,
+                createdByUserId: user._id,
+                name: file.name.replace(/\.[^.]+$/, ""),
+                fileUrl: `#local-${file.name}`,
+                fileName: file.name,
+                fileSize: file.size,
+                fileMimeType: file.type || "application/octet-stream",
+                category: "other",
+            });
+            toast.success(`"${file.name}" uploaded`);
+        } catch (err) {
+            devError("rfp upload:", err);
+            toast.error("Upload failed");
+        }
+        if (downloadFileRef.current) downloadFileRef.current.value = "";
     }
 
     // ─── Loading ─────────────────────────────────────────
@@ -317,6 +359,18 @@ export default function RfpHubPage() {
 
     return (
         <div className="flex h-full w-full flex-col bg-primary relative">
+            {pendingDelete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-primary border border-secondary rounded-xl p-6 shadow-xl max-w-sm w-full mx-4">
+                        <h3 className="text-md font-semibold text-primary mb-2">Confirm Delete</h3>
+                        <p className="text-sm text-secondary mb-6">Are you sure you want to delete this {pendingDelete.label}?</p>
+                        <div className="flex items-center justify-end gap-3">
+                            <Button color="secondary" size="sm" onClick={() => setPendingDelete(null)}>Cancel</Button>
+                            <Button color="primary-destructive" size="sm" onClick={() => { pendingDelete.action(); setPendingDelete(null); }}>Delete</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="flex-1 overflow-y-auto w-full">
                 <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-8 py-8 flex flex-col gap-8">
 
@@ -454,7 +508,7 @@ export default function RfpHubPage() {
                                                             }
                                                         </Table.Cell>
                                                         <Table.Cell>
-                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => handleDeleteUseCase(item._id)} />
+                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("use case", () => handleDeleteUseCase(item._id))} />
                                                         </Table.Cell>
                                                     </Table.Row>
                                                 )}
@@ -561,7 +615,7 @@ export default function RfpHubPage() {
                                                             </span>
                                                         </Table.Cell>
                                                         <Table.Cell>
-                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => handleDeleteCert(item._id)} />
+                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("certification", () => handleDeleteCert(item._id))} />
                                                         </Table.Cell>
                                                     </Table.Row>
                                                 )}
@@ -578,10 +632,10 @@ export default function RfpHubPage() {
                             <div className="flex flex-col gap-6">
                                 {/* Summary Cards */}
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                                    <MetricsChart04 title={rfpStats.active.toString()} subtitle="Active RFPs" change={rfpStats.active.toString()} changeTrend="positive" changeDescription="in pipeline" />
-                                    <MetricsChart04 title={rfpStats.won.toString()} subtitle="Won" change={rfpStats.won.toString()} changeTrend="positive" changeDescription="total" />
-                                    <MetricsChart04 title={rfpStats.lost.toString()} subtitle="Lost" change={rfpStats.lost.toString()} changeTrend="negative" changeDescription="total" chartColor="text-fg-error-secondary" />
-                                    <MetricsChart04 title={rfpStats.winRate} subtitle="Win Rate" change="" changeTrend="positive" changeDescription="" />
+                                    <MetricsChart04 title={rfpStats.active.toString()} subtitle="Active RFPs" change={rfpStats.active.toString()} changeTrend="positive" changeDescription="in pipeline" actions={false} />
+                                    <MetricsChart04 title={rfpStats.won.toString()} subtitle="Won" change={rfpStats.won.toString()} changeTrend="positive" changeDescription="total" actions={false} />
+                                    <MetricsChart04 title={rfpStats.lost.toString()} subtitle="Lost" change={rfpStats.lost.toString()} changeTrend="negative" changeDescription="total" chartColor="text-fg-error-secondary" actions={false} />
+                                    <MetricsChart04 title={rfpStats.winRate} subtitle="Win Rate" change="" changeTrend="positive" changeDescription="" actions={false} />
                                 </div>
 
                                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -600,7 +654,15 @@ export default function RfpHubPage() {
                                                         <div className="flex flex-col gap-5">
                                                             {formInput("RFP Title", rfpTitle, setRfpTitle, "e.g. City of Houston IT Infrastructure")}
                                                             {formInput("Client / Prospect", rfpClient, setRfpClient, "Who issued the RFP?")}
-                                                            {formInput("Submission Deadline", rfpDeadline, setRfpDeadline, "", "date")}
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Submission Deadline</label>
+                                                                <input
+                                                                    type="datetime-local"
+                                                                    value={rfpDeadline}
+                                                                    onChange={(e) => setRfpDeadline(e.target.value)}
+                                                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                                                                />
+                                                            </div>
                                                             <div>
                                                                 <label className="block text-sm font-medium text-secondary mb-1.5">Status</label>
                                                                 <NativeSelect aria-label="Status" value={rfpStatus} onChange={(e) => setRfpStatus(e.target.value as any)}
@@ -609,6 +671,8 @@ export default function RfpHubPage() {
                                                                 />
                                                             </div>
                                                             {formInput("Estimated Value ($)", rfpValue, setRfpValue, "e.g. 125000", "number")}
+                                                            {formInput("Assignee", rfpAssignee, setRfpAssignee, "e.g. John Smith")}
+                                                            {formInput("RFP Link", rfpLink, setRfpLink, "https://...", "url")}
                                                         </div>
                                                     </SlideoutMenu.Content>
                                                     <SlideoutMenu.Footer>
@@ -645,6 +709,7 @@ export default function RfpHubPage() {
                                                     <Table.Head id="client" isRowHeader allowsSorting>Client / Opportunity</Table.Head>
                                                     <Table.Head id="status" allowsSorting>Status</Table.Head>
                                                     <Table.Head id="value" allowsSorting>Est. Value</Table.Head>
+                                                    <Table.Head id="assignee" allowsSorting>Assignee</Table.Head>
                                                     <Table.Head id="deadline" allowsSorting>Due Date</Table.Head>
                                                     <Table.Head id="actions" className="w-12"></Table.Head>
                                                 </Table.Row>
@@ -658,6 +723,11 @@ export default function RfpHubPage() {
                                                                 <div className="flex flex-col">
                                                                     <span className="font-medium text-primary">{item.title}</span>
                                                                     <span className="text-sm text-tertiary">{item.clientProspect}</span>
+                                                                    {item.rfpLink && (
+                                                                        <a href={sanitizeUrl(item.rfpLink)} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-secondary hover:underline truncate max-w-[200px]">
+                                                                            {item.rfpLink}
+                                                                        </a>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </Table.Cell>
@@ -675,13 +745,16 @@ export default function RfpHubPage() {
                                                             </span>
                                                         </Table.Cell>
                                                         <Table.Cell>
+                                                            <span className="text-secondary">{item.assigneeName || "—"}</span>
+                                                        </Table.Cell>
+                                                        <Table.Cell>
                                                             <div className="flex items-center gap-2">
                                                                 {getDeadlineIndicator(item.submissionDeadline)}
-                                                                <span className="text-secondary">{formatDate(item.submissionDeadline)}</span>
+                                                                <span className="text-secondary">{formatDateTime(item.submissionDeadline)}</span>
                                                             </div>
                                                         </Table.Cell>
                                                         <Table.Cell>
-                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => handleDeleteRfp(item._id)} />
+                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("RFP entry", () => handleDeleteRfp(item._id))} />
                                                         </Table.Cell>
                                                     </Table.Row>
                                                 )}
@@ -756,7 +829,7 @@ export default function RfpHubPage() {
                                                         >
                                                             {copiedId === item._id ? "Copied!" : "Copy"}
                                                         </Button>
-                                                        <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => handleDeleteAnswer(item._id)} />
+                                                        <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("answer", () => handleDeleteAnswer(item._id))} />
                                                     </div>
                                                 </div>
                                             </div>
@@ -774,7 +847,10 @@ export default function RfpHubPage() {
                                         <h2 className="text-lg font-semibold text-primary">Quick Downloads</h2>
                                         <p className="text-sm text-tertiary">Downloadable documents and assets for sales and compliance.</p>
                                     </div>
-                                    <Button size="md" color="primary" iconLeading={UploadCloud02}>Upload File</Button>
+                                    <div>
+                                        <Button size="md" color="primary" iconLeading={UploadCloud02} onClick={() => downloadFileRef.current?.click()}>Upload File</Button>
+                                        <input ref={downloadFileRef} type="file" className="hidden" accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.csv" onChange={handleUploadFile} />
+                                    </div>
                                 </div>
 
                                 {rfpDownloads === undefined ? (
@@ -802,9 +878,9 @@ export default function RfpHubPage() {
                                                             {item.fileSize ? ` · ${(item.fileSize / 1024 / 1024).toFixed(1)} MB` : ""}
                                                         </span>
                                                     </div>
-                                                    <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => handleDeleteDownload(item._id)} />
+                                                    <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("download", () => handleDeleteDownload(item._id))} />
                                                 </div>
-                                                <Button size="sm" color="secondary" iconLeading={DownloadCloud01} className="w-full" onClick={() => window.open(item.fileUrl, "_blank")}>
+                                                <Button size="sm" color="secondary" iconLeading={DownloadCloud01} className="w-full" onClick={() => window.open(sanitizeUrl(item.fileUrl), "_blank")}>
                                                     Download
                                                 </Button>
                                             </div>

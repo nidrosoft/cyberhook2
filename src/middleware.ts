@@ -5,11 +5,18 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/sso-callback(.*)",
   "/api/webhooks(.*)",
+  "/stripe/webhook(.*)",
 ]);
 
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
+  // CVE-2025-29927: Block middleware bypass attempts
+  const subrequest = req.headers.get("x-middleware-subrequest");
+  if (subrequest) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+
   const { userId, sessionClaims } = await auth();
 
   if (isPublicRoute(req)) {

@@ -2,12 +2,11 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
-    Activity,
-    AlertCircle,
     Bell01,
     CheckCircle,
-    Clock,
     Eye,
     Globe01,
     Hash01,
@@ -18,11 +17,7 @@ import {
     PlayCircle,
     Plus,
     SearchLg,
-    Settings01,
-    Shield01,
     Trash01,
-    XClose,
-    DotsVertical,
 } from "@untitledui/icons";
 import type { SortDescriptor } from "react-aria-components";
 
@@ -110,6 +105,7 @@ export default function WatchlistPage() {
     const removeFromWatchlist = useMutation(api.watchlist.remove);
     const pauseWatchlist = useMutation(api.watchlist.pause);
     const resumeWatchlist = useMutation(api.watchlist.resume);
+    const updateUser = useMutation(api.users.update);
 
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
         column: "domain",
@@ -117,21 +113,44 @@ export default function WatchlistPage() {
     });
     const [newDomain, setNewDomain] = useState("");
     const [companyName, setCompanyName] = useState("");
-    const [monitorWindow, setMonitorWindow] = useState<"7" | "30" | "90">("30");
     const [emailAlerts, setEmailAlerts] = useState(true);
-    const [alertThreshold, setAlertThreshold] = useState("Any Change");
     const [isAdding, setIsAdding] = useState(false);
 
     const [filterStatus, setFilterStatus] = useState("all");
     const [filterAlertLevel, setFilterAlertLevel] = useState("all");
     const [domainSearch, setDomainSearch] = useState("");
 
-    const [emailNotif, setEmailNotif] = useState(true);
-    const [inAppNotif, setInAppNotif] = useState(true);
-    const [slackNotif, setSlackNotif] = useState(false);
-    const [teamsNotif, setTeamsNotif] = useState(false);
-    const [alertFrequency, setAlertFrequency] = useState("Instant");
-    const [criticalOnly, setCriticalOnly] = useState(false);
+    const [emailNotif, setEmailNotif] = useState(user?.emailNotifications ?? true);
+    const [inAppNotif, setInAppNotif] = useState(user?.inAppNotifications ?? true);
+    const [slackNotif, setSlackNotif] = useState(user?.slackNotifications ?? false);
+    const [teamsNotif, setTeamsNotif] = useState(user?.teamsNotifications ?? false);
+    const [alertFrequency, setAlertFrequency] = useState(user?.notificationFrequency ?? "Instant");
+    const [criticalOnly, setCriticalOnly] = useState(user?.criticalAlertsOnly ?? false);
+    const [isSavingPrefs, setIsSavingPrefs] = useState(false);
+
+    const [confirmRemoveId, setConfirmRemoveId] = useState<Id<"watchlistItems"> | null>(null);
+
+    async function handleSaveAlertPreferences() {
+        if (!user) return;
+        setIsSavingPrefs(true);
+        try {
+            await updateUser({
+                id: user._id,
+                emailNotifications: emailNotif,
+                inAppNotifications: inAppNotif,
+                slackNotifications: slackNotif,
+                teamsNotifications: teamsNotif,
+                notificationFrequency: alertFrequency,
+                criticalAlertsOnly: criticalOnly,
+            });
+            toast.success("Alert preferences saved");
+        } catch (error) {
+            devError("Failed to save preferences:", error);
+            toast.error("Failed to save preferences");
+        } finally {
+            setIsSavingPrefs(false);
+        }
+    }
 
     // Filter watchlist items
     const filteredItems = useMemo(() => {
@@ -166,41 +185,45 @@ export default function WatchlistPage() {
                 domain: newDomain.trim().toLowerCase(),
                 companyName: companyName.trim() || newDomain.split(".")[0].charAt(0).toUpperCase() + newDomain.split(".")[0].slice(1),
                 notifyByEmail: emailAlerts,
-                monitoringWindow: parseInt(monitorWindow),
             });
             setNewDomain("");
             setCompanyName("");
             close();
         } catch (error) {
-            console.error("Failed to add domain:", error);
-            alert(error instanceof Error ? error.message : "Failed to add domain");
+            devError("Failed to add domain:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to add domain");
         } finally {
             setIsAdding(false);
         }
     }
 
     async function handleRemove(id: Id<"watchlistItems">) {
-        if (!confirm("Are you sure you want to remove this domain from your watchlist?")) return;
         try {
             await removeFromWatchlist({ id });
+            toast.success("Domain removed from watchlist");
         } catch (error) {
-            console.error("Failed to remove:", error);
+            devError("Failed to remove:", error);
+            toast.error("Failed to remove domain");
         }
     }
 
     async function handlePause(id: Id<"watchlistItems">) {
         try {
             await pauseWatchlist({ id });
+            toast.success("Monitoring paused");
         } catch (error) {
-            console.error("Failed to pause:", error);
+            devError("Failed to pause:", error);
+            toast.error("Failed to pause monitoring");
         }
     }
 
     async function handleResume(id: Id<"watchlistItems">) {
         try {
             await resumeWatchlist({ id });
+            toast.success("Monitoring resumed");
         } catch (error) {
-            console.error("Failed to resume:", error);
+            devError("Failed to resume:", error);
+            toast.error("Failed to resume monitoring");
         }
     }
 
@@ -213,7 +236,19 @@ export default function WatchlistPage() {
     }
 
     return (
-        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
+        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto relative">
+            {confirmRemoveId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-primary border border-secondary rounded-xl p-6 shadow-xl max-w-sm w-full mx-4">
+                        <h3 className="text-md font-semibold text-primary mb-2">Remove Domain</h3>
+                        <p className="text-sm text-secondary mb-6">Are you sure you want to remove this domain from your watchlist?</p>
+                        <div className="flex items-center justify-end gap-3">
+                            <Button color="secondary" size="sm" onClick={() => setConfirmRemoveId(null)}>Cancel</Button>
+                            <Button color="primary-destructive" size="sm" onClick={() => { handleRemove(confirmRemoveId); setConfirmRemoveId(null); }}>Remove</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="flex flex-col gap-8">
                 {/* Page Header */}
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
@@ -257,60 +292,10 @@ export default function WatchlistPage() {
                                                     className="max-w-md"
                                                 />
                                                 <div>
-                                                    <label className="block text-sm font-medium text-secondary mb-1.5">Monitoring Window</label>
-                                                    <div className="flex items-center gap-4">
-                                                        <label className="flex items-center gap-2 cursor-pointer">
-                                                            <input
-                                                                type="radio"
-                                                                name="window"
-                                                                checked={monitorWindow === "7"}
-                                                                onChange={() => setMonitorWindow("7")}
-                                                                className="size-4 accent-brand-600"
-                                                            />
-                                                            <span className="text-sm text-secondary">7 days</span>
-                                                        </label>
-                                                        <label className="flex items-center gap-2 cursor-pointer">
-                                                            <input
-                                                                type="radio"
-                                                                name="window"
-                                                                checked={monitorWindow === "30"}
-                                                                onChange={() => setMonitorWindow("30")}
-                                                                className="size-4 accent-brand-600"
-                                                            />
-                                                            <span className="text-sm text-secondary">30 days</span>
-                                                        </label>
-                                                        <label className="flex items-center gap-2 cursor-pointer">
-                                                            <input
-                                                                type="radio"
-                                                                name="window"
-                                                                checked={monitorWindow === "90"}
-                                                                onChange={() => setMonitorWindow("90")}
-                                                                className="size-4 accent-brand-600"
-                                                            />
-                                                            <span className="text-sm text-secondary">90 days</span>
-                                                        </label>
-                                                    </div>
-                                                </div>
-                                                <div>
                                                     <Checkbox
                                                         label="Email Notifications"
                                                         isSelected={emailAlerts}
                                                         onChange={setEmailAlerts}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-sm font-medium text-secondary mb-1.5">Alert Threshold</label>
-                                                    <NativeSelect
-                                                        aria-label="Alert Threshold"
-                                                        value={alertThreshold}
-                                                        onChange={(e) => setAlertThreshold(e.target.value)}
-                                                        options={[
-                                                            { label: "Any Change", value: "Any Change" },
-                                                            { label: "Critical Only", value: "Critical Only" },
-                                                            { label: "High & Critical", value: "High & Critical" },
-                                                        ]}
-                                                        className="w-full"
-                                                        selectClassName="text-sm"
                                                     />
                                                 </div>
                                             </div>
@@ -341,7 +326,8 @@ export default function WatchlistPage() {
                         subtitle="Monitored Domains" 
                         change={(watchlistStats?.active ?? 0).toString()} 
                         changeTrend="positive" 
-                        changeDescription="active" 
+                        changeDescription="active"
+                        actions={false}
                     />
                     <MetricsChart04 
                         title={(watchlistStats?.withAlerts ?? 0).toString()} 
@@ -349,7 +335,8 @@ export default function WatchlistPage() {
                         change={(watchlistStats?.withAlerts ?? 0).toString()} 
                         changeTrend={(watchlistStats?.withAlerts ?? 0) > 0 ? "negative" : "positive"} 
                         changeDescription="domains with new exposures" 
-                        chartColor="text-fg-warning-secondary" 
+                        chartColor="text-fg-warning-secondary"
+                        actions={false}
                     />
                     <MetricsChart04 
                         title={(watchlistStats?.paused ?? 0).toString()} 
@@ -357,7 +344,8 @@ export default function WatchlistPage() {
                         change={(watchlistStats?.paused ?? 0).toString()} 
                         changeTrend="positive" 
                         changeDescription="monitoring paused" 
-                        chartColor="text-fg-error-secondary" 
+                        chartColor="text-fg-error-secondary"
+                        actions={false}
                     />
                 </div>
 
@@ -499,7 +487,7 @@ export default function WatchlistPage() {
                                                     color="tertiary" 
                                                     icon={Trash01} 
                                                     aria-label="Remove"
-                                                    onClick={() => handleRemove(item._id)}
+                                                    onClick={() => setConfirmRemoveId(item._id)}
                                                 />
                                             </div>
                                         </Table.Cell>
@@ -520,7 +508,19 @@ export default function WatchlistPage() {
 
                 {/* Alert Preferences */}
                 <div className="rounded-xl border border-secondary bg-primary p-6 shadow-sm">
-                    <h2 className="text-lg font-semibold text-primary mb-6">Alert Preferences</h2>
+                    <div className="flex items-center justify-between mb-6">
+                        <h2 className="text-lg font-semibold text-primary">Alert Preferences</h2>
+                        <div className="flex items-center gap-3">
+                            <Button
+                                color="primary"
+                                size="sm"
+                                onClick={handleSaveAlertPreferences}
+                                isDisabled={isSavingPrefs}
+                            >
+                                {isSavingPrefs ? "Saving..." : "Save Preferences"}
+                            </Button>
+                        </div>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="flex flex-col gap-5">
                             <h3 className="text-sm font-semibold text-secondary uppercase tracking-wide">Notification Channels</h3>

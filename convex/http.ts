@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { internal, components } from "./_generated/api";
+import { registerRoutes } from "@convex-dev/stripe";
 
 const http = httpRouter();
 
@@ -78,6 +79,10 @@ http.route({
       return new Response("Webhook processing failed", { status: 500 });
     }
   }),
+});
+
+registerRoutes(http, components.stripe, {
+  webhookPath: "/stripe/webhook",
 });
 
 export default http;

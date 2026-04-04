@@ -2,6 +2,8 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
     Activity,
     Calendar,
@@ -13,15 +15,17 @@ import {
     Plus,
     SearchLg,
     Shield01,
-    DotsVertical,
     Building02,
+    LinkExternal01,
+    AlertCircle,
+    CheckCircle,
+    XClose,
 } from "@untitledui/icons";
 import type { SortDescriptor } from "react-aria-components";
 
 import { Table, TableCard } from "@/components/application/table/table";
 import { Badge, BadgeWithIcon } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
-import { ButtonUtility } from "@/components/base/buttons/button-utility";
 import { InputBase } from "@/components/base/input/input";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { Tabs, TabList, Tab, TabPanel } from "@/components/application/tabs/tabs";
@@ -29,6 +33,7 @@ import { Toggle } from "@/components/base/toggle/toggle";
 import { PaginationCardMinimal } from "@/components/application/pagination/pagination";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { sanitizeUrl } from "@/utils/sanitize-url";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -58,25 +63,6 @@ function formatIncidentType(type: string): string {
     }
 }
 
-function severityColor(severity: string) {
-    switch (severity) {
-        case "Critical": return "error";
-        case "High": return "warning";
-        case "Medium": return "gray";
-        case "Low": return "success";
-        default: return "gray";
-    }
-}
-
-function statusColor(status: string) {
-    switch (status) {
-        case "Active": return "error";
-        case "Contained": return "warning";
-        case "Resolved": return "success";
-        default: return "gray";
-    }
-}
-
 function typeColor(type: string) {
     return type === "breach_notification" || type === "Data Breach" ? "purple" : "blue";
 }
@@ -96,6 +82,26 @@ function sourceColor(source: string) {
 
 function formatNumber(n: number) {
     return n === 0 ? "—" : n.toLocaleString();
+}
+
+function exportRansomCSV(incidents: Array<{ ransomwareGroup?: string; companyName: string; country?: string; region?: string; attackDate: number; source: string }>) {
+    const headers = ["Group", "Victim", "Country", "Posted Date", "Source"];
+    const rows = incidents.map(i => [
+        i.ransomwareGroup || "Unknown",
+        i.companyName,
+        i.country || i.region || "",
+        formatDate(i.attackDate),
+        formatSourceLabel(i.source),
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${(v || "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.download = `CyberHook_RansomHub_Export_${dateStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 export default function RansomHubPage() {
@@ -141,14 +147,12 @@ export default function RansomHubPage() {
     const [breachSearchQuery, setBreachSearchQuery] = useState("");
     const [region, setRegion] = useState("all");
     const [threatGroup, setThreatGroup] = useState("all");
-    const [severity, setSeverity] = useState("all");
-    const [status, setStatus] = useState("all");
 
     const [breachRegulation, setBreachRegulation] = useState("all");
     const [breachSource, setBreachSource] = useState("all");
 
-    const [openMenu, setOpenMenu] = useState<string | null>(null);
     const [showFilterPanel, setShowFilterPanel] = useState(false);
+
 
     const [hhsActive, setHhsActive] = useState(true);
     const [privacyRightsActive, setPrivacyRightsActive] = useState(true);
@@ -165,11 +169,17 @@ export default function RansomHubPage() {
                     return false;
                 }
             }
-            if (threatGroup !== "all" && inc.ransomwareGroup?.toLowerCase() !== threatGroup) return false;
+            if (threatGroup !== "all" && !inc.ransomwareGroup?.toLowerCase().includes(threatGroup)) return false;
             if (region !== "all" && inc.region !== region) return false;
             return true;
         });
     }, [ransomwareIncidents, searchQuery, threatGroup, region]);
+
+    const regulationSourceMap: Record<string, string[]> = {
+        hipaa: ["hhs_ocr"],
+        ccpa: ["california_ag"],
+        glba: ["privacy_rights"],
+    };
 
     // Filter breach notifications locally
     const filteredBreaches = useMemo(() => {
@@ -180,9 +190,13 @@ export default function RansomHubPage() {
                 if (!inc.companyName.toLowerCase().includes(q)) return false;
             }
             if (breachSource !== "all" && inc.source !== breachSource) return false;
+            if (breachRegulation !== "all") {
+                const allowedSources = regulationSourceMap[breachRegulation];
+                if (allowedSources && !allowedSources.includes(inc.source)) return false;
+            }
             return true;
         });
-    }, [breachIncidents, breachSearchQuery, breachSource]);
+    }, [breachIncidents, breachSearchQuery, breachSource, breachRegulation]);
 
     async function handleAddToLeads(companyName: string, domain?: string) {
         if (!companyId || !user) return;
@@ -194,10 +208,10 @@ export default function RansomHubPage() {
                 domain: domain || companyName.toLowerCase().replace(/\s+/g, "") + ".com",
                 source: "ransom_hub",
             });
-            alert(`${companyName} added to leads!`);
+            toast.success(`${companyName} added to leads!`);
         } catch (error) {
-            console.error("Failed to add to leads:", error);
-            alert(error instanceof Error ? error.message : "Failed to add to leads");
+            devError("Failed to add to leads:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to add to leads");
         }
     }
 
@@ -210,10 +224,10 @@ export default function RansomHubPage() {
                 domain: domain.toLowerCase(),
                 companyName,
             });
-            alert(`${domain} added to watchlist!`);
+            toast.success(`${domain} added to watchlist!`);
         } catch (error) {
-            console.error("Failed to add to watchlist:", error);
-            alert(error instanceof Error ? error.message : "Failed to add to watchlist");
+            devError("Failed to add to watchlist:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to add to watchlist");
         }
     }
 
@@ -231,7 +245,7 @@ export default function RansomHubPage() {
     ];
 
     return (
-        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto" onClick={() => openMenu && setOpenMenu(null)}>
+        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
             <div className="flex flex-col gap-8">
                 {/* Page Header */}
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
@@ -244,15 +258,124 @@ export default function RansomHubPage() {
                             Real-time monitoring of ransomware leak sites, dark web extortion operations, and regulatory breach filings.
                         </p>
                     </div>
-                    <div className="flex items-center gap-3 mt-4 sm:mt-0">
-                        <Button color="secondary" iconLeading={DownloadCloud01}>
-                            Export CSV
-                        </Button>
-                        <Button color="primary" iconLeading={FilterLines} onClick={() => setShowFilterPanel((p) => !p)}>
-                            Filters
-                        </Button>
+                        <div className="flex flex-col items-end gap-2 mt-4 sm:mt-0">
+                        <div className="flex items-center gap-3">
+                            <Button color="secondary" iconLeading={DownloadCloud01} onClick={() => exportRansomCSV(filteredRansomware)}>
+                                Export CSV
+                            </Button>
+                            <Button color={showFilterPanel ? "primary" : "secondary"} iconLeading={FilterLines} onClick={() => setShowFilterPanel((p) => !p)}>
+                                Filters
+                            </Button>
+                        </div>
+                        <span className="text-xs text-tertiary">
+                            Last updated: {ransomwareIncidents && ransomwareIncidents.length > 0
+                                ? new Date(Math.max(...ransomwareIncidents.map(i => i.updatedAt ?? i.createdAt))).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })
+                                : "No data yet"
+                            }
+                        </span>
                     </div>
                 </div>
+
+                {/* Global Filter Panel */}
+                {showFilterPanel && (
+                    <div className="rounded-xl border border-secondary bg-primary p-5 shadow-xs animate-in slide-in-from-top-2 duration-200">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-md font-semibold text-primary">Advanced Filters</h3>
+                            <button
+                                onClick={() => setShowFilterPanel(false)}
+                                className="rounded-md p-1 text-quaternary hover:text-secondary hover:bg-secondary_subtle transition"
+                            >
+                                <XClose className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-medium text-secondary">Time Period</label>
+                                <FilterDropdown
+                                    aria-label="Time Period"
+                                    value={timePeriod}
+                                    onChange={(v) => setTimePeriod(v)}
+                                    options={[
+                                        { label: "All Time", value: "all" },
+                                        { label: "Last 7 Days", value: "7d" },
+                                        { label: "Last 30 Days", value: "30d" },
+                                        { label: "Last 90 Days", value: "90d" },
+                                    ]}
+                                    className="w-full"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-medium text-secondary">Region</label>
+                                <FilterDropdown
+                                    aria-label="Region"
+                                    value={region}
+                                    onChange={(v) => setRegion(v)}
+                                    options={[
+                                        { label: "All Regions", value: "all" },
+                                        { label: "North America", value: "na" },
+                                        { label: "Europe", value: "eu" },
+                                        { label: "Asia", value: "asia" },
+                                        { label: "South America", value: "sa" },
+                                    ]}
+                                    className="w-full"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-medium text-secondary">Threat Group</label>
+                                <FilterDropdown
+                                    aria-label="Threat Group"
+                                    value={threatGroup}
+                                    onChange={(v) => setThreatGroup(v)}
+                                    options={[
+                                        { label: "All Groups", value: "all" },
+                                        { label: "LockBit 3.0", value: "lockbit" },
+                                        { label: "BlackCat", value: "blackcat" },
+                                        { label: "Clop", value: "clop" },
+                                        { label: "Royal", value: "royal" },
+                                        { label: "Play", value: "play" },
+                                    ]}
+                                    className="w-full"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-sm font-medium text-secondary">Data Source</label>
+                                <FilterDropdown
+                                    aria-label="Source"
+                                    value={breachSource}
+                                    onChange={(v) => setBreachSource(v)}
+                                    options={[
+                                        { label: "All Sources", value: "all" },
+                                        { label: "HHS OCR", value: "hhs_ocr" },
+                                        { label: "CA AG", value: "california_ag" },
+                                        { label: "Privacy Rights", value: "privacy_rights" },
+                                    ]}
+                                    className="w-full"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between mt-4 pt-4 border-t border-secondary">
+                            <span className="text-sm text-tertiary">
+                                {filteredRansomware.length + filteredBreaches.length} result{filteredRansomware.length + filteredBreaches.length !== 1 ? "s" : ""} matching
+                            </span>
+                            <Button
+                                size="sm"
+                                color="secondary"
+                                onClick={() => {
+                                    setTimePeriod("all");
+                                    setRegion("all");
+                                    setThreatGroup("all");
+                                    setBreachSource("all");
+                                    setBreachRegulation("all");
+                                    setSearchQuery("");
+                                    setBreachSearchQuery("");
+                                    toast.success("All filters cleared");
+                                }}
+                            >
+                                Clear All Filters
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Tabs */}
                 <Tabs>
@@ -300,37 +423,14 @@ export default function RansomHubPage() {
                                     { label: "Play", value: "play" },
                                 ]}
                             />
-                            <FilterDropdown
-                                aria-label="Severity"
-                                value={severity}
-                                onChange={(v) => setSeverity(v)}
-                                options={[
-                                    { label: "All", value: "all" },
-                                    { label: "Critical", value: "critical" },
-                                    { label: "High", value: "high" },
-                                    { label: "Medium", value: "medium" },
-                                    { label: "Low", value: "low" },
-                                ]}
-                            />
-                            <FilterDropdown
-                                aria-label="Status"
-                                value={status}
-                                onChange={(v) => setStatus(v)}
-                                options={[
-                                    { label: "All", value: "all" },
-                                    { label: "Active", value: "active" },
-                                    { label: "Contained", value: "contained" },
-                                    { label: "Resolved", value: "resolved" },
-                                ]}
-                            />
                         </div>
 
                         {/* Summary Stats Bar */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                            <MetricsChart04 title={String(stats?.total ?? 0)} subtitle="Total Incidents" change="—" changeTrend="positive" changeDescription="all time" />
-                            <MetricsChart04 title={String(stats?.ransomware ?? 0)} subtitle="Ransomware" change="—" changeTrend="negative" changeDescription="attacks" chartColor="text-fg-error-secondary" />
-                            <MetricsChart04 title={String(stats?.last7Days ?? 0)} subtitle="This Week" change="—" changeTrend="negative" changeDescription="last 7 days" chartColor="text-fg-warning-secondary" />
-                            <MetricsChart04 title={String(stats?.last30Days ?? 0)} subtitle="Last 30 Days" change="—" changeTrend="negative" changeDescription="incidents" chartColor="text-fg-brand-secondary" />
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-stretch">
+                            <MetricsChart04 title={String(stats?.total ?? 0)} subtitle="Total Incidents" change="—" changeTrend="positive" changeDescription="all time" actions={false} />
+                            <MetricsChart04 title={String(stats?.ransomware ?? 0)} subtitle="Ransomware" change="—" changeTrend="negative" changeDescription="attacks" chartColor="text-fg-error-secondary" actions={false} />
+                            <MetricsChart04 title={String(stats?.last7Days ?? 0)} subtitle="This Week" change="—" changeTrend="negative" changeDescription="last 7 days" chartColor="text-fg-warning-secondary" actions={false} />
+                            <MetricsChart04 title={String(stats?.last30Days ?? 0)} subtitle="Last 30 Days" change="—" changeTrend="negative" changeDescription="incidents" chartColor="text-fg-brand-secondary" actions={false} />
                         </div>
 
                         {/* Incidents Table */}
@@ -360,8 +460,9 @@ export default function RansomHubPage() {
                                 <Table.Header className="bg-secondary_subtle">
                                     <Table.Head id="group" label="Threat Group" allowsSorting isRowHeader className="min-w-[150px]" />
                                     <Table.Head id="company" label="Victim" allowsSorting className="min-w-[180px]" />
+                                    <Table.Head id="country" label="Country" className="min-w-[120px] hidden md:table-cell" />
                                     <Table.Head id="industry" label="Industry" allowsSorting className="min-w-[130px] hidden lg:table-cell" />
-                                    <Table.Head id="date" label="Date" allowsSorting className="min-w-[130px]" />
+                                    <Table.Head id="date" label="Posted Date" allowsSorting className="min-w-[130px]" />
                                     <Table.Head id="type" label="Type" allowsSorting className="min-w-[120px] hidden lg:table-cell" />
                                     <Table.Head id="source" label="Source" className="min-w-[130px] hidden xl:table-cell" />
                                     <Table.Head id="affected" label="Individuals" className="min-w-[120px] hidden lg:table-cell" />
@@ -380,6 +481,9 @@ export default function RansomHubPage() {
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <span className="font-medium text-secondary whitespace-nowrap">{item.companyName}</span>
+                                            </Table.Cell>
+                                            <Table.Cell className="hidden md:table-cell">
+                                                <span className="text-sm text-secondary whitespace-nowrap">{item.country || item.region || "—"}</span>
                                             </Table.Cell>
                                             <Table.Cell className="hidden lg:table-cell">
                                                 <Badge color="gray" size="sm">{item.industry || "Unknown"}</Badge>
@@ -409,36 +513,34 @@ export default function RansomHubPage() {
                                                 <span className="text-sm text-secondary whitespace-nowrap">{item.breachVector || "—"}</span>
                                             </Table.Cell>
                                             <Table.Cell className="px-4">
-                                                <div className="relative" onClick={(e) => e.stopPropagation()}>
-                                                    <ButtonUtility
-                                                        size="sm"
-                                                        icon={DotsVertical}
-                                                        aria-label="Actions"
-                                                        onClick={() => setOpenMenu(openMenu === item._id ? null : item._id)}
-                                                    />
-                                                    {openMenu === item._id && (
-                                                        <div className="absolute right-0 top-8 z-50 min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg">
-                                                            <button 
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle" 
-                                                                onClick={() => {
-                                                                    handleAddToLeads(item.companyName, item.domain);
-                                                                    setOpenMenu(null);
-                                                                }}
-                                                            >
-                                                                <Plus className="w-4 h-4" /> Add to Leads
-                                                            </button>
-                                                            {item.domain && (
-                                                                <button 
-                                                                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle" 
-                                                                    onClick={() => {
-                                                                        handleAddToWatchlist(item.domain!, item.companyName);
-                                                                        setOpenMenu(null);
-                                                                    }}
-                                                                >
-                                                                    <Shield01 className="w-4 h-4" /> Add to Watchlist
-                                                                </button>
-                                                            )}
-                                                        </div>
+                                                <div className="flex items-center gap-1">
+                                                    <a
+                                                        href={sanitizeUrl(item.sourceUrl || "https://ransomware.live")}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-secondary transition duration-100 ease-linear"
+                                                        aria-label="View on ransomware.live"
+                                                        title="View source"
+                                                    >
+                                                        <LinkExternal01 className="w-4 h-4" />
+                                                    </a>
+                                                    <button
+                                                        className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-brand-600 transition duration-100 ease-linear"
+                                                        aria-label="Add to Leads"
+                                                        title="Add to Leads"
+                                                        onClick={(e) => { e.stopPropagation(); handleAddToLeads(item.companyName, item.domain); }}
+                                                    >
+                                                        <Plus className="w-4 h-4" />
+                                                    </button>
+                                                    {item.domain && (
+                                                        <button
+                                                            className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-success-600 transition duration-100 ease-linear"
+                                                            aria-label="Add to Watchlist"
+                                                            title="Add to Watchlist"
+                                                            onClick={(e) => { e.stopPropagation(); handleAddToWatchlist(item.domain!, item.companyName); }}
+                                                        >
+                                                            <Shield01 className="w-4 h-4" />
+                                                        </button>
                                                     )}
                                                 </div>
                                             </Table.Cell>
@@ -591,36 +693,24 @@ export default function RansomHubPage() {
                                                 <span className="text-sm text-secondary whitespace-nowrap">{item.breachVector || "—"}</span>
                                             </Table.Cell>
                                             <Table.Cell className="px-4">
-                                                <div className="relative" onClick={(e) => e.stopPropagation()}>
-                                                    <ButtonUtility
-                                                        size="sm"
-                                                        icon={DotsVertical}
-                                                        aria-label="Actions"
-                                                        onClick={() => setOpenMenu(openMenu === item._id ? null : item._id)}
-                                                    />
-                                                    {openMenu === item._id && (
-                                                        <div className="absolute right-0 top-8 z-50 min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg">
-                                                            <button 
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle" 
-                                                                onClick={() => {
-                                                                    handleAddToLeads(item.companyName, item.domain);
-                                                                    setOpenMenu(null);
-                                                                }}
-                                                            >
-                                                                <Plus className="w-4 h-4" /> Add to Leads
-                                                            </button>
-                                                            {item.domain && (
-                                                                <button 
-                                                                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle" 
-                                                                    onClick={() => {
-                                                                        handleAddToWatchlist(item.domain!, item.companyName);
-                                                                        setOpenMenu(null);
-                                                                    }}
-                                                                >
-                                                                    <Shield01 className="w-4 h-4" /> Add to Watchlist
-                                                                </button>
-                                                            )}
-                                                        </div>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-brand-600 transition duration-100 ease-linear"
+                                                        aria-label="Add to Leads"
+                                                        title="Add to Leads"
+                                                        onClick={(e) => { e.stopPropagation(); handleAddToLeads(item.companyName, item.domain); }}
+                                                    >
+                                                        <Plus className="w-4 h-4" />
+                                                    </button>
+                                                    {item.domain && (
+                                                        <button
+                                                            className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-success-600 transition duration-100 ease-linear"
+                                                            aria-label="Add to Watchlist"
+                                                            title="Add to Watchlist"
+                                                            onClick={(e) => { e.stopPropagation(); handleAddToWatchlist(item.domain!, item.companyName); }}
+                                                        >
+                                                            <Shield01 className="w-4 h-4" />
+                                                        </button>
                                                     )}
                                                 </div>
                                             </Table.Cell>

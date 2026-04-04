@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,9 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let events = await ctx.db
       .query("events")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -57,7 +61,11 @@ export const list = query({
 export const getById = query({
   args: { id: v.id("events") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const user = await requireAuth(ctx);
+    const event = await ctx.db.get(args.id);
+    if (!event) return null;
+    assertCompanyAccess(user.companyId, event.companyId);
+    return event;
   },
 });
 
@@ -68,6 +76,9 @@ export const getUpcoming = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const now = Date.now();
 
     let events = await ctx.db
@@ -104,6 +115,9 @@ export const getToday = query({
     userId: v.optional(v.id("users")),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const endOfDay = startOfDay + 24 * 60 * 60 * 1000 - 1;
@@ -140,6 +154,9 @@ export const getStats = query({
     dateTo: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     let events = await ctx.db
       .query("events")
       .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
@@ -201,6 +218,9 @@ export const create = mutation({
     externalCalendarSource: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
     const eventId = await ctx.db.insert("events", {
       ...args,
       createdAt: Date.now(),
@@ -234,9 +254,11 @@ export const update = mutation({
     attendeeUserIds: v.optional(v.array(v.id("users"))),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const { id, ...updates } = args;
     const event = await ctx.db.get(id);
-    if (!event) throw new Error("Event not found");
+    if (!event) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, event.companyId);
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -254,8 +276,10 @@ export const update = mutation({
 export const remove = mutation({
   args: { id: v.id("events") },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const event = await ctx.db.get(args.id);
-    if (!event) throw new Error("Event not found");
+    if (!event) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, event.companyId);
 
     await ctx.db.delete(args.id);
     return args.id;
@@ -268,8 +292,10 @@ export const addAttendee = mutation({
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const event = await ctx.db.get(args.id);
-    if (!event) throw new Error("Event not found");
+    if (!event) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, event.companyId);
 
     const attendees = event.attendeeUserIds || [];
     if (!attendees.includes(args.userId)) {
@@ -289,8 +315,10 @@ export const removeAttendee = mutation({
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
     const event = await ctx.db.get(args.id);
-    if (!event) throw new Error("Event not found");
+    if (!event) throw new Error("Not found");
+    assertCompanyAccess(user.companyId, event.companyId);
 
     const attendees = event.attendeeUserIds || [];
     await ctx.db.patch(args.id, {

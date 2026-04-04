@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useQuery } from "convex/react";
+import jsPDF from "jspdf";
 import {
     DownloadCloud01,
     FileCheck02,
@@ -27,6 +28,8 @@ import {
 
 import { api } from "../../../../convex/_generated/api";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useCompany } from "@/hooks/use-company";
+import { toast } from "sonner";
 import { ChartTooltipContent, ChartActiveDot } from "@/components/application/charts/charts-base";
 import { Table, TableCard } from "@/components/application/table/table";
 import { Badge } from "@/components/base/badges/badges";
@@ -232,7 +235,8 @@ export default function ReportingPage() {
     const [dealSort, setDealSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
     const [activitySort, setActivitySort] = useState<SortDescriptor>({ column: "metric", direction: "ascending" });
 
-    const { companyId, isLoading: isUserLoading } = useCurrentUser();
+    const { companyId, user, isLoading: isUserLoading } = useCurrentUser();
+    const { company } = useCompany();
 
     const searchStats = useQuery(
         api.searches.getStats,
@@ -276,21 +280,52 @@ export default function ReportingPage() {
 
     const isLoading = isUserLoading || searchStats === undefined || campaignStats === undefined || leadStats === undefined;
 
+    const dateFrom = useMemo(() => {
+        const now = new Date();
+        switch (dateRange) {
+            case "this-month":
+                return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+            case "last-30":
+                return now.getTime() - 30 * 24 * 60 * 60 * 1000;
+            case "last-quarter":
+                return now.getTime() - 90 * 24 * 60 * 60 * 1000;
+            case "last-year":
+                return now.getTime() - 365 * 24 * 60 * 60 * 1000;
+            default:
+                return 0;
+        }
+    }, [dateRange]);
+
+    const filteredSearches = useMemo(
+        () => (allSearches ?? []).filter((s) => s.createdAt >= dateFrom),
+        [allSearches, dateFrom],
+    );
+
+    const filteredLeads = useMemo(
+        () => (allLeads ?? []).filter((l) => l.createdAt >= dateFrom),
+        [allLeads, dateFrom],
+    );
+
+    const filteredCampaigns = useMemo(
+        () => (allCampaigns ?? []).filter((c) => c.createdAt >= dateFrom),
+        [allCampaigns, dateFrom],
+    );
+
     const activityData = useMemo(() => {
         if (!searchStats || !campaignStats || !leadStats || !eventStats) return [];
 
         return [
-            { id: "1", metric: "Total Searches", current: searchStats.total, recent: searchStats.last7Days, label: "last 7 days" },
-            { id: "2", metric: "Leads Created", current: leadStats.total, recent: leadStats.newThisWeek, label: "new this week" },
-            { id: "3", metric: "Emails Sent", current: campaignStats.totalEmailsSent, recent: campaignStats.active, label: "active campaigns" },
+            { id: "1", metric: "Total Searches", current: filteredSearches.length, recent: searchStats.last7Days, label: "last 7 days" },
+            { id: "2", metric: "Leads Created", current: filteredLeads.length, recent: leadStats.newThisWeek, label: "new this week" },
+            { id: "3", metric: "Emails Sent", current: filteredCampaigns.reduce((sum, c) => sum + (c.emailsSent ?? 0), 0), recent: campaignStats.active, label: "active campaigns" },
             { id: "4", metric: "Events Booked", current: eventStats.total, recent: eventStats.thisWeek, label: "this week" },
-            { id: "5", metric: "Active Campaigns", current: campaignStats.active, recent: campaignStats.draft, label: "drafts" },
+            { id: "5", metric: "Active Campaigns", current: filteredCampaigns.filter((c) => c.status === "active").length, recent: campaignStats.draft, label: "drafts" },
         ];
-    }, [searchStats, campaignStats, leadStats, eventStats]);
+    }, [searchStats, campaignStats, leadStats, eventStats, filteredSearches, filteredLeads, filteredCampaigns]);
 
     const campaignTableData = useMemo(() => {
-        if (!allCampaigns) return [];
-        return allCampaigns.map((c) => ({
+        if (!filteredCampaigns.length) return [];
+        return filteredCampaigns.map((c) => ({
             id: c._id,
             name: c.name,
             status: c.status,
@@ -301,7 +336,7 @@ export default function ReportingPage() {
             openRate: c.emailsSent ? `${Math.round(((c.emailsOpened ?? 0) / c.emailsSent) * 100)}%` : "—",
             clickRate: c.emailsSent ? `${Math.round(((c.emailsClicked ?? 0) / c.emailsSent) * 100)}%` : "—",
         }));
-    }, [allCampaigns]);
+    }, [filteredCampaigns]);
 
     const leadPipelineData = useMemo(() => {
         if (!leadStats?.byStatus) return [];
@@ -317,13 +352,13 @@ export default function ReportingPage() {
     }, [leadStats]);
 
     const teamTableData = useMemo(() => {
-        if (!teamMembers || !allSearches || !allLeads) return [];
+        if (!teamMembers || !filteredSearches || !filteredLeads) return [];
 
         return teamMembers
             .filter((m) => m.status === "approved")
             .map((member) => {
-                const memberSearches = allSearches.filter((s) => s.userId === member._id).length;
-                const memberLeads = allLeads.filter((l) => l.createdByUserId === member._id).length;
+                const memberSearches = filteredSearches.filter((s) => s.userId === member._id).length;
+                const memberLeads = filteredLeads.filter((l) => l.createdByUserId === member._id).length;
                 const initials = `${member.firstName?.[0] ?? ""}${member.lastName?.[0] ?? ""}`.toUpperCase();
 
                 return {
@@ -335,7 +370,7 @@ export default function ReportingPage() {
                     leads: memberLeads,
                 };
             });
-    }, [teamMembers, allSearches, allLeads]);
+    }, [teamMembers, filteredSearches, filteredLeads]);
 
     const teamTotals = useMemo(() => {
         return teamTableData.reduce(
@@ -346,6 +381,310 @@ export default function ReportingPage() {
             { searches: 0, leads: 0 }
         );
     }, [teamTableData]);
+
+    const dateRangeLabel = dateRangeOptions.find((o) => o.value === dateRange)?.label ?? dateRange;
+
+    const generatePerformanceReport = useCallback(() => {
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const margin = 20;
+        const contentWidth = pageWidth - margin * 2;
+        const now = new Date();
+        let y = 20;
+
+        const checkPageBreak = (needed: number) => {
+            if (y + needed > 275) {
+                doc.addPage();
+                y = 20;
+            }
+        };
+
+        const drawSectionHeader = (title: string) => {
+            checkPageBreak(20);
+            doc.setDrawColor(127, 86, 217);
+            doc.setLineWidth(0.5);
+            doc.line(margin, y, margin + contentWidth, y);
+            y += 8;
+            doc.setFontSize(14);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(30);
+            doc.text(title, margin, y);
+            y += 8;
+        };
+
+        const drawTableRow = (cols: string[], widths: number[], bold = false) => {
+            checkPageBreak(8);
+            doc.setFontSize(8);
+            doc.setFont("helvetica", bold ? "bold" : "normal");
+            doc.setTextColor(bold ? 30 : 80);
+            let x = margin + 2;
+            cols.forEach((col, i) => {
+                doc.text(col.substring(0, 40), x, y);
+                x += widths[i];
+            });
+            y += 5;
+        };
+
+        // Header
+        doc.setFillColor(127, 86, 217);
+        doc.rect(0, 0, pageWidth, 40, "F");
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(255);
+        doc.text("CyberHook", margin, 18);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        doc.text("Performance Report", margin, 28);
+        doc.setFontSize(9);
+        doc.text(`${dateRangeLabel}  |  ${now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`, margin, 36);
+        y = 50;
+
+        // Company Info
+        if (company) {
+            doc.setTextColor(30);
+            doc.setFontSize(12);
+            doc.setFont("helvetica", "bold");
+            doc.text("Company Information", margin, y);
+            y += 7;
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(60);
+
+            const companyInfo = [
+                ["Company", company.name],
+                ["Website", company.website || "—"],
+                ["Phone", company.phone || "—"],
+                ["Plan", (company.planId ?? "Enterprise").charAt(0).toUpperCase() + (company.planId ?? "enterprise").slice(1)],
+                ["Business Model", company.primaryBusinessModel || "—"],
+                ["Revenue Range", company.annualRevenue || "—"],
+                ["Geographic Coverage", (company.geographicCoverage ?? []).join(", ") || "—"],
+                ["Team Size", `${teamTableData.length} member${teamTableData.length !== 1 ? "s" : ""}`],
+            ];
+
+            for (const [label, value] of companyInfo) {
+                doc.setFont("helvetica", "bold");
+                doc.text(`${label}:`, margin + 2, y);
+                doc.setFont("helvetica", "normal");
+                doc.text(String(value).substring(0, 80), margin + 42, y);
+                y += 5;
+            }
+            y += 4;
+        }
+
+        if (user) {
+            doc.setFontSize(8);
+            doc.setTextColor(120);
+            doc.text(`Prepared by: ${user.firstName} ${user.lastName} (${user.email})`, margin, y);
+            y += 8;
+        }
+
+        // KPI Summary
+        drawSectionHeader("Key Performance Indicators");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+
+        const totalEmails = filteredCampaigns.reduce((sum, c) => sum + (c.emailsSent ?? 0), 0);
+        const activeCampaigns = filteredCampaigns.filter((c) => c.status === "active").length;
+        const kpis = [
+            { label: "Total Searches", value: filteredSearches.length, detail: `${searchStats?.last7Days ?? 0} in last 7 days` },
+            { label: "Leads Generated", value: filteredLeads.length, detail: `${leadStats?.newThisWeek ?? 0} new this week` },
+            { label: "Emails Sent", value: totalEmails, detail: `${activeCampaigns} active campaign${activeCampaigns !== 1 ? "s" : ""}` },
+            { label: "Events / Meetings", value: eventStats?.total ?? 0, detail: `${eventStats?.upcoming ?? 0} upcoming` },
+            { label: "Tokens Consumed", value: searchStats?.tokensConsumed ?? 0, detail: "" },
+        ];
+
+        for (const kpi of kpis) {
+            checkPageBreak(12);
+            doc.setFillColor(248, 247, 252);
+            doc.roundedRect(margin, y - 3, contentWidth, 10, 2, 2, "F");
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(30);
+            doc.text(kpi.label, margin + 4, y + 3);
+            doc.setFontSize(12);
+            doc.text(kpi.value.toLocaleString(), margin + 80, y + 3);
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(120);
+            if (kpi.detail) doc.text(kpi.detail, margin + 110, y + 3);
+            doc.setFontSize(9);
+            y += 12;
+        }
+
+        // Team Performance
+        if (teamTableData.length > 0) {
+            drawSectionHeader("Team Performance");
+            const teamWidths = [55, 40, 30, 30];
+            doc.setFillColor(240, 240, 240);
+            doc.rect(margin, y - 4, contentWidth, 7, "F");
+            drawTableRow(["Member", "Role", "Searches", "Leads"], teamWidths, true);
+            y += 1;
+
+            for (const member of teamTableData) {
+                drawTableRow([member.name, member.role, String(member.searches), String(member.leads)], teamWidths);
+            }
+
+            doc.setFillColor(240, 240, 240);
+            doc.rect(margin, y - 3, contentWidth, 7, "F");
+            drawTableRow(["TOTAL", "", String(teamTotals.searches), String(teamTotals.leads)], teamWidths, true);
+            y += 4;
+        }
+
+        // Campaign Performance
+        if (campaignTableData.length > 0) {
+            drawSectionHeader("Campaign Performance");
+            const campWidths = [50, 25, 25, 25, 25, 25];
+            doc.setFillColor(240, 240, 240);
+            doc.rect(margin, y - 4, contentWidth, 7, "F");
+            drawTableRow(["Campaign", "Status", "Recipients", "Sent", "Open Rate", "Click Rate"], campWidths, true);
+            y += 1;
+
+            for (const c of campaignTableData) {
+                drawTableRow([c.name, c.status, String(c.recipients), String(c.sent), c.openRate, c.clickRate], campWidths);
+            }
+            y += 4;
+        }
+
+        // Lead Pipeline
+        if (leadPipelineData.length > 0) {
+            drawSectionHeader("Lead Pipeline");
+            const pipeWidths = [50, 30];
+            doc.setFillColor(240, 240, 240);
+            doc.rect(margin, y - 4, contentWidth, 7, "F");
+            drawTableRow(["Stage", "Leads"], pipeWidths, true);
+            y += 1;
+
+            for (const s of leadPipelineData) {
+                drawTableRow([s.stage, `${s.leads} leads`], pipeWidths);
+            }
+            y += 4;
+        }
+
+        // Lead Sources
+        const sourceBreakdown = filteredLeads.reduce<Record<string, number>>((acc, l) => {
+            const src = (l.source ?? "other").replace(/_/g, " ");
+            acc[src] = (acc[src] ?? 0) + 1;
+            return acc;
+        }, {});
+
+        if (Object.keys(sourceBreakdown).length > 0) {
+            drawSectionHeader("Lead Sources");
+            for (const [src, count] of Object.entries(sourceBreakdown)) {
+                const pct = filteredLeads.length > 0 ? Math.round((count / filteredLeads.length) * 100) : 0;
+                checkPageBreak(6);
+                doc.setFontSize(9);
+                doc.setFont("helvetica", "normal");
+                doc.setTextColor(60);
+                doc.text(`${src.charAt(0).toUpperCase() + src.slice(1)}: ${count} (${pct}%)`, margin + 2, y);
+                y += 5;
+            }
+            y += 4;
+        }
+
+        // Footer
+        checkPageBreak(20);
+        doc.setDrawColor(200);
+        doc.line(margin, y, margin + contentWidth, y);
+        y += 6;
+        doc.setFontSize(7);
+        doc.setTextColor(150);
+        doc.text(`Generated by CyberHook on ${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} at ${now.toLocaleTimeString()}`, margin, y);
+        y += 4;
+        doc.text("CONFIDENTIAL — This report is intended for authorized recipients only. Do not distribute without permission.", margin, y);
+
+        const dateStr = now.toISOString().slice(0, 10);
+        doc.save(`CyberHook_Performance_Report_${dateStr}.pdf`);
+        toast.success("PDF report downloaded");
+    }, [dateRangeLabel, filteredSearches, filteredLeads, filteredCampaigns, eventStats, searchStats, leadStats, teamTableData, teamTotals, campaignTableData, leadPipelineData, company, user]);
+
+    const [showExportMenu, setShowExportMenu] = useState(false);
+
+    const downloadCSV = useCallback((filename: string, headers: string[], rows: string[][]) => {
+        const escape = (val: string) => {
+            if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+                return `"${val.replace(/"/g, '""')}"`;
+            }
+            return val;
+        };
+        const csvContent = [headers, ...rows].map((r) => r.map(escape).join(",")).join("\n");
+        const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success("Data exported successfully");
+    }, []);
+
+    const exportAllData = useCallback(() => {
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const headers = ["Category", "Name", "Status", "Value1", "Value2", "Value3", "Created"];
+        const rows: string[][] = [];
+
+        rows.push(["--- KPI Summary ---", "", "", "", "", "", ""]);
+        for (const a of activityData) {
+            rows.push(["KPI", a.metric, "", String(a.current), String(a.recent), a.label, ""]);
+        }
+
+        rows.push(["", "", "", "", "", "", ""]);
+        rows.push(["--- Team Performance ---", "", "", "", "", "", ""]);
+        for (const m of teamTableData) {
+            rows.push(["Team", m.name, m.role, String(m.searches), String(m.leads), "", ""]);
+        }
+
+        rows.push(["", "", "", "", "", "", ""]);
+        rows.push(["--- Campaigns ---", "", "", "", "", "", ""]);
+        for (const c of campaignTableData) {
+            rows.push(["Campaign", c.name, c.status, String(c.sent), c.openRate, c.clickRate, ""]);
+        }
+
+        rows.push(["", "", "", "", "", "", ""]);
+        rows.push(["--- Pipeline ---", "", "", "", "", "", ""]);
+        for (const s of leadPipelineData) {
+            rows.push(["Pipeline", s.stage, "", String(s.leads), `${s.pct}%`, "", ""]);
+        }
+
+        rows.push(["", "", "", "", "", "", ""]);
+        rows.push(["--- Recent Leads ---", "", "", "", "", "", ""]);
+        for (const l of (allLeads ?? []).slice(0, 50)) {
+            rows.push(["Lead", l.name, l.status ?? "new", l.domain, String(l.exposureCount ?? 0), l.source ?? "manual", new Date(l.createdAt).toLocaleDateString()]);
+        }
+
+        downloadCSV(`CyberHook_Full_Report_${dateStr}.csv`, headers, rows);
+        setShowExportMenu(false);
+    }, [activityData, teamTableData, campaignTableData, leadPipelineData, allLeads, downloadCSV]);
+
+    const exportLeadsCSV = useCallback(() => {
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const headers = ["Name", "Domain", "Status", "Source", "Exposures", "LinkedIn", "Created"];
+        const rows = (allLeads ?? []).map((l) => [
+            l.name,
+            l.domain,
+            l.status ?? "new",
+            (l.source ?? "manual").replace(/_/g, " "),
+            String(l.exposureCount ?? 0),
+            l.linkedinUrl ?? "",
+            new Date(l.createdAt).toLocaleDateString(),
+        ]);
+        downloadCSV(`CyberHook_Leads_${dateStr}.csv`, headers, rows);
+        setShowExportMenu(false);
+    }, [allLeads, downloadCSV]);
+
+    const exportTeamCSV = useCallback(() => {
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const headers = ["Member", "Role", "Searches", "Leads Created"];
+        const rows = teamTableData.map((m) => [m.name, m.role, String(m.searches), String(m.leads)]);
+        downloadCSV(`CyberHook_Team_Performance_${dateStr}.csv`, headers, rows);
+        setShowExportMenu(false);
+    }, [teamTableData, downloadCSV]);
+
+    const exportCampaignsCSV = useCallback(() => {
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const headers = ["Campaign", "Status", "Recipients", "Sent", "Opened", "Clicked", "Open Rate", "Click Rate"];
+        const rows = campaignTableData.map((c) => [c.name, c.status, String(c.recipients), String(c.sent), String(c.opened), String(c.clicked), c.openRate, c.clickRate]);
+        downloadCSV(`CyberHook_Campaigns_${dateStr}.csv`, headers, rows);
+        setShowExportMenu(false);
+    }, [campaignTableData, downloadCSV]);
 
     if (isLoading) {
         return (
@@ -379,12 +718,37 @@ export default function ReportingPage() {
                                 onChange={(v) => setDateRange(v)}
                                 options={dateRangeOptions}
                             />
-                            <Button size="md" color="secondary" iconLeading={FileCheck02}>
+                            <Button size="md" color="secondary" iconLeading={FileCheck02} onClick={generatePerformanceReport}>
                                 Generate PDF Report
                             </Button>
-                            <Button size="md" color="secondary" iconLeading={DownloadCloud01}>
-                                Export Data
-                            </Button>
+                            <div className="relative">
+                                <Button size="md" color="secondary" iconLeading={DownloadCloud01} onClick={() => setShowExportMenu((prev) => !prev)}>
+                                    Export Data
+                                </Button>
+                                {showExportMenu && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                                        <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg border border-secondary bg-primary shadow-lg py-1">
+                                            <button className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-primary hover:bg-secondary_subtle transition-colors text-left" onClick={exportAllData}>
+                                                <DownloadCloud01 className="w-4 h-4 text-tertiary shrink-0" />
+                                                Export All Data
+                                            </button>
+                                            <button className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-primary hover:bg-secondary_subtle transition-colors text-left" onClick={exportLeadsCSV}>
+                                                <DownloadCloud01 className="w-4 h-4 text-tertiary shrink-0" />
+                                                Export Leads
+                                            </button>
+                                            <button className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-primary hover:bg-secondary_subtle transition-colors text-left" onClick={exportTeamCSV}>
+                                                <DownloadCloud01 className="w-4 h-4 text-tertiary shrink-0" />
+                                                Export Team Data
+                                            </button>
+                                            <button className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-primary hover:bg-secondary_subtle transition-colors text-left" onClick={exportCampaignsCSV}>
+                                                <DownloadCloud01 className="w-4 h-4 text-tertiary shrink-0" />
+                                                Export Campaigns
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     </div>
 
@@ -402,13 +766,14 @@ export default function ReportingPage() {
                         {/* ═══════════════════ OVERVIEW TAB ═══════════════════ */}
                         <Tabs.Panel id="overview">
                             <div className="flex flex-col gap-6">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
                                     <MetricsChart04
                                         title={searchStats?.total.toLocaleString() ?? "0"}
                                         subtitle="Total Searches"
                                         change={`${searchStats?.last30Days ?? 0}`}
                                         changeTrend="positive"
                                         changeDescription="last 30 days"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={leadStats?.total.toLocaleString() ?? "0"}
@@ -416,6 +781,7 @@ export default function ReportingPage() {
                                         change={`${leadStats?.newThisWeek ?? 0}`}
                                         changeTrend="positive"
                                         changeDescription="new this week"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={campaignStats?.totalEmailsSent.toLocaleString() ?? "0"}
@@ -423,6 +789,7 @@ export default function ReportingPage() {
                                         change={`${campaignStats?.active ?? 0} active`}
                                         changeTrend="positive"
                                         changeDescription="campaigns"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={eventStats?.total.toLocaleString() ?? "0"}
@@ -430,12 +797,13 @@ export default function ReportingPage() {
                                         change={`${eventStats?.upcoming ?? 0}`}
                                         changeTrend="positive"
                                         changeDescription="upcoming"
+                                        actions={false}
                                     />
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    <SearchesChart searches={allSearches ?? []} />
-                                    <LeadSourcesChart leads={allLeads ?? []} />
+                                    <SearchesChart searches={filteredSearches} />
+                                    <LeadSourcesChart leads={filteredLeads} />
                                 </div>
 
                                 {/* Activity Summary Table */}
@@ -563,13 +931,14 @@ export default function ReportingPage() {
                         {/* ═══════════════════ AI CAMPAIGNS TAB ═══════════════════ */}
                         <Tabs.Panel id="ai">
                             <div className="flex flex-col gap-6">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
                                     <MetricsChart04
                                         title={String(campaignStats?.active ?? 0)}
                                         subtitle="Active Campaigns"
                                         change={`${campaignStats?.total ?? 0} total`}
                                         changeTrend="positive"
                                         changeDescription=""
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={campaignStats?.totalEmailsSent.toLocaleString() ?? "0"}
@@ -577,6 +946,7 @@ export default function ReportingPage() {
                                         change={`${campaignStats?.totalRecipients ?? 0}`}
                                         changeTrend="positive"
                                         changeDescription="recipients"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(campaignStats?.draft ?? 0)}
@@ -584,6 +954,7 @@ export default function ReportingPage() {
                                         change={`${campaignStats?.paused ?? 0}`}
                                         changeTrend="positive"
                                         changeDescription="paused"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(campaignStats?.completed ?? 0)}
@@ -591,6 +962,7 @@ export default function ReportingPage() {
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
+                                        actions={false}
                                     />
                                 </div>
 
@@ -648,6 +1020,7 @@ export default function ReportingPage() {
                                         change={`${leadStats?.newThisWeek ?? 0}`}
                                         changeTrend="positive"
                                         changeDescription="new this week"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(leadStats?.byStatus?.["qualified"] ?? 0)}
@@ -655,6 +1028,7 @@ export default function ReportingPage() {
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(leadStats?.byStatus?.["contacted"] ?? 0)}
@@ -662,6 +1036,7 @@ export default function ReportingPage() {
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(leadStats?.byStatus?.["new"] ?? 0)}
@@ -669,6 +1044,7 @@ export default function ReportingPage() {
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
+                                        actions={false}
                                     />
                                 </div>
 

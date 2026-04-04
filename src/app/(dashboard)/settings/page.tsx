@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import { useQuery, useMutation, useAction } from "convex/react";
+import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import { useCurrentUser, useCompany, useTokens } from "@/hooks";
 import {
@@ -16,6 +18,7 @@ import {
     SearchLg,
     Zap,
 } from "@untitledui/icons";
+import PricingCards from "@/components/ui/pricing-cards";
 import { FileUpload } from "@/components/application/file-upload/file-upload-base";
 import { TabList, Tabs } from "@/components/application/tabs/tabs";
 import { Avatar } from "@/components/base/avatar/avatar";
@@ -37,47 +40,54 @@ const tabs = [
     { id: "plan", label: "Plan & Billing" },
     { id: "integrations", label: "Integrations" },
     { id: "audit", label: "Audit Log" },
+    { id: "usage", label: "Usage" },
 ];
 
 const integrationCategories = [
     {
         label: "EMAIL",
         items: [
-            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", icon: "📧", provider: "outlook_email" as const },
-            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", icon: "📧", provider: "gmail" as const },
+            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", logo: "OL", logoColor: "bg-blue-600", provider: "outlook_email" as const },
+            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", logo: "GM", logoColor: "bg-red-500", provider: "gmail" as const },
         ],
     },
     {
         label: "CALENDAR",
         items: [
-            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", icon: "📅", provider: "outlook_calendar" as const },
-            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", icon: "📅", provider: "google_calendar" as const },
+            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", logo: "OC", logoColor: "bg-blue-500", provider: "outlook_calendar" as const },
+            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", logo: "GC", logoColor: "bg-green-500", provider: "google_calendar" as const },
         ],
     },
     {
         label: "CRM",
         items: [
-            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", icon: "🔶", provider: "hubspot" as const },
-            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", icon: "🟢", provider: "ghl" as const },
+            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", logo: "HS", logoColor: "bg-orange-500", provider: "hubspot" as const },
+            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", logo: "GHL", logoColor: "bg-green-600", provider: "ghl" as const },
         ],
     },
     {
         label: "MESSAGING",
         items: [
-            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", icon: "💬", provider: "teams" as const },
-            { name: "Slack", description: "Send notifications and alerts to Slack channels", icon: "💬", provider: "slack" as const },
+            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", logo: "MT", logoColor: "bg-indigo-600", provider: "teams" as const },
+            { name: "Slack", description: "Send notifications and alerts to Slack channels", logo: "SL", logoColor: "bg-purple-500", provider: "slack" as const },
         ],
     },
     {
         label: "SOCIAL",
         items: [
-            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", icon: "🔗", provider: "linkedin" as const },
+            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", logo: "LI", logoColor: "bg-blue-700", provider: "linkedin" as const },
+        ],
+    },
+    {
+        label: "PSA / RMM",
+        items: [
+            { name: "ConnectWise", description: "Sync tickets, contacts, and companies with ConnectWise Manage", logo: "CW", logoColor: "bg-cyan-600", provider: "connectwise" as const },
         ],
     },
     {
         label: "PAYMENTS",
         items: [
-            { name: "Stripe", description: "Process payments and manage subscriptions", icon: "💳", provider: "stripe" as const },
+            { name: "Stripe", description: "Process payments and manage subscriptions", logo: "ST", logoColor: "bg-indigo-500", provider: "stripe" as const },
         ],
     },
 ];
@@ -179,12 +189,29 @@ function LoadingSpinner() {
 }
 
 export default function SettingsPage() {
-    const [selectedTab, setSelectedTab] = useState<string>("profile");
+    const searchParams = useSearchParams();
+    const validTabs = ["profile", "company", "team", "plan", "integrations", "audit", "usage"];
+    const tabFromUrl = searchParams.get("tab");
+    const [selectedTab, setSelectedTab] = useState<string>(
+        tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "profile"
+    );
     const [uploadedAvatar, setUploadedAvatar] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
 
     const [userSort, setUserSort] = useState<SortDescriptor>({ column: "name", direction: "ascending" });
     const [auditSort, setAuditSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
+
+    const [openUserMenu, setOpenUserMenu] = useState<string | null>(null);
+    const [editingRole, setEditingRole] = useState<{ userId: string; role: string } | null>(null);
+
+    const [auditSearch, setAuditSearch] = useState("");
+    const [auditDateFilter, setAuditDateFilter] = useState("");
+
+    const [showInviteModal, setShowInviteModal] = useState(false);
+    const [inviteEmail, setInviteEmail] = useState("");
+    const [inviteName, setInviteName] = useState("");
+    const [inviteRole, setInviteRole] = useState<"sales_rep" | "sales_admin" | "billing">("sales_rep");
+    const [isInviting, setIsInviting] = useState(false);
 
     const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
     const { company, isLoading: isCompanyLoading } = useCompany();
@@ -192,6 +219,11 @@ export default function SettingsPage() {
 
     const updateUser = useMutation(api.users.update);
     const updateCompany = useMutation(api.companies.update);
+    const createInvitation = useMutation(api.invitations.create);
+    const cancelInvitation = useMutation(api.invitations.cancel);
+    const createAuditLog = useMutation(api.audit.create);
+    const openPortal = useAction(api.stripe.createPortalSession);
+    const invitations = useQuery(api.invitations.list, companyId ? { companyId } : "skip");
 
     const teamMembers = useQuery(
         api.users.getByCompanyId,
@@ -234,6 +266,12 @@ export default function SettingsPage() {
                 firstName: data.firstName as string,
                 lastName: data.lastName as string,
             });
+            if (companyId) {
+                await createAuditLog({ companyId, userId: user._id, action: "user.updated", entityType: "user", entityId: user._id, details: "Profile updated" });
+            }
+            toast.success("Profile saved");
+        } catch (err) {
+            toast.error("Failed to save profile");
         } finally {
             setIsSaving(false);
         }
@@ -248,7 +286,6 @@ export default function SettingsPage() {
             await updateCompany({
                 id: company._id,
                 name: data.companyName as string,
-                locationId: data.locationId as string,
                 companyType: data.companyType as string,
                 website: data.website as string,
                 phone: data.phone as string,
@@ -262,8 +299,46 @@ export default function SettingsPage() {
                 mrrTarget: data.mrrTarget ? Number(data.mrrTarget) : undefined,
                 appointmentTarget: data.appointmentTarget ? Number(data.appointmentTarget) : undefined,
             });
+            if (companyId && user) {
+                await createAuditLog({ companyId, userId: user._id, action: "company.updated", entityType: "company", entityId: company._id, details: "Company settings updated" });
+            }
+            toast.success("Company settings saved");
+        } catch (err) {
+            toast.error("Failed to save company settings");
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleInviteUser = async () => {
+        if (!companyId || !user || !inviteEmail.trim()) return;
+        setIsInviting(true);
+        try {
+            await createInvitation({
+                companyId,
+                invitedByUserId: user._id,
+                email: inviteEmail.trim(),
+                role: inviteRole,
+            });
+            await createAuditLog({ companyId, userId: user._id, action: "user.created", entityType: "invitation", details: `Invited ${inviteEmail.trim()} as ${formatRole(inviteRole)}` });
+            toast.success(`Invitation sent to ${inviteEmail}`);
+            setInviteEmail("");
+            setInviteName("");
+            setInviteRole("sales_rep");
+            setShowInviteModal(false);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to send invitation");
+        } finally {
+            setIsInviting(false);
+        }
+    };
+
+    const handleCancelInvitation = async (id: string) => {
+        try {
+            await cancelInvitation({ id: id as Parameters<typeof cancelInvitation>[0]["id"] });
+            toast.success("Invitation cancelled");
+        } catch {
+            toast.error("Failed to cancel invitation");
         }
     };
 
@@ -279,6 +354,65 @@ export default function SettingsPage() {
 
     const planLabel = company?.planId ?? "Enterprise";
     const planPrice = company?.planId === "starter" ? "$99" : company?.planId === "pro" ? "$499" : "$1,250";
+    const currentPlanId = company?.planId ?? "enterprise";
+
+    const menuRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        function handleClickOutside(e: MouseEvent) {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                setOpenUserMenu(null);
+                setEditingRole(null);
+            }
+        }
+        if (openUserMenu) {
+            document.addEventListener("mousedown", handleClickOutside);
+            return () => document.removeEventListener("mousedown", handleClickOutside);
+        }
+    }, [openUserMenu]);
+
+    const handleRoleChange = async (userId: string, newRole: "sales_rep" | "sales_admin" | "billing") => {
+        await updateUser({ id: userId as Parameters<typeof updateUser>[0]["id"], role: newRole });
+        if (companyId && user) {
+            await createAuditLog({ companyId, userId: user._id, action: "user.updated", entityType: "user", entityId: userId, details: `Role changed to ${formatRole(newRole)}` });
+        }
+        toast.success(`Role updated to ${formatRole(newRole)}`);
+        setEditingRole(null);
+        setOpenUserMenu(null);
+    };
+
+    const handleToggleStatus = async (userId: string, currentStatus: string) => {
+        const newStatus: "approved" | "deactivated" = currentStatus === "deactivated" ? "approved" : "deactivated";
+        await updateUser({ id: userId as Parameters<typeof updateUser>[0]["id"], status: newStatus });
+        if (companyId && user) {
+            await createAuditLog({ companyId, userId: user._id, action: newStatus === "deactivated" ? "user.deactivated" : "user.approved", entityType: "user", entityId: userId, details: newStatus === "deactivated" ? "User deactivated" : "User reactivated" });
+        }
+        toast.success(newStatus === "deactivated" ? "User deactivated" : "User reactivated");
+        setOpenUserMenu(null);
+    };
+
+    const filteredAuditLogs = useMemo(() => {
+        if (!auditLogs) return [];
+        let filtered = [...auditLogs];
+        if (auditSearch.trim()) {
+            const q = auditSearch.toLowerCase();
+            filtered = filtered.filter((log) => {
+                const eventLabel = getAuditEventLabel(log.action).toLowerCase();
+                const userName = getUserName(log.userId).toLowerCase();
+                const details = (log.details ?? "").toLowerCase();
+                return eventLabel.includes(q) || userName.includes(q) || details.includes(q) || log.action.toLowerCase().includes(q);
+            });
+        }
+        if (auditDateFilter) {
+            const filterDate = new Date(auditDateFilter);
+            filtered = filtered.filter((log) => {
+                const logDate = new Date(log.createdAt);
+                return logDate.getFullYear() === filterDate.getFullYear() &&
+                    logDate.getMonth() === filterDate.getMonth() &&
+                    logDate.getDate() === filterDate.getDate();
+            });
+        }
+        return filtered;
+    }, [auditLogs, auditSearch, auditDateFilter, auditUserMap]);
 
     return (
         <main className="min-w-0 flex-1 bg-primary pt-8 pb-12">
@@ -406,7 +540,7 @@ export default function SettingsPage() {
                                             <Label>Company Name</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <TextField name="locationId" defaultValue={company?.locationId ?? ""}>
+                                        <TextField name="locationId" defaultValue={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`} isDisabled>
                                             <Label>Location ID</Label>
                                             <InputBase size="md" />
                                         </TextField>
@@ -545,7 +679,7 @@ export default function SettingsPage() {
                                     <div className="relative w-full sm:max-w-md">
                                         <InputBase type="text" size="md" placeholder="Search users..." className="w-full shadow-sm" icon={SearchLg} />
                                     </div>
-                                    <Button size="md" color="primary" iconLeading={Plus}>Invite User</Button>
+                                    <Button size="md" color="primary" iconLeading={Plus} onClick={() => setShowInviteModal(true)}>Invite User</Button>
                                 </div>
 
                                 {teamMembers === undefined ? <LoadingSpinner /> : (
@@ -577,13 +711,44 @@ export default function SettingsPage() {
                                                     <Table.Cell><Badge size="sm" color="gray">{formatRole(item.role)}</Badge></Table.Cell>
                                                     <Table.Cell>{getStatusBadge(item.status)}</Table.Cell>
                                                     <Table.Cell><span className="text-secondary">{formatRelativeTime(item.lastAccessedAt)}</span></Table.Cell>
-                                                    <Table.Cell><ButtonUtility size="sm" icon={DotsVertical} aria-label="Row actions" /></Table.Cell>
+                                                    <Table.Cell>
+                                                        <div className="relative" ref={openUserMenu === item._id ? menuRef : undefined}>
+                                                            <ButtonUtility
+                                                                size="sm"
+                                                                icon={DotsVertical}
+                                                                aria-label="Row actions"
+                                                                onClick={(e: React.MouseEvent) => {
+                                                                    e.stopPropagation();
+                                                                    setOpenUserMenu(openUserMenu === item._id ? null : item._id);
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </Table.Cell>
                                                 </Table.Row>
                                             )}
                                         </Table.Body>
                                     </Table>
                                     </div>
                                 </TableCard.Root>
+                                )}
+
+                                {/* Pending Invitations */}
+                                {invitations && invitations.filter((inv) => inv.status === "pending").length > 0 && (
+                                    <div className="flex flex-col gap-3 mt-4">
+                                        <h3 className="text-sm font-semibold text-tertiary uppercase">Pending Invitations</h3>
+                                        {invitations.filter((inv) => inv.status === "pending").map((inv) => (
+                                            <div key={inv._id} className="flex items-center justify-between p-4 border border-secondary rounded-lg bg-secondary_subtle">
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className="text-sm font-medium text-primary">{inv.email}</span>
+                                                    <span className="text-xs text-tertiary">Role: {formatRole(inv.role)} &middot; Invited {new Date(inv.createdAt).toLocaleDateString()}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge size="sm" color="warning">Pending</Badge>
+                                                    <Button size="sm" color="secondary" onClick={() => handleCancelInvitation(inv._id)}>Cancel</Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -594,48 +759,29 @@ export default function SettingsPage() {
                             <div className="flex flex-col gap-8">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
                                     <div className="flex flex-col gap-1">
-                                        <h2 className="text-lg font-semibold text-primary">Current Plan</h2>
-                                        <p className="text-sm text-tertiary">Manage your platform subscription and view limits.</p>
+                                        <h2 className="text-lg font-semibold text-primary">Plan & Billing</h2>
+                                        <p className="text-sm text-tertiary">Choose the plan that fits your team. Upgrade or downgrade anytime.</p>
                                     </div>
                                     <div className="flex items-center gap-3 mt-4 sm:mt-0">
-                                        <Button size="md" color="secondary" iconLeading={CreditCard02}>Update Payment Method</Button>
+                                        <Button size="md" color="secondary" iconLeading={CreditCard02} onClick={async () => {
+                                            try {
+                                                const result = await openPortal({
+                                                    returnUrl: `${window.location.origin}/settings?tab=plan`,
+                                                });
+                                                if (result?.url && (result.url.startsWith("https://checkout.stripe.com") || result.url.startsWith("https://billing.stripe.com"))) {
+                                                    window.location.href = result.url;
+                                                }
+                                            } catch (err) {
+                                                if (process.env.NODE_ENV === "development") console.error(err);
+                                                toast.error(err instanceof Error ? err.message : "Failed to open billing portal");
+                                            }
+                                        }}>Update Payment Method</Button>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    <div className="flex flex-col gap-6 p-6 border border-secondary rounded-2xl bg-secondary_subtle lg:col-span-2">
-                                        <div className="flex justify-between items-start">
-                                            <div className="flex flex-col gap-1">
-                                                <h3 className="text-lg font-semibold text-primary capitalize">{planLabel} Plan</h3>
-                                                <p className="text-sm border-tertiary">
-                                                    {company?.planStatus === "trialing"
-                                                        ? `Trial ends ${company?.trialEndsAt ? new Date(company.trialEndsAt).toLocaleDateString() : "soon"}`
-                                                        : "Billed annually"
-                                                    }
-                                                </p>
-                                            </div>
-                                            <h3 className="text-display-sm font-semibold text-primary">{planPrice}<span className="text-md text-tertiary font-normal">/mo</span></h3>
-                                        </div>
-
-                                        <div className="flex flex-col gap-3 mt-4">
-                                            <div className="flex items-center gap-2">
-                                                <CheckCircle className="w-5 h-5 text-brand-secondary" />
-                                                <span className="text-secondary">Unlimited AI Email Campaigns</span>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <CheckCircle className="w-5 h-5 text-brand-secondary" />
-                                                <span className="text-secondary">Custom Knowledge Base Uploads (Up to 50GB)</span>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <CheckCircle className="w-5 h-5 text-brand-secondary" />
-                                                <span className="text-secondary">CRM Integrations (Salesforce, HubSpot)</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-3 mt-4 pt-4 border-t border-secondary">
-                                            <Button size="md" color="primary" iconLeading={Zap}>Upgrade Plan</Button>
-                                            <Button size="md" color="secondary">Cancel Subscription</Button>
-                                        </div>
+                                <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+                                    <div className="xl:col-span-3">
+                                        <PricingCards currentPlanId={currentPlanId} />
                                     </div>
 
                                     <div className="flex flex-col gap-6 p-6 border border-secondary rounded-2xl bg-primary">
@@ -655,6 +801,10 @@ export default function SettingsPage() {
                                             <div className="w-full bg-secondary_subtle rounded-full h-2.5 overflow-hidden border border-secondary">
                                                 <div className="bg-brand-secondary h-2.5 rounded-full transition-all duration-300" style={{ width: `${Math.min(tokenPercentage, 100)}%` }}></div>
                                             </div>
+                                        </div>
+
+                                        <div className="mt-auto pt-4 border-t border-secondary">
+                                            <p className="text-xs text-tertiary">Tokens reset on a monthly billing cycle. Contact support for additional tokens or custom allocations.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -681,7 +831,7 @@ export default function SettingsPage() {
                                 {integrationCategories.map((category) => (
                                     <div key={category.label} className="flex flex-col gap-4">
                                         <h3 className="text-xs font-semibold text-tertiary tracking-wider uppercase">{category.label}</h3>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             {category.items.map((item) => {
                                                 const isConnected = item.provider === "stripe" && !!company?.stripeCustomerId;
                                                 return (
@@ -691,8 +841,8 @@ export default function SettingsPage() {
                                                     >
                                                         <div className="flex items-start justify-between">
                                                             <div className="flex items-center gap-3">
-                                                                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle text-lg">
-                                                                    {item.icon}
+                                                                <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-white text-xs font-bold ${item.logoColor}`}>
+                                                                    {item.logo}
                                                                 </div>
                                                                 <div className="flex flex-col gap-0.5">
                                                                     <span className="font-semibold text-primary">{item.name}</span>
@@ -721,6 +871,52 @@ export default function SettingsPage() {
                             </div>
                         )}
 
+                        {/* Usage Tab */}
+                        {selectedTab === "usage" && (
+                            <div className="flex flex-col gap-8">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-5">
+                                    <div className="flex flex-col gap-1">
+                                        <h2 className="text-lg font-semibold text-primary">Usage & Consumption</h2>
+                                        <p className="text-sm text-tertiary">Monitor your token usage, searches, and feature consumption.</p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="flex flex-col gap-6 p-6 border border-secondary rounded-2xl bg-secondary_subtle lg:col-span-2">
+                                        <div className="flex flex-col gap-1">
+                                            <h3 className="text-md font-semibold text-primary">Live Search Tokens</h3>
+                                            <p className="text-sm text-tertiary">Used for Live Search and Web Scanning.</p>
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex items-end justify-between">
+                                                <span className="text-3xl font-semibold text-primary">{tokensRemaining.toLocaleString()}</span>
+                                                <span className="text-sm font-medium text-tertiary pb-1">/ {tokenAllocation.toLocaleString()}</span>
+                                            </div>
+                                            <div className="w-full bg-secondary_subtle rounded-full h-2.5 overflow-hidden border border-secondary">
+                                                <div className="bg-brand-secondary h-2.5 rounded-full transition-all duration-300" style={{ width: `${Math.min(tokenPercentage, 100)}%` }} />
+                                            </div>
+                                        </div>
+                                        <div className="border-t border-secondary pt-4">
+                                            <p className="text-xs text-tertiary">Tokens reset on a monthly billing cycle ({resetDisplayText}). Contact support for additional tokens.</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col gap-4 p-6 border border-secondary rounded-2xl bg-primary">
+                                        <h3 className="text-md font-semibold text-primary">Current Plan</h3>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-display-xs font-semibold text-primary">{planPrice}</span>
+                                            <span className="text-sm text-tertiary">/mo</span>
+                                        </div>
+                                        <Badge size="md" color="brand">{planLabel}</Badge>
+                                        <div className="mt-auto pt-3 border-t border-secondary">
+                                            <Button size="sm" color="secondary" className="w-full" onClick={() => setSelectedTab("plan")}>
+                                                Manage Plan
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Audit Tab */}
                         {selectedTab === "audit" && (
                             <div className="flex flex-col gap-6">
@@ -733,17 +929,38 @@ export default function SettingsPage() {
 
                                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                     <div className="relative w-full sm:max-w-md">
-                                        <InputBase type="text" size="md" placeholder="Search audit events..." className="w-full shadow-sm" icon={SearchLg} />
+                                        <InputBase
+                                            type="text"
+                                            size="md"
+                                            placeholder="Search audit events..."
+                                            className="w-full shadow-sm"
+                                            icon={SearchLg}
+                                            value={auditSearch}
+                                            onChange={(value: string) => setAuditSearch(value)}
+                                        />
                                     </div>
                                     <div className="flex items-center gap-3 w-full sm:w-auto">
-                                        <InputBase type="date" size="md" className="w-full sm:w-auto shadow-sm" />
-                                        <Button size="md" color="secondary" iconLeading={FilterLines}>Filters</Button>
+                                        <InputBase
+                                            type="date"
+                                            size="md"
+                                            className="w-full sm:w-auto shadow-sm"
+                                            value={auditDateFilter}
+                                            onChange={(value: string) => setAuditDateFilter(value)}
+                                        />
+                                        <Button
+                                            size="md"
+                                            color="secondary"
+                                            iconLeading={FilterLines}
+                                            onClick={() => { setAuditSearch(""); setAuditDateFilter(""); }}
+                                        >
+                                            {auditSearch || auditDateFilter ? "Clear" : "Filters"}
+                                        </Button>
                                     </div>
                                 </div>
 
                                 {auditLogs === undefined ? <LoadingSpinner /> : (
                                 <TableCard.Root>
-                                    <TableCard.Header title="Activity Log" badge={`${auditLogs.length} Event${auditLogs.length === 1 ? "" : "s"}`} />
+                                    <TableCard.Header title="Activity Log" badge={`${filteredAuditLogs.length} Event${filteredAuditLogs.length === 1 ? "" : "s"}`} />
                                     <div className="overflow-x-auto">
                                     <Table aria-label="Audit Log" sortDescriptor={auditSort} onSortChange={setAuditSort}>
                                         <Table.Header>
@@ -755,7 +972,7 @@ export default function SettingsPage() {
                                                 <Table.Head id="date" allowsSorting>Date</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
-                                        <Table.Body items={auditLogs.map((log) => ({ ...log, id: log._id }))}>
+                                        <Table.Body items={filteredAuditLogs.map((log) => ({ ...log, id: log._id }))}>
                                             {(item) => (
                                                 <Table.Row id={item._id}>
                                                     <Table.Cell>
@@ -785,6 +1002,104 @@ export default function SettingsPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Floating dropdown for team member actions */}
+            {openUserMenu && (() => {
+                const member = teamMembers?.find((m) => m._id === openUserMenu);
+                if (!member) return null;
+                return (
+                    <div className="fixed inset-0 z-[60]" onClick={() => { setOpenUserMenu(null); setEditingRole(null); }}>
+                        <div
+                            ref={menuRef}
+                            className="fixed right-16 w-52 rounded-lg border border-secondary bg-primary shadow-xl"
+                            style={{ top: "50%", transform: "translateY(-50%)" }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {editingRole?.userId === member._id ? (
+                                <div className="flex flex-col p-1">
+                                    <span className="px-3 py-1.5 text-xs font-semibold text-tertiary">Select Role</span>
+                                    {(["sales_rep", "sales_admin", "billing"] as const).map((role) => (
+                                        <button
+                                            key={role}
+                                            type="button"
+                                            className={`flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-secondary_hover transition-colors ${member.role === role ? "text-brand-secondary font-medium" : "text-secondary"}`}
+                                            onClick={() => handleRoleChange(member._id, role)}
+                                        >
+                                            {member.role === role && <CheckCircle className="size-4 text-brand-secondary" />}
+                                            <span className={member.role === role ? "" : "pl-6"}>{formatRole(role)}</span>
+                                        </button>
+                                    ))}
+                                    <button type="button" className="mt-1 border-t border-secondary px-3 py-2 text-left text-sm text-tertiary hover:bg-secondary_hover rounded-b-md transition-colors" onClick={() => setEditingRole(null)}>Cancel</button>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col p-1">
+                                    <button type="button" className="rounded-md px-3 py-2 text-left text-sm text-secondary hover:bg-secondary_hover transition-colors" onClick={() => setEditingRole({ userId: member._id, role: member.role })}>Change Role</button>
+                                    <button
+                                        type="button"
+                                        className={`rounded-md px-3 py-2 text-left text-sm transition-colors ${member.status === "deactivated" ? "text-success-primary hover:bg-success-secondary" : "text-error-primary hover:bg-error-secondary"}`}
+                                        onClick={() => handleToggleStatus(member._id, member.status)}
+                                    >
+                                        {member.status === "deactivated" ? "Reactivate User" : "Deactivate User"}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
+
+            {/* Invite User Modal */}
+            {showInviteModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-primary border border-secondary rounded-xl p-6 shadow-xl max-w-md w-full mx-4">
+                        <h3 className="text-lg font-semibold text-primary mb-1">Invite Team Member</h3>
+                        <p className="text-sm text-tertiary mb-6">Send an invitation to join your team on CyberHook.</p>
+                        <div className="flex flex-col gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-secondary mb-1.5">Name</label>
+                                <input
+                                    type="text"
+                                    value={inviteName}
+                                    onChange={(e) => setInviteName(e.target.value)}
+                                    placeholder="Full name"
+                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-secondary mb-1.5">Email *</label>
+                                <input
+                                    type="email"
+                                    value={inviteEmail}
+                                    onChange={(e) => setInviteEmail(e.target.value)}
+                                    placeholder="colleague@company.com"
+                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-secondary mb-1.5">Role</label>
+                                <NativeSelect
+                                    aria-label="Role"
+                                    value={inviteRole}
+                                    onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
+                                    options={[
+                                        { label: "Sales Rep", value: "sales_rep" },
+                                        { label: "Sales Admin", value: "sales_admin" },
+                                        { label: "Billing", value: "billing" },
+                                    ]}
+                                    className="w-full"
+                                    selectClassName="text-sm"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-3 mt-6">
+                            <Button color="secondary" size="md" onClick={() => { setShowInviteModal(false); setInviteEmail(""); setInviteName(""); }}>Cancel</Button>
+                            <Button color="primary" size="md" onClick={handleInviteUser} isDisabled={!inviteEmail.trim() || isInviting} isLoading={isInviting}>
+                                Send Invitation
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </main>
     );
 }

@@ -8,7 +8,7 @@ import { cx, sortCx } from "@/utils/cx";
 
 const styles = sortCx({
     root: "group relative flex w-full cursor-pointer items-center rounded-md bg-primary outline-focus-ring transition duration-100 ease-linear select-none hover:bg-primary_hover focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2",
-    rootSelected: "!bg-gray-100 hover:!bg-gray-200",
+    rootSelected: "!bg-brand-50 hover:!bg-brand-100",
 });
 
 interface NavItemBaseProps {
@@ -35,7 +35,7 @@ interface NavItemBaseProps {
 }
 
 export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, truncate = true, onClick }: NavItemBaseProps) => {
-    const iconElement = Icon && <Icon aria-hidden="true" className={cx("mr-2 size-5 shrink-0 text-fg-quaternary transition-inherit-all", current && "!text-gray-900")} />;
+    const iconElement = Icon && <Icon aria-hidden="true" className={cx("mr-2 size-5 shrink-0 text-fg-quaternary transition-inherit-all", current && "!text-brand-700")} />;
 
     const badgeElement =
         badge && (typeof badge === "string" || typeof badge === "number") ? (
@@ -49,9 +49,9 @@ export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, 
     const labelElement = (
         <span
             className={cx(
-                "flex-1 text-md font-semibold text-secondary transition-inherit-all group-hover:text-secondary_hover",
+                "flex-1 text-md font-medium text-secondary transition-inherit-all group-hover:text-secondary_hover",
                 truncate && "truncate",
-                current && "!text-gray-900",
+                current && "!text-brand-700 !font-semibold",
             )}
         >
             {children}

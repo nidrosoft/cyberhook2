@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
     AlertCircle,
     BookmarkCheck,
@@ -27,8 +29,10 @@ import { Button } from "@/components/base/buttons/button";
 import { InputBase } from "@/components/base/input/input";
 import { PaginationCardMinimal } from "@/components/application/pagination/pagination";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
+import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-menu";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useCompany } from "@/hooks/use-company";
+import { generateExposureReport } from "@/lib/pdf-report";
 import { api } from "../../../../convex/_generated/api";
 import type { RedrokSearchResult } from "../../../../convex/redrokApi";
 
@@ -68,7 +72,8 @@ function getSeverityBadge(severity: number): { color: "error" | "warning" | "suc
 
 export default function LiveSearchPage() {
     const { user, companyId } = useCurrentUser();
-    const { tokensRemaining, tokenAllocation, isLoading: isCompanyLoading } = useCompany();
+    const { company: companyData, tokensRemaining, tokenAllocation, isLoading: isCompanyLoading } = useCompany();
+    const isTrial = companyData?.status === "trial";
 
     // Fetch recent searches from Convex
     const recentSearches = useQuery(
@@ -79,7 +84,6 @@ export default function LiveSearchPage() {
     // Mutations & Actions
     const createSearch = useMutation(api.searches.create);
     const redrokLiveSearch = useAction(api.redrokApi.liveSearch);
-    const redrokReport = useAction(api.redrokApi.generateReport);
     const addToWatchlist = useMutation(api.watchlist.add);
     const createLead = useMutation(api.leads.create);
 
@@ -92,6 +96,8 @@ export default function LiveSearchPage() {
     const [domain, setDomain] = useState("");
     const [searchError, setSearchError] = useState<string | null>(null);
     const [currentSearchResults, setCurrentSearchResults] = useState<RedrokSearchResult[]>([]);
+    const [selectedResult, setSelectedResult] = useState<RedrokSearchResult | null>(null);
+
 
     const tokensTotal = tokenAllocation ?? 0;
     const tokensLeft = tokensRemaining ?? 0;
@@ -140,7 +146,7 @@ export default function LiveSearchPage() {
                 setSearchState("idle");
             }
         } catch (error) {
-            console.error("Search failed:", error);
+            devError("Search failed:", error);
             setSearchError(error instanceof Error ? error.message : "Search failed. Please try again.");
             setSearchState("idle");
         }
@@ -155,10 +161,10 @@ export default function LiveSearchPage() {
                 domain: domain.trim().toLowerCase(),
                 companyName: domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1),
             });
-            alert(`${domain} added to watchlist!`);
+            toast.success(`${domain} added to watchlist!`);
         } catch (error) {
-            console.error("Failed to add to watchlist:", error);
-            alert(error instanceof Error ? error.message : "Failed to add to watchlist");
+            devError("Failed to add to watchlist:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to add to watchlist");
         }
     }
 
@@ -181,10 +187,10 @@ export default function LiveSearchPage() {
                 industry: currentSearchResults[0]?.industry || undefined,
                 country: currentSearchResults[0]?.country || undefined,
             });
-            alert(`Lead created for ${companyName}!`);
+            toast.success(`Lead created for ${companyName}!`);
         } catch (error) {
-            console.error("Failed to create lead:", error);
-            alert(error instanceof Error ? error.message : "Failed to create lead");
+            devError("Failed to create lead:", error);
+            toast.error(error instanceof Error ? error.message : "Failed to create lead");
         }
     }
 
@@ -198,7 +204,7 @@ export default function LiveSearchPage() {
 
 
     return (
-        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
+        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto relative">
             <div className="flex flex-col gap-8">
                 {/* Token Display Bar */}
                 <div className="p-5 border border-secondary rounded-xl bg-primary">
@@ -377,24 +383,33 @@ export default function LiveSearchPage() {
                                 </div>
                                 <div className="flex flex-col">
                                     <h2 className="text-display-xs font-semibold text-primary">{domain}</h2>
-                                    <div className="flex items-center gap-3 text-sm text-tertiary mt-1">
-                                        <span className="flex items-center gap-1"><ShieldOff className="w-4 h-4 text-error-500" /> {currentSearchResults.length} Compromised Credentials</span>
-                                        <span>•</span>
-                                        <span>Last scanned: Just now</span>
+                                    <div className="flex flex-col gap-0.5 mt-1">
+                                        <div className="flex items-center gap-3 text-sm text-tertiary">
+                                            <span className="flex items-center gap-1">
+                                                <ShieldOff className="w-4 h-4 text-error-500" />
+                                                {currentSearchResults.length >= 15 ? "15+" : currentSearchResults.length} Compromised Credentials
+                                            </span>
+                                            <span>•</span>
+                                            <span>Last scanned: Just now</span>
+                                        </div>
+                                        {currentSearchResults.length >= 15 && (
+                                            <span className="text-xs text-tertiary">Showing sample records. Actual count may be higher.</span>
+                                        )}
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         {/* Summary Cards */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch">
                             <MetricsChart04 
-                                title={currentSearchResults.length.toString()} 
+                                title={currentSearchResults.length >= 15 ? "15+" : currentSearchResults.length.toString()} 
                                 subtitle="Compromised Credentials" 
                                 change={new Set(currentSearchResults.map(r => r.source).filter(Boolean)).size.toString()} 
                                 changeTrend="negative" 
                                 changeDescription="data sources" 
                                 chartColor="text-fg-error-secondary" 
+                                actions={false}
                             />
                             <MetricsChart04 
                                 title={new Set(currentSearchResults.map(r => r.username).filter(Boolean)).size.toString()} 
@@ -403,6 +418,7 @@ export default function LiveSearchPage() {
                                 changeTrend="negative" 
                                 changeDescription="via infostealers" 
                                 chartColor="text-fg-warning-secondary" 
+                                actions={false}
                             />
                             <MetricsChart04 
                                 title="Just now" 
@@ -411,12 +427,61 @@ export default function LiveSearchPage() {
                                 changeTrend="negative" 
                                 changeDescription="Dark Web Intelligence" 
                                 chartColor="text-fg-error-secondary" 
+                                actions={false}
                             />
+                        </div>
+
+                        {/* Action Bar */}
+                        <div className="flex flex-wrap items-center gap-3 p-4 border border-secondary rounded-xl bg-secondary_subtle">
+                            <Button 
+                                color="secondary" 
+                                iconLeading={DownloadCloud01}
+                                onClick={() => {
+                                    const companyName = currentSearchResults[0]?.companyName || 
+                                        (domain.includes(".") ? domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1) : domain);
+                                    generateExposureReport({
+                                        domain: domain.trim().toLowerCase(),
+                                        companyName,
+                                        credentials: currentSearchResults.map(r => ({
+                                            username: r.username || "",
+                                            password: r.password || "",
+                                            url: r.url || "",
+                                            source: r.source || "",
+                                            severity: r.severity || 0,
+                                            timestamp: r.timestamp || r.infectedAt || "",
+                                            stealer: r.stealer,
+                                            breachName: r.breachName,
+                                            country: r.country,
+                                            computerName: r.computerName,
+                                            operatingSystem: r.operatingSystem,
+                                        })),
+                                        isTrial,
+                                        generatedAt: new Date(),
+                                    });
+                                }}
+                            >
+                                Download Report (PDF)
+                            </Button>
+                            <Button color="secondary" iconLeading={BookmarkCheck} onClick={handleAddToWatchlist}>
+                                Add {domain} to Watchlist
+                            </Button>
+                            <Button color="secondary" iconLeading={Plus} onClick={handleCreateLead}>
+                                Create Lead from Results
+                            </Button>
+                            <Button color="primary" iconLeading={SearchLg} onClick={handleSearch}>
+                                Re-scan (1 Token)
+                            </Button>
                         </div>
 
                         {/* Results Table */}
                         <div className="flex flex-col gap-4">
                             <h3 className="text-lg font-semibold text-primary">Compromised Credentials</h3>
+                            {isTrial && (
+                                <div className="flex items-center gap-2 text-sm text-warning-700 bg-warning-50 border border-warning-200 px-4 py-2.5 rounded-lg">
+                                    <Lock01 className="w-4 h-4 shrink-0" />
+                                    <span>You&apos;re on a trial plan. Upgrade to view full credentials.</span>
+                                </div>
+                            )}
                             <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
                                 <Table
                                     aria-label="Search Results"
@@ -443,7 +508,7 @@ export default function LiveSearchPage() {
                                                         <div className="flex items-center gap-2">
                                                             <Mail01 className="w-4 h-4 text-tertiary shrink-0" />
                                                             <span className="font-medium text-primary text-sm truncate max-w-[180px]">
-                                                                {maskValue(item.username)}
+                                                                {isTrial ? maskValue(item.username) : item.username}
                                                             </span>
                                                         </div>
                                                     </Table.Cell>
@@ -451,13 +516,13 @@ export default function LiveSearchPage() {
                                                         <div className="flex items-center gap-1.5">
                                                             <Lock01 className="w-3.5 h-3.5 text-tertiary" />
                                                             <span className="text-sm text-secondary font-mono">
-                                                                {maskValue(item.password)}
+                                                                {isTrial ? maskValue(item.password) : item.password}
                                                             </span>
                                                         </div>
                                                     </Table.Cell>
                                                     <Table.Cell>
                                                         <span className="text-sm text-tertiary truncate max-w-[160px] block">
-                                                            {item.url ? maskValue(item.url) : "—"}
+                                                            {item.url ? (isTrial ? maskValue(item.url) : item.url) : "—"}
                                                         </span>
                                                     </Table.Cell>
                                                     <Table.Cell>
@@ -478,10 +543,7 @@ export default function LiveSearchPage() {
                                                             size="sm"
                                                             color="secondary"
                                                             iconLeading={Eye}
-                                                            onClick={() => {
-                                                                // Detail view — for now just show info
-                                                                alert(`Computer: ${item.computerName || "N/A"}\nOS: ${item.operatingSystem || "N/A"}\nLocation: ${item.country || "N/A"}\nBreach: ${item.breachName || "N/A"}`);
-                                                            }}
+                                                            onClick={() => setSelectedResult(item)}
                                                         >
                                                             Details
                                                         </Button>
@@ -505,40 +567,89 @@ export default function LiveSearchPage() {
                             </TableCard.Root>
                         </div>
 
-                        {/* Action Bar */}
-                        <div className="flex flex-wrap items-center gap-3 p-4 border border-secondary rounded-xl bg-secondary_subtle">
-                            <Button 
-                                color="secondary" 
-                                iconLeading={DownloadCloud01}
-                                onClick={async () => {
-                                    if (!companyId) return;
-                                    try {
-                                        const result = await redrokReport({ companyId, domain: domain.trim().toLowerCase() });
-                                        if (result.success) {
-                                            alert("Report generation requested. The PDF will be available shortly.");
-                                        } else {
-                                            alert(result.error || "Failed to generate report");
-                                        }
-                                    } catch (e) {
-                                        alert(e instanceof Error ? e.message : "Failed to generate report");
-                                    }
-                                }}
-                            >
-                                Download Report (PDF)
-                            </Button>
-                            <Button color="secondary" iconLeading={BookmarkCheck} onClick={handleAddToWatchlist}>
-                                Add {domain} to Watchlist
-                            </Button>
-                            <Button color="secondary" iconLeading={Plus} onClick={handleCreateLead}>
-                                Create Lead from Results
-                            </Button>
-                            <Button color="primary" iconLeading={SearchLg} onClick={handleSearch}>
-                                Re-scan (1 Token)
-                            </Button>
-                        </div>
                     </div>
                 )}
             </div>
+
+            {/* Details Side Panel */}
+            <SlideoutMenu
+                isOpen={selectedResult !== null}
+                onOpenChange={(isOpen) => { if (!isOpen) setSelectedResult(null); }}
+            >
+                {({ close }) => {
+                    const r = selectedResult;
+                    if (!r) return null;
+
+                    const detailRows: { label: string; value: string; masked?: boolean }[] = [
+                        { label: "Username / Email", value: r.username, masked: true },
+                        { label: "Password", value: r.password, masked: true },
+                        { label: "URL", value: r.url, masked: true },
+                        { label: "Source", value: r.source },
+                        { label: "Severity", value: r.severity != null ? `${r.severity} — ${getSeverityBadge(r.severity).label}` : "" },
+                        { label: "Date", value: formatApiDate(r.timestamp || r.infectedAt) },
+                        { label: "Computer Name", value: r.computerName },
+                        { label: "Operating System", value: r.operatingSystem },
+                        { label: "Country", value: r.country },
+                        { label: "Location", value: r.location },
+                        { label: "Breach Name", value: r.breachName },
+                        { label: "Stealer", value: r.stealer },
+                        { label: "Application", value: r.application },
+                        { label: "IP Address", value: r.ip },
+                        { label: "Domain", value: r.domain },
+                        { label: "Industry", value: r.industry },
+                        { label: "Infected File", value: r.infectedFileLocation },
+                        { label: "Local User", value: r.localUser },
+                        { label: "Computer CPU", value: r.computerCPU },
+                        { label: "Computer GPU", value: r.computerGPU },
+                        { label: "Computer RAM", value: r.computerRAM },
+                        { label: "Antivirus", value: r.computerAV },
+                        { label: "Screen Size", value: r.screenSize },
+                    ];
+
+                    return (
+                        <>
+                            <SlideoutMenu.Header onClose={close}>
+                                <div className="flex items-center gap-3 pr-8">
+                                    <div className="w-10 h-10 rounded-lg bg-error-50 flex items-center justify-center">
+                                        <ShieldOff className="w-5 h-5 text-error-600" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-lg font-semibold text-primary">Credential Details</h2>
+                                        <p className="text-sm text-tertiary">{r.domain || domain}</p>
+                                    </div>
+                                </div>
+                            </SlideoutMenu.Header>
+
+                            <SlideoutMenu.Content>
+                                {isTrial && (
+                                    <div className="flex items-center gap-2 text-sm text-warning-700 bg-warning-50 border border-warning-200 px-3 py-2 rounded-lg">
+                                        <Lock01 className="w-4 h-4 shrink-0" />
+                                        <span>Trial plan — some values are masked.</span>
+                                    </div>
+                                )}
+                                <div className="flex flex-col divide-y divide-secondary">
+                                    {detailRows.map((row) => {
+                                        if (!row.value) return null;
+                                        const displayValue = row.masked && isTrial ? maskValue(row.value) : row.value;
+                                        return (
+                                            <div key={row.label} className="flex flex-col gap-0.5 py-3">
+                                                <span className="text-xs font-medium text-tertiary uppercase tracking-wide">{row.label}</span>
+                                                <span className="text-sm text-primary font-mono break-all">{displayValue}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </SlideoutMenu.Content>
+
+                            <SlideoutMenu.Footer>
+                                <Button color="secondary" className="w-full" onClick={close}>
+                                    Close
+                                </Button>
+                            </SlideoutMenu.Footer>
+                        </>
+                    );
+                }}
+            </SlideoutMenu>
         </div>
     );
 }

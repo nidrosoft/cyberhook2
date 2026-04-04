@@ -35,9 +35,11 @@ export const completeOnboarding = mutation({
     teamEmails: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    // Verify the caller is the same user as the clerkId they're claiming
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity || identity.subject !== args.clerkId) {
+    if (!identity) {
+      throw new Error("Unauthorized: not authenticated");
+    }
+    if (identity.subject !== args.clerkId) {
       throw new Error("Unauthorized: identity mismatch");
     }
 
@@ -60,6 +62,8 @@ export const completeOnboarding = mutation({
       };
     }
 
+    const locationId = "LOC-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+
     // Create company
     const companyId = await ctx.db.insert("companies", {
       name: args.companyName,
@@ -76,6 +80,7 @@ export const completeOnboarding = mutation({
       country: args.country,
       streetAddress: args.streetAddress,
       notes: args.notes,
+      locationId,
       // Create initial location if address provided
       locations: args.streetAddress
         ? [
@@ -152,6 +157,14 @@ export const checkOnboardingStatus = mutation({
     clerkId: v.string(),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: not authenticated");
+    }
+    if (identity.subject !== args.clerkId) {
+      throw new Error("Unauthorized: identity mismatch");
+    }
+
     const user = await ctx.db
       .query("users")
       .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
@@ -211,6 +224,19 @@ export const updateOnboardingData = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: not authenticated");
+    }
+
+    const callingUser = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .first();
+    if (!callingUser || callingUser.companyId !== args.companyId) {
+      throw new Error("Forbidden: access denied");
+    }
+
     const { companyId, companyName, ...updates } = args;
 
     const filteredUpdates: Record<string, unknown> = {};

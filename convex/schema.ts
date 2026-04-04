@@ -26,6 +26,11 @@ export default defineSchema({
     ),
     timezone: v.optional(v.string()),
     emailNotifications: v.optional(v.boolean()),
+    inAppNotifications: v.optional(v.boolean()),
+    slackNotifications: v.optional(v.boolean()),
+    teamsNotifications: v.optional(v.boolean()),
+    notificationFrequency: v.optional(v.string()),
+    criticalAlertsOnly: v.optional(v.boolean()),
     // Guided tour (V2)
     guidedTourCompleted: v.optional(v.boolean()),
     guidedTourCompletedAt: v.optional(v.number()),
@@ -158,6 +163,7 @@ export default defineSchema({
     exposureCount: v.optional(v.number()),
     lastExposureDate: v.optional(v.number()),
     exposureSeverity: v.optional(v.string()),
+    lastScanDate: v.optional(v.number()),
     // V2 Enrichment data
     enrichmentData: v.optional(
       v.object({
@@ -343,6 +349,7 @@ export default defineSchema({
     status: v.union(v.literal("pending"), v.literal("completed")),
     // Linked entities
     linkedLeadId: v.optional(v.id("leads")),
+    linkedContactId: v.optional(v.id("contacts")),
     linkedWatchlistId: v.optional(v.id("watchlistItems")),
     completedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -552,7 +559,9 @@ export default defineSchema({
       v.literal("no_bid")
     ),
     assignedToUserId: v.optional(v.id("users")),
+    assigneeName: v.optional(v.string()),
     estimatedValue: v.optional(v.number()),
+    rfpLink: v.optional(v.string()),
     notes: v.optional(v.string()),
     linkedUseCaseId: v.optional(v.id("useCases")),
     createdAt: v.number(),

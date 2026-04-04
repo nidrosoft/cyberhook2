@@ -60,9 +60,9 @@ export const NavAccountMenu = ({
         >
             <div className="rounded-xl bg-primary ring-1 ring-secondary">
                 <div className="flex flex-col gap-0.5 py-1.5">
-                    <NavAccountCardMenuItem label="View profile" icon={User01} />
+                    <NavAccountCardMenuItem label="View profile" icon={User01} href="/settings?tab=profile" />
                     <NavAccountCardMenuItem label="Account settings" icon={Settings01} href="/settings" />
-                    <NavAccountCardMenuItem label="Documentation" icon={BookOpen01} />
+                    <NavAccountCardMenuItem label="Documentation" icon={BookOpen01} href="https://docs.cyberhook.com" />
                 </div>
             </div>
 

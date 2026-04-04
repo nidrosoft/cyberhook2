@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
+import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import {
     Plus,
@@ -247,6 +248,8 @@ export default function EventsPage() {
     const [aptDuration, setAptDuration] = useState("30");
     const [aptNotes, setAptNotes] = useState("");
 
+    const [viewingEvent, setViewingEvent] = useState<typeof events[0] | null>(null);
+
     if (!userData) {
         return (
             <div className="flex h-full w-full items-center justify-center bg-primary">
@@ -304,6 +307,7 @@ export default function EventsPage() {
             description: evtDescription || undefined,
         });
 
+        toast.success("Event created");
         setEvtTitle("");
         setEvtType("conference");
         setEvtStartDate("");
@@ -338,6 +342,7 @@ export default function EventsPage() {
             isVirtual: true,
         });
 
+        toast.success("Appointment scheduled");
         setAptTitle("");
         setAptDate("");
         setAptTime("");
@@ -401,12 +406,60 @@ export default function EventsPage() {
                                                 </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">Start Time</label>
-                                                    <input
-                                                        type="time"
-                                                        value={evtStartTime}
-                                                        onChange={(e) => setEvtStartTime(e.target.value)}
-                                                        className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500"
-                                                    />
+                                                    <div className="grid grid-cols-3 gap-2">
+                                                        <NativeSelect
+                                                            aria-label="Hour"
+                                                            value={evtStartTime ? evtStartTime.split(":")[0] : ""}
+                                                            onChange={(e) => {
+                                                                const min = evtStartTime ? evtStartTime.split(":")[1] || "00" : "00";
+                                                                setEvtStartTime(`${e.target.value}:${min}`);
+                                                            }}
+                                                            options={[
+                                                                { label: "Hour", value: "" },
+                                                                ...Array.from({ length: 24 }, (_, i) => ({
+                                                                    label: String(i === 0 ? 12 : i > 12 ? i - 12 : i).padStart(2, "0"),
+                                                                    value: String(i).padStart(2, "0"),
+                                                                })),
+                                                            ]}
+                                                            className="w-full"
+                                                            selectClassName="text-sm"
+                                                        />
+                                                        <NativeSelect
+                                                            aria-label="Minute"
+                                                            value={evtStartTime ? evtStartTime.split(":")[1] || "00" : ""}
+                                                            onChange={(e) => {
+                                                                const hr = evtStartTime ? evtStartTime.split(":")[0] || "09" : "09";
+                                                                setEvtStartTime(`${hr}:${e.target.value}`);
+                                                            }}
+                                                            options={[
+                                                                { label: "Min", value: "" },
+                                                                ...Array.from({ length: 12 }, (_, i) => ({
+                                                                    label: String(i * 5).padStart(2, "0"),
+                                                                    value: String(i * 5).padStart(2, "0"),
+                                                                })),
+                                                            ]}
+                                                            className="w-full"
+                                                            selectClassName="text-sm"
+                                                        />
+                                                        <NativeSelect
+                                                            aria-label="AM/PM"
+                                                            value={evtStartTime && parseInt(evtStartTime.split(":")[0]) >= 12 ? "PM" : "AM"}
+                                                            onChange={(e) => {
+                                                                if (!evtStartTime) return;
+                                                                let hr = parseInt(evtStartTime.split(":")[0]);
+                                                                const min = evtStartTime.split(":")[1] || "00";
+                                                                if (e.target.value === "PM" && hr < 12) hr += 12;
+                                                                if (e.target.value === "AM" && hr >= 12) hr -= 12;
+                                                                setEvtStartTime(`${String(hr).padStart(2, "0")}:${min}`);
+                                                            }}
+                                                            options={[
+                                                                { label: "AM", value: "AM" },
+                                                                { label: "PM", value: "PM" },
+                                                            ]}
+                                                            className="w-full"
+                                                            selectClassName="text-sm"
+                                                        />
+                                                    </div>
                                                 </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">End Date</label>
@@ -476,13 +529,14 @@ export default function EventsPage() {
                         <Tabs.Panel id="upcoming">
                             <div className="flex flex-col gap-6">
                                 {/* Summary Stats */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
                                     <MetricsChart04
                                         title={String(stats?.total ?? 0)}
                                         subtitle="Total Events"
                                         change={String(stats?.upcoming ?? 0)}
                                         changeTrend="positive"
                                         changeDescription="upcoming"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(stats?.thisWeek ?? 0)}
@@ -490,6 +544,7 @@ export default function EventsPage() {
                                         change={String(stats?.upcoming ?? 0)}
                                         changeTrend="positive"
                                         changeDescription="upcoming total"
+                                        actions={false}
                                     />
                                     <MetricsChart04
                                         title={String(stats?.upcoming ?? 0)}
@@ -497,6 +552,7 @@ export default function EventsPage() {
                                         change={String(Object.keys(stats?.byType ?? {}).length)}
                                         changeTrend="positive"
                                         changeDescription="event types"
+                                        actions={false}
                                     />
                                 </div>
 
@@ -585,7 +641,7 @@ export default function EventsPage() {
                                                         </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <Button size="sm" color="secondary">
+                                                        <Button size="sm" color="secondary" onClick={() => setViewingEvent(item)}>
                                                             View Details
                                                         </Button>
                                                     </Table.Cell>
@@ -643,12 +699,60 @@ export default function EventsPage() {
                                                             </div>
                                                             <div>
                                                                 <label className="block text-sm font-medium text-secondary mb-1.5">Time</label>
-                                                                <input
-                                                                    type="time"
-                                                                    value={aptTime}
-                                                                    onChange={(e) => setAptTime(e.target.value)}
-                                                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500"
-                                                                />
+                                                                <div className="grid grid-cols-3 gap-2">
+                                                                    <NativeSelect
+                                                                        aria-label="Hour"
+                                                                        value={aptTime ? aptTime.split(":")[0] : ""}
+                                                                        onChange={(e) => {
+                                                                            const min = aptTime ? aptTime.split(":")[1] || "00" : "00";
+                                                                            setAptTime(`${e.target.value}:${min}`);
+                                                                        }}
+                                                                        options={[
+                                                                            { label: "Hour", value: "" },
+                                                                            ...Array.from({ length: 24 }, (_, i) => ({
+                                                                                label: String(i === 0 ? 12 : i > 12 ? i - 12 : i).padStart(2, "0"),
+                                                                                value: String(i).padStart(2, "0"),
+                                                                            })),
+                                                                        ]}
+                                                                        className="w-full"
+                                                                        selectClassName="text-sm"
+                                                                    />
+                                                                    <NativeSelect
+                                                                        aria-label="Minute"
+                                                                        value={aptTime ? aptTime.split(":")[1] || "00" : ""}
+                                                                        onChange={(e) => {
+                                                                            const hr = aptTime ? aptTime.split(":")[0] || "09" : "09";
+                                                                            setAptTime(`${hr}:${e.target.value}`);
+                                                                        }}
+                                                                        options={[
+                                                                            { label: "Min", value: "" },
+                                                                            ...Array.from({ length: 12 }, (_, i) => ({
+                                                                                label: String(i * 5).padStart(2, "0"),
+                                                                                value: String(i * 5).padStart(2, "0"),
+                                                                            })),
+                                                                        ]}
+                                                                        className="w-full"
+                                                                        selectClassName="text-sm"
+                                                                    />
+                                                                    <NativeSelect
+                                                                        aria-label="AM/PM"
+                                                                        value={aptTime && parseInt(aptTime.split(":")[0]) >= 12 ? "PM" : "AM"}
+                                                                        onChange={(e) => {
+                                                                            if (!aptTime) return;
+                                                                            let hr = parseInt(aptTime.split(":")[0]);
+                                                                            const min = aptTime.split(":")[1] || "00";
+                                                                            if (e.target.value === "PM" && hr < 12) hr += 12;
+                                                                            if (e.target.value === "AM" && hr >= 12) hr -= 12;
+                                                                            setAptTime(`${String(hr).padStart(2, "0")}:${min}`);
+                                                                        }}
+                                                                        options={[
+                                                                            { label: "AM", value: "AM" },
+                                                                            { label: "PM", value: "PM" },
+                                                                        ]}
+                                                                        className="w-full"
+                                                                        selectClassName="text-sm"
+                                                                    />
+                                                                </div>
                                                             </div>
                                                             <div>
                                                                 <label className="block text-sm font-medium text-secondary mb-1.5">Duration</label>
@@ -737,7 +841,7 @@ export default function EventsPage() {
                                                             {item.meetingUrl && (
                                                                 <Button size="sm" color="primary">Join</Button>
                                                             )}
-                                                            <Button size="sm" color="secondary">View Details</Button>
+                                                            <Button size="sm" color="secondary" onClick={() => setViewingEvent(item)}>View Details</Button>
                                                         </div>
                                                     </Table.Cell>
                                                 </Table.Row>
@@ -752,6 +856,88 @@ export default function EventsPage() {
 
                 </div>
             </div>
+
+            {/* Event Detail Slideout */}
+            {viewingEvent && (
+                <div className="fixed inset-0 z-50 flex justify-end">
+                    <div className="absolute inset-0 bg-black/50" onClick={() => setViewingEvent(null)} />
+                    <div className="relative w-full max-w-[480px] bg-primary border-l border-secondary shadow-xl flex flex-col h-full animate-in slide-in-from-right">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-secondary">
+                            <h2 className="text-lg font-semibold text-primary">Event Details</h2>
+                            <button onClick={() => setViewingEvent(null)} className="text-tertiary hover:text-secondary transition-colors text-xl">&times;</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-6 py-5">
+                            <div className="flex flex-col gap-5">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-secondary bg-secondary_subtle">
+                                        <Calendar className="w-6 h-6 text-brand-secondary" />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <h3 className="text-md font-semibold text-primary">{viewingEvent.title}</h3>
+                                        <Badge color={getTypeColor(viewingEvent.type)} size="sm">
+                                            {TYPE_LABELS[viewingEvent.type] ?? viewingEvent.type}
+                                        </Badge>
+                                    </div>
+                                </div>
+
+                                <hr className="border-secondary" />
+
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex items-start gap-3">
+                                        <Calendar className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="text-xs font-medium text-tertiary uppercase">Date</span>
+                                            <span className="text-sm text-primary">{formatEventDate(viewingEvent.startDate, viewingEvent.endDate)}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-start gap-3">
+                                        <Clock className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="text-xs font-medium text-tertiary uppercase">Time</span>
+                                            <span className="text-sm text-primary">
+                                                {new Date(viewingEvent.startDate).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                                                {viewingEvent.endDate && ` – ${new Date(viewingEvent.endDate).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-start gap-3">
+                                        <MarkerPin01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="text-xs font-medium text-tertiary uppercase">Location</span>
+                                            <span className="text-sm text-primary">
+                                                {viewingEvent.isVirtual ? "Virtual" : (viewingEvent.location || "Not specified")}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-5 h-5 flex items-center justify-center shrink-0 mt-0.5">
+                                            <Badge color={getFormatColor(viewingEvent.isVirtual)} size="sm">
+                                                {viewingEvent.isVirtual ? "Virtual" : "In Person"}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {viewingEvent.description && (
+                                    <>
+                                        <hr className="border-secondary" />
+                                        <div className="flex flex-col gap-1.5">
+                                            <span className="text-xs font-medium text-tertiary uppercase">Description</span>
+                                            <p className="text-sm text-secondary leading-relaxed whitespace-pre-wrap">{viewingEvent.description}</p>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        <div className="px-6 py-4 border-t border-secondary">
+                            <Button size="md" color="secondary" className="w-full" onClick={() => setViewingEvent(null)}>Close</Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
