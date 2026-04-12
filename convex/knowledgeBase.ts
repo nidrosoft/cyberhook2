@@ -265,19 +265,61 @@ export const extractFromUrl = action({
     }
 
     try {
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "CyberHook-Bot/1.0",
-          Accept: "text/html,application/xhtml+xml,text/plain",
-        },
-        signal: AbortSignal.timeout(15000),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            "User-Agent": "CyberHook-Bot/1.0",
+            Accept: "text/html,application/xhtml+xml,text/plain",
+          },
+          signal: controller.signal,
+          redirect: "follow",
+        });
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        if (fetchErr.name === "AbortError" || fetchErr.message?.includes("abort")) {
+          return { success: false, content: "", error: "Request timed out — the website took too long to respond (15s limit)" };
+        }
+        if (fetchErr.cause?.code === "ENOTFOUND" || fetchErr.message?.includes("ENOTFOUND")) {
+          return { success: false, content: "", error: "Domain not found — check the URL and try again" };
+        }
+        if (fetchErr.message?.includes("ECONNREFUSED")) {
+          return { success: false, content: "", error: "Connection refused — the server is not accepting connections" };
+        }
+        if (fetchErr.message?.includes("certificate") || fetchErr.message?.includes("SSL") || fetchErr.message?.includes("CERT")) {
+          return { success: false, content: "", error: "SSL/TLS error — the website has an invalid or expired certificate" };
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
-        return { success: false, content: "", error: `Failed to fetch URL (${response.status})` };
+        const statusMessages: Record<number, string> = {
+          403: "Access denied — the website blocked our request",
+          404: "Page not found — check the URL path",
+          429: "Rate limited — the website is throttling requests, try again later",
+          500: "Server error — the website is experiencing issues",
+          502: "Bad gateway — the website is temporarily unavailable",
+          503: "Service unavailable — the website is down or under maintenance",
+        };
+        const friendlyMsg = statusMessages[response.status] || `Failed to fetch URL (HTTP ${response.status})`;
+        return { success: false, content: "", error: friendlyMsg };
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("text/") && !contentType.includes("html") && !contentType.includes("xml") && !contentType.includes("json")) {
+        return { success: false, content: "", error: `Cannot extract text — the URL returned non-text content (${contentType.split(";")[0]})` };
       }
 
       const html = await response.text();
+
+      if (!html || html.trim().length === 0) {
+        return { success: false, content: "", error: "The page returned empty content" };
+      }
 
       const text = html
         .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
@@ -304,7 +346,10 @@ export const extractFromUrl = action({
       return { success: true, content: truncated };
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
-      return { success: false, content: "", error: msg };
+      if (msg.includes("abort") || msg.includes("timeout")) {
+        return { success: false, content: "", error: "Request timed out — the website took too long to respond" };
+      }
+      return { success: false, content: "", error: `Extraction failed: ${msg}` };
     }
   },
 });

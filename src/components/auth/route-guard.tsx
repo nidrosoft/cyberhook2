@@ -31,10 +31,11 @@ export function RouteGuard({ children }: RouteGuardProps) {
         if (user) {
             const status = user.status;
 
-            // Pending approval — during testing, allow access after the
-            // reminder screen.  Remove this bypass once the admin approval
-            // flow is implemented and the client confirms the gate.
+            // Pending approval — redirect to approval page
             if (status === "pending") {
+                if (pathname !== "/pending-approval") {
+                    router.replace("/pending-approval");
+                }
                 return;
             }
 

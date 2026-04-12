@@ -1,34 +1,58 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { Button } from "@/components/base/buttons/button";
-import { Clock, LogOut01, Mail01, CheckCircle, ArrowRight } from "@untitledui/icons";
+import { Clock, LogOut01, Mail01, CheckCircle, RefreshCw01 } from "@untitledui/icons";
 
-const AUTO_REDIRECT_SECONDS = 30;
+const AUTO_POLL_SECONDS = 30;
 
 export default function PendingApprovalPage() {
     const { user } = useUser();
     const { signOut } = useClerk();
     const router = useRouter();
-    const [secondsLeft, setSecondsLeft] = useState(AUTO_REDIRECT_SECONDS);
+    const { user: convexUser, isLoading } = useCurrentUser();
+    const [checking, setChecking] = useState(false);
+    const [countdown, setCountdown] = useState(AUTO_POLL_SECONDS);
 
+    const checkStatus = useCallback(() => {
+        if (convexUser?.status === "approved") {
+            router.replace("/dashboard");
+        }
+    }, [convexUser, router]);
+
+    // Auto-poll: Convex query is reactive, so just check status when it changes
+    useEffect(() => {
+        if (!isLoading && convexUser) {
+            if (convexUser.status === "approved") {
+                router.replace("/dashboard");
+            } else if (convexUser.status === "rejected") {
+                router.replace("/rejected");
+            }
+        }
+    }, [isLoading, convexUser, router]);
+
+    // Countdown for visual feedback
     useEffect(() => {
         const timer = setInterval(() => {
-            setSecondsLeft((prev) => {
+            setCountdown((prev) => {
                 if (prev <= 1) {
-                    clearInterval(timer);
-                    router.push("/dashboard");
-                    return 0;
+                    checkStatus();
+                    return AUTO_POLL_SECONDS;
                 }
                 return prev - 1;
             });
         }, 1000);
         return () => clearInterval(timer);
-    }, [router]);
+    }, [checkStatus]);
 
-    const progressPercent = ((AUTO_REDIRECT_SECONDS - secondsLeft) / AUTO_REDIRECT_SECONDS) * 100;
+    const handleManualCheck = () => {
+        setChecking(true);
+        checkStatus();
+        setTimeout(() => setChecking(false), 1500);
+    };
 
     return (
         <section className="flex min-h-screen items-center justify-center bg-primary p-4">
@@ -49,27 +73,29 @@ export default function PendingApprovalPage() {
                         Thank you for signing up, {user?.firstName || "there"}! Your account is currently being reviewed by our team.
                     </p>
 
-                    {/* Auto-redirect timer */}
+                    {/* Status Check */}
                     <div className="mt-6 w-full rounded-lg border border-brand-200 bg-brand-50 p-4">
                         <div className="flex items-center justify-between mb-2">
                             <p className="text-sm font-medium text-brand-700">
-                                Continuing to dashboard in {secondsLeft}s
+                                Auto-checking status in {countdown}s
                             </p>
                             <button
-                                onClick={() => router.push("/dashboard")}
-                                className="text-sm font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                                onClick={handleManualCheck}
+                                disabled={checking}
+                                className="text-sm font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1 disabled:opacity-50"
                             >
-                                Skip <ArrowRight className="h-3.5 w-3.5" />
+                                <RefreshCw01 className={`h-3.5 w-3.5 ${checking ? "animate-spin" : ""}`} />
+                                {checking ? "Checking..." : "Check Now"}
                             </button>
                         </div>
                         <div className="h-1.5 w-full rounded-full bg-brand-100 overflow-hidden">
                             <div
                                 className="h-full rounded-full bg-brand-500 transition-all duration-1000 ease-linear"
-                                style={{ width: `${progressPercent}%` }}
+                                style={{ width: `${((AUTO_POLL_SECONDS - countdown) / AUTO_POLL_SECONDS) * 100}%` }}
                             />
                         </div>
                         <p className="mt-2 text-xs text-brand-500">
-                            This screen is a reminder — approval flow is pending implementation.
+                            This page will automatically redirect once your account is approved.
                         </p>
                     </div>
 
@@ -121,8 +147,8 @@ export default function PendingApprovalPage() {
                     {/* Footer */}
                     <p className="mt-6 text-sm text-tertiary">
                         Questions? Contact{" "}
-                        <a href="mailto:support@cyberhook.com" className="text-brand-500 hover:text-brand-600">
-                            support@cyberhook.com
+                        <a href="mailto:support@cyberhook.ai" className="text-brand-500 hover:text-brand-600">
+                            support@cyberhook.ai
                         </a>
                     </p>
                 </div>

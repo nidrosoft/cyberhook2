@@ -1,6 +1,9 @@
 "use client";
 
 import type { FC, ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import { Bell01, CheckCircle, AlertTriangle, InfoCircle, LifeBuoy01, SearchLg, Settings01 } from "@untitledui/icons";
 import { Button as AriaButton, DialogTrigger, Popover } from "react-aria-components";
 import { Avatar } from "@/components/base/avatar/avatar";
@@ -10,6 +13,7 @@ import { Input } from "@/components/base/input/input";
 import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-menu";
 import { CyberHookLogo } from "@/components/foundations/logo/cyberhook-logo";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useCompany } from "@/hooks/use-company";
 import { cx } from "@/utils/cx";
 import { MobileNavigationHeader } from "./base-components/mobile-header";
 import { NavAccountCard, NavAccountMenu } from "./base-components/nav-account-card";
@@ -17,29 +21,45 @@ import { NavItemBase } from "./base-components/nav-item";
 import { NavItemButton } from "./base-components/nav-item-button";
 import { NavList } from "./base-components/nav-list";
 
-const mockNotifications = [
-    { id: "1", type: "alert" as const, title: "New breach detected", description: "A new ransomware incident involving HealthNet Corp has been detected.", time: "2 min ago", read: false },
-    { id: "2", type: "lead" as const, title: "Lead added to watchlist", description: "acmecorp.com was automatically added from a Live Search match.", time: "15 min ago", read: false },
-    { id: "3", type: "success" as const, title: "Campaign delivered", description: "Q1 Healthcare Outreach campaign sent 145 emails successfully.", time: "1 hour ago", read: false },
-    { id: "4", type: "info" as const, title: "Weekly report ready", description: "Your weekly performance report for Feb 24 – Mar 2 is available.", time: "3 hours ago", read: true },
-    { id: "5", type: "alert" as const, title: "Domain exposure change", description: "globallogistics.com exposure level changed from Medium to High.", time: "5 hours ago", read: true },
-    { id: "6", type: "success" as const, title: "New meeting booked", description: "Meeting with TechForward Inc scheduled for Mar 10 at 2:00 PM.", time: "Yesterday", read: true },
-    { id: "7", type: "info" as const, title: "Token usage reminder", description: "You've used 85% of your monthly search tokens.", time: "Yesterday", read: true },
-];
+function getNotificationIcon(type: string) {
+    if (type.startsWith("watchlist.") || type.startsWith("billing.")) return AlertTriangle;
+    if (type.startsWith("lead.") || type.startsWith("task.")) return SearchLg;
+    if (type.startsWith("campaign.") || type.startsWith("team.")) return CheckCircle;
+    return InfoCircle;
+}
 
-const notificationIconMap = {
-    alert: AlertTriangle,
-    lead: SearchLg,
-    success: CheckCircle,
-    info: InfoCircle,
-};
+function getNotificationColors(type: string) {
+    if (type.startsWith("watchlist.") || type.startsWith("billing.")) return "text-warning-secondary bg-warning-secondary";
+    if (type.startsWith("lead.") || type.startsWith("task.")) return "text-brand-secondary bg-brand-secondary";
+    if (type.startsWith("campaign.") || type.startsWith("team.")) return "text-success-secondary bg-success-secondary";
+    return "text-fg-quaternary bg-secondary";
+}
 
-const notificationColorMap = {
-    alert: "text-warning-secondary bg-warning-secondary",
-    lead: "text-brand-secondary bg-brand-secondary",
-    success: "text-success-secondary bg-success-secondary",
-    info: "text-fg-quaternary bg-secondary",
-};
+function getNotificationRoute(notification: { type: string; relatedEntityType?: string; actionUrl?: string }): string | null {
+    if (notification.actionUrl) return notification.actionUrl;
+    const type = notification.type;
+    if (type.startsWith("watchlist.")) return "/watchlist";
+    if (type.startsWith("lead.")) return "/live-leads";
+    if (type.startsWith("campaign.")) return "/ai-agents";
+    if (type.startsWith("task.")) return "/todos";
+    if (type.startsWith("team.")) return "/settings?tab=team";
+    if (type.startsWith("billing.")) return "/billing";
+    if (type.startsWith("system.")) return "/dashboard";
+    return null;
+}
+
+function formatTimeAgo(ts: number): string {
+    const diff = Date.now() - ts;
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return "Yesterday";
+    if (days < 7) return `${days} days ago`;
+    return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 type NavItem = {
     /** Label text for the nav item. */
@@ -79,10 +99,27 @@ export const HeaderNavigationBase = ({
     showAvatarDropdown = true,
     hideBorder = false,
 }: HeaderNavigationBaseProps) => {
+    const router = useRouter();
     const { user, clerkUser } = useCurrentUser();
+    const { tokensRemaining, tokenAllocation } = useCompany();
     const avatarSrc = user?.imageUrl ?? clerkUser?.imageUrl ?? "";
     const avatarAlt = user ? `${user.firstName} ${user.lastName}` : clerkUser?.fullName ?? "User";
+    const tokensLeft = tokensRemaining ?? 0;
+    const tokensTotal = tokenAllocation ?? 0;
+    const tokenPercent = tokensTotal > 0 ? Math.round((tokensLeft / tokensTotal) * 100) : 0;
     const activeSubNavItems = subItems || items.find((item) => item.current && item.items && item.items.length > 0)?.items;
+
+    // Real notifications from Convex
+    const notifications = useQuery(
+        api.notifications.getRecent,
+        user?._id ? { userId: user._id, limit: 15 } : "skip"
+    );
+    const unreadCount = useQuery(
+        api.notifications.getUnreadCount,
+        user?._id ? { userId: user._id } : "skip"
+    );
+    const markAsRead = useMutation(api.notifications.markAsRead);
+    const markAllAsRead = useMutation(api.notifications.markAllAsRead);
 
     const showSecondaryNav = activeSubNavItems && activeSubNavItems.length > 0;
 
@@ -130,15 +167,6 @@ export const HeaderNavigationBase = ({
                 >
                     <div className="flex w-full justify-between pr-3 pl-4 md:px-8">
                         <div className="flex flex-1 items-center gap-3">
-                            <Input
-                                shortcut
-                                size="sm"
-                                aria-label="Search CyberHook"
-                                placeholder="Search leads, domains, reports..."
-                                icon={SearchLg}
-                                className="max-w-sm"
-                            />
-
                             {items.length > 0 && (
                                 <nav>
                                     <ul className="flex items-center gap-0.5">
@@ -159,9 +187,9 @@ export const HeaderNavigationBase = ({
 
                             <div className="flex items-center gap-2 rounded-md border border-secondary px-3 py-1.5">
                                 <SearchLg aria-hidden="true" className="size-4 shrink-0 text-fg-quaternary" />
-                                <span className="text-sm font-medium text-fg-secondary whitespace-nowrap">941 / 1,000</span>
+                                <span className="text-sm font-medium text-fg-secondary whitespace-nowrap">{tokensLeft.toLocaleString()} / {tokensTotal.toLocaleString()}</span>
                                 <div className="h-1.5 w-16 rounded-full bg-gray-200">
-                                    <div className="h-1.5 rounded-full bg-green-500" style={{ width: "94%" }} />
+                                    <div className="h-1.5 rounded-full bg-green-500" style={{ width: `${tokenPercent}%` }} />
                                 </div>
                             </div>
 
@@ -177,9 +205,11 @@ export const HeaderNavigationBase = ({
                             <SlideoutMenu.Trigger>
                                 <AriaButton className="relative flex cursor-pointer items-center justify-center rounded-lg p-2 text-fg-quaternary outline-focus-ring transition duration-100 ease-linear hover:bg-primary_hover hover:text-fg-quaternary_hover focus-visible:outline-2 focus-visible:outline-offset-2">
                                     <Bell01 className="size-5" />
-                                    <span className="absolute -top-0.5 -right-0.5 flex size-4.5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                                        3
-                                    </span>
+                                    {(unreadCount ?? 0) > 0 && (
+                                        <span className="absolute -top-0.5 -right-0.5 flex size-4.5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                                            {unreadCount! > 9 ? "9+" : unreadCount}
+                                        </span>
+                                    )}
                                 </AriaButton>
                                 <SlideoutMenu>
                                     {({ close }) => (
@@ -187,38 +217,59 @@ export const HeaderNavigationBase = ({
                                             <SlideoutMenu.Header onClose={close}>
                                                 <div className="flex items-center gap-3">
                                                     <h2 className="text-lg font-semibold text-primary">Notifications</h2>
-                                                    <Badge color="brand" size="sm">{mockNotifications.filter((n) => !n.read).length} new</Badge>
+                                                    {(unreadCount ?? 0) > 0 && (
+                                                        <Badge color="brand" size="sm">{unreadCount} new</Badge>
+                                                    )}
                                                 </div>
                                                 <p className="mt-1 text-sm text-tertiary">Stay updated on breaches, leads, and campaigns.</p>
                                             </SlideoutMenu.Header>
 
                                             <SlideoutMenu.Content>
                                                 <div className="flex flex-col">
-                                                    {mockNotifications.map((notification) => {
-                                                        const Icon = notificationIconMap[notification.type];
-                                                        const colors = notificationColorMap[notification.type];
+                                                    {(!notifications || notifications.length === 0) && (
+                                                        <div className="flex flex-col items-center justify-center py-12 text-center">
+                                                            <Bell01 className="size-8 text-quaternary mb-3" />
+                                                            <p className="text-sm font-medium text-secondary">No notifications yet</p>
+                                                            <p className="text-xs text-tertiary mt-1">You&apos;ll be notified about breaches, leads, and campaigns.</p>
+                                                        </div>
+                                                    )}
+                                                    {notifications?.map((notification) => {
+                                                        const Icon = getNotificationIcon(notification.type);
+                                                        const colors = getNotificationColors(notification.type);
+                                                        const route = getNotificationRoute(notification);
                                                         return (
-                                                            <div
-                                                                key={notification.id}
+                                                            <button
+                                                                type="button"
+                                                                key={notification._id}
                                                                 className={cx(
-                                                                    "flex gap-3 border-b border-secondary px-1 py-4 transition-colors hover:bg-primary_hover",
-                                                                    !notification.read && "bg-brand-primary_alt",
+                                                                    "flex gap-3 border-b border-secondary px-1 py-4 transition-colors hover:bg-primary_hover text-left w-full",
+                                                                    !notification.isRead && "bg-brand-primary_alt",
+                                                                    route && "cursor-pointer",
                                                                 )}
+                                                                onClick={async () => {
+                                                                    if (!notification.isRead) {
+                                                                        await markAsRead({ id: notification._id });
+                                                                    }
+                                                                    if (route) {
+                                                                        close();
+                                                                        router.push(route);
+                                                                    }
+                                                                }}
                                                             >
                                                                 <div className={cx("flex size-9 shrink-0 items-center justify-center rounded-full", colors)}>
                                                                     <Icon className="size-4" />
                                                                 </div>
                                                                 <div className="flex flex-1 flex-col gap-0.5">
                                                                     <div className="flex items-center justify-between gap-2">
-                                                                        <span className={cx("text-sm font-medium", !notification.read ? "text-primary" : "text-secondary")}>
+                                                                        <span className={cx("text-sm font-medium", !notification.isRead ? "text-primary" : "text-secondary")}>
                                                                             {notification.title}
                                                                         </span>
-                                                                        {!notification.read && <span className="size-2 shrink-0 rounded-full bg-brand-solid" />}
+                                                                        {!notification.isRead && <span className="size-2 shrink-0 rounded-full bg-brand-solid" />}
                                                                     </div>
-                                                                    <p className="text-sm text-tertiary">{notification.description}</p>
-                                                                    <span className="mt-1 text-xs text-quaternary">{notification.time}</span>
+                                                                    <p className="text-sm text-tertiary">{notification.message}</p>
+                                                                    <span className="mt-1 text-xs text-quaternary">{formatTimeAgo(notification.createdAt)}</span>
                                                                 </div>
-                                                            </div>
+                                                            </button>
                                                         );
                                                     })}
                                                 </div>
@@ -226,8 +277,18 @@ export const HeaderNavigationBase = ({
 
                                             <SlideoutMenu.Footer>
                                                 <div className="flex items-center justify-between">
-                                                    <Button size="sm" color="link-gray">Mark all as read</Button>
-                                                    <Button size="sm" color="link-color">View all notifications</Button>
+                                                    <Button
+                                                        size="sm"
+                                                        color="link-gray"
+                                                        onClick={() => {
+                                                            if (user?._id) markAllAsRead({ userId: user._id });
+                                                        }}
+                                                    >
+                                                        Mark all as read
+                                                    </Button>
+                                                    <Button size="sm" color="link-color" onClick={() => { close(); router.push("/dashboard"); }}>
+                                                        View all notifications
+                                                    </Button>
                                                 </div>
                                             </SlideoutMenu.Footer>
                                         </>
@@ -283,7 +344,6 @@ export const HeaderNavigationBase = ({
                                 </ul>
                             </nav>
 
-                            <Input shortcut aria-label="Search" placeholder="Search" icon={SearchLg} size="sm" className="max-w-xs" />
                         </div>
                     </section>
                 )}

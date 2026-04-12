@@ -7,6 +7,7 @@ import { api } from "../../../convex/_generated/api";
 import { SidebarNavigationSectionsSubheadings } from "@/components/application/app-navigation/sidebar-navigation/sidebar-sections-subheadings";
 import { HeaderNavigationBase } from "@/components/application/app-navigation/header-navigation";
 import { RouteGuard } from "@/components/auth/route-guard";
+import { UpgradeModalProvider } from "@/components/application/upgrade-modal/upgrade-modal";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import {
     BarChartSquare02,
@@ -69,7 +70,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         hideBorder={false}
                     />
                     <div className="flex-1 overflow-y-auto">
-                        {children}
+                        <UpgradeModalProvider>
+                            {children}
+                        </UpgradeModalProvider>
                     </div>
                 </main>
             </div>

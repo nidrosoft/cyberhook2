@@ -556,6 +556,61 @@ export const getCredits = action({
   },
 });
 
+export const rescanDomain = action({
+  args: {
+    companyId: v.id("companies"),
+    watchlistItemId: v.id("watchlistItems"),
+    domain: v.string(),
+  },
+  handler: async (ctx, args): Promise<{
+    success: boolean;
+    exposureCount: number;
+    error?: string;
+  }> => {
+    const company = await ctx.runQuery(internal.redrokApi.getCompanyCredentials, {
+      companyId: args.companyId,
+    });
+
+    if (!company) {
+      return { success: false, exposureCount: 0, error: "Company not found" };
+    }
+
+    const email = company.redrokEmail || process.env.REDROK_EMAIL;
+    const password = company.redrokPassword || process.env.REDROK_PASSWORD;
+
+    if (!email || !password) {
+      return { success: false, exposureCount: 0, error: "Redrok credentials not configured" };
+    }
+
+    try {
+      const token = await getOrRefreshToken(
+        ctx, args.companyId, email, password,
+        company.redrokToken, company.redrokTokenExpiresAt
+      );
+
+      const result = await redrokFetch(token, "/search/LiveSearch", {
+        domain: args.domain,
+      });
+
+      const count = result.count || (result.data ? result.data.length : 0);
+
+      await ctx.runMutation(internal.watchlist.updateFromCheck, {
+        id: args.watchlistItemId,
+        exposureCount: count,
+        hasNewExposures: count > 0,
+      });
+
+      return { success: true, exposureCount: count };
+    } catch (error) {
+      return {
+        success: false,
+        exposureCount: 0,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  },
+});
+
 export const generateReport = action({
   args: {
     companyId: v.id("companies"),

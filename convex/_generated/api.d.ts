@@ -10,15 +10,19 @@
 
 import type * as aiEmail from "../aiEmail.js";
 import type * as audit from "../audit.js";
+import type * as breachPortalsApi from "../breachPortalsApi.js";
 import type * as campaigns from "../campaigns.js";
 import type * as companies from "../companies.js";
 import type * as contacts from "../contacts.js";
+import type * as crons from "../crons.js";
+import type * as emails from "../emails.js";
 import type * as events from "../events.js";
 import type * as http from "../http.js";
 import type * as invitations from "../invitations.js";
 import type * as knowledgeBase from "../knowledgeBase.js";
 import type * as leads from "../leads.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_plans from "../lib/plans.js";
 import type * as notifications from "../notifications.js";
 import type * as onboarding from "../onboarding.js";
 import type * as ransomHub from "../ransomHub.js";
@@ -26,6 +30,7 @@ import type * as ransomwareLiveApi from "../ransomwareLiveApi.js";
 import type * as redrokApi from "../redrokApi.js";
 import type * as rfpHub from "../rfpHub.js";
 import type * as searches from "../searches.js";
+import type * as storage from "../storage.js";
 import type * as stripe from "../stripe.js";
 import type * as tasks from "../tasks.js";
 import type * as users from "../users.js";
@@ -40,15 +45,19 @@ import type {
 declare const fullApi: ApiFromModules<{
   aiEmail: typeof aiEmail;
   audit: typeof audit;
+  breachPortalsApi: typeof breachPortalsApi;
   campaigns: typeof campaigns;
   companies: typeof companies;
   contacts: typeof contacts;
+  crons: typeof crons;
+  emails: typeof emails;
   events: typeof events;
   http: typeof http;
   invitations: typeof invitations;
   knowledgeBase: typeof knowledgeBase;
   leads: typeof leads;
   "lib/auth": typeof lib_auth;
+  "lib/plans": typeof lib_plans;
   notifications: typeof notifications;
   onboarding: typeof onboarding;
   ransomHub: typeof ransomHub;
@@ -56,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   redrokApi: typeof redrokApi;
   rfpHub: typeof rfpHub;
   searches: typeof searches;
+  storage: typeof storage;
   stripe: typeof stripe;
   tasks: typeof tasks;
   users: typeof users;

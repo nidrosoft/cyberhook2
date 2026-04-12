@@ -29,7 +29,6 @@ import { Button } from "@/components/base/buttons/button";
 import { InputBase } from "@/components/base/input/input";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { Tabs, TabList, Tab, TabPanel } from "@/components/application/tabs/tabs";
-import { Toggle } from "@/components/base/toggle/toggle";
 import { PaginationCardMinimal } from "@/components/application/pagination/pagination";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -152,11 +151,6 @@ export default function RansomHubPage() {
     const [breachSource, setBreachSource] = useState("all");
 
     const [showFilterPanel, setShowFilterPanel] = useState(false);
-
-
-    const [hhsActive, setHhsActive] = useState(true);
-    const [privacyRightsActive, setPrivacyRightsActive] = useState(true);
-    const [caAgActive, setCaAgActive] = useState(true);
 
     // Filter ransomware incidents locally
     const filteredRansomware = useMemo(() => {
@@ -385,46 +379,6 @@ export default function RansomHubPage() {
 
                     {/* Ransomware Attacks Tab */}
                     <TabPanel id="ransomware" className="pt-6 flex flex-col gap-6">
-                        {/* Filters Row */}
-                        <div className="flex flex-wrap items-end gap-3">
-                            <FilterDropdown
-                                aria-label="Time Period"
-                                value={timePeriod}
-                                onChange={(v) => setTimePeriod(v)}
-                                options={[
-                                    { label: "All Time", value: "all" },
-                                    { label: "Last 7 Days", value: "7d" },
-                                    { label: "Last 30 Days", value: "30d" },
-                                    { label: "Last 90 Days", value: "90d" },
-                                ]}
-                            />
-                            <FilterDropdown
-                                aria-label="Region"
-                                value={region}
-                                onChange={(v) => setRegion(v)}
-                                options={[
-                                    { label: "All", value: "all" },
-                                    { label: "North America", value: "na" },
-                                    { label: "Europe", value: "eu" },
-                                    { label: "Asia", value: "asia" },
-                                    { label: "South America", value: "sa" },
-                                ]}
-                            />
-                            <FilterDropdown
-                                aria-label="Threat Group"
-                                value={threatGroup}
-                                onChange={(v) => setThreatGroup(v)}
-                                options={[
-                                    { label: "All", value: "all" },
-                                    { label: "LockBit 3.0", value: "lockbit" },
-                                    { label: "BlackCat", value: "blackcat" },
-                                    { label: "Clop", value: "clop" },
-                                    { label: "Royal", value: "royal" },
-                                    { label: "Play", value: "play" },
-                                ]}
-                            />
-                        </div>
-
                         {/* Summary Stats Bar */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-stretch">
                             <MetricsChart04 title={String(stats?.total ?? 0)} subtitle="Total Incidents" change="—" changeTrend="positive" changeDescription="all time" actions={false} />
@@ -567,39 +521,33 @@ export default function RansomHubPage() {
 
                     {/* Breach Notifications Tab */}
                     <TabPanel id="breaches" className="pt-6 flex flex-col gap-6">
-                        {/* Sources with toggles */}
+                        {/* Monitored Sources */}
                         <div className="p-5 border border-secondary rounded-xl bg-primary">
                             <h3 className="text-md font-semibold text-primary mb-4">Monitored Sources</h3>
-                            <div className="flex flex-col sm:flex-row gap-6">
-                                <div className="flex items-start gap-3 p-3 border border-secondary rounded-lg flex-1">
-                                    <Toggle
-                                        size="sm"
-                                        isSelected={hhsActive}
-                                        onChange={setHhsActive}
-                                        label="HHS OCR Breach Portal"
-                                        hint="Healthcare"
-                                    />
-                                    {hhsActive && <Badge color="success" size="sm">Active</Badge>}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="flex items-center justify-between p-3 border border-secondary rounded-lg">
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-sm font-medium text-primary">HHS OCR Breach Portal</span>
+                                        <span className="text-xs text-tertiary">HIPAA — Healthcare breaches</span>
+                                    </div>
+                                    <Badge color="success" size="sm">Active</Badge>
                                 </div>
-                                <div className="flex items-start gap-3 p-3 border border-secondary rounded-lg flex-1">
-                                    <Toggle
-                                        size="sm"
-                                        isSelected={privacyRightsActive}
-                                        onChange={setPrivacyRightsActive}
-                                        label="Privacy Rights Clearinghouse"
-                                    />
-                                    {privacyRightsActive && <Badge color="success" size="sm">Active</Badge>}
+                                <div className="flex items-center justify-between p-3 border border-secondary rounded-lg">
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-sm font-medium text-primary">Privacy Rights Clearinghouse</span>
+                                        <span className="text-xs text-tertiary">GLBA — Financial breaches</span>
+                                    </div>
+                                    <Badge color="success" size="sm">Active</Badge>
                                 </div>
-                                <div className="flex items-start gap-3 p-3 border border-secondary rounded-lg flex-1">
-                                    <Toggle
-                                        size="sm"
-                                        isSelected={caAgActive}
-                                        onChange={setCaAgActive}
-                                        label="California AG Breach List"
-                                    />
-                                    {caAgActive && <Badge color="success" size="sm">Active</Badge>}
+                                <div className="flex items-center justify-between p-3 border border-secondary rounded-lg">
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-sm font-medium text-primary">California AG Breach List</span>
+                                        <span className="text-xs text-tertiary">CCPA — California consumer breaches</span>
+                                    </div>
+                                    <Badge color="success" size="sm">Active</Badge>
                                 </div>
                             </div>
+                            <p className="text-xs text-tertiary mt-3">Data is automatically synced daily from all active sources.</p>
                         </div>
 
                         {/* Breach Filters */}

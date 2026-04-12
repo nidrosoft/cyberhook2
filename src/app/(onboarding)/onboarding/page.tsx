@@ -25,11 +25,13 @@ import {
 import { FileUpload } from "@/components/application/file-upload/file-upload-base";
 import { Progress } from "@/components/application/progress-steps/progress-steps";
 import type { ProgressFeaturedIconType } from "@/components/application/progress-steps/progress-types";
-import { PricingTierCardCallout } from "@/components/marketing/pricing-sections/base-components/pricing-tier-card";
 import { Button } from "@/components/base/buttons/button";
+import { Badge } from "@/components/base/badges/badges";
 import { InputBase, TextField } from "@/components/base/input/input";
 import { Label } from "@/components/base/input/label";
 import { Select } from "@/components/base/select/select";
+import { PLANS, PLAN_ORDER, type PlanTier } from "@/lib/plans";
+import { CheckCircle } from "@untitledui/icons";
 
 const businessModels = [
     { id: "msp", label: "MSP/MSSP" },
@@ -75,55 +77,6 @@ const salesRanges = [
     { id: "50+", label: "50+" },
 ];
 
-const pricingPlans = [
-    {
-        title: "Starter",
-        subtitle: "$299/mo",
-        description: "Billed annually.",
-        secondAction: "Chat to sales",
-        features: [
-            "Up to 100 Live Search queries/mo",
-            "AI Email Campaigns (500/mo)",
-            "Basic Threat Intelligence Feed",
-            "1 User Seat",
-            "Email Support",
-        ],
-    },
-    {
-        title: "Growth",
-        subtitle: "$599/mo",
-        description: "Billed annually.",
-        secondAction: "Chat to sales",
-        callOut: "Most popular",
-        hasCallout: true,
-        features: [
-            "Up to 500 Live Search queries/mo",
-            "AI Email Campaigns (5,000/mo)",
-            "Advanced Threat Intelligence + Ransomware Hub",
-            "5 User Seats",
-            "Priority Support + Onboarding",
-            "CRM Integrations (HubSpot, GHL)",
-            "Custom Report Templates",
-        ],
-    },
-    {
-        title: "Enterprise",
-        subtitle: "$1,250/mo",
-        description: "Billed annually.",
-        secondAction: "Chat to sales",
-        features: [
-            "1,000 Live Search queries/mo",
-            "Unlimited AI Email Campaigns",
-            "Full Threat Intel Suite + Custom Alerts",
-            "Unlimited User Seats",
-            "Dedicated Success Manager",
-            "All Integrations + API Access",
-            "Advanced Analytics & Reporting",
-            "SSO Authentication",
-            "Custom Onboarding & Training",
-        ],
-    },
-];
 
 function getSteps(currentStep: number): ProgressFeaturedIconType[] {
     const status = (i: number): "complete" | "current" | "incomplete" => {
@@ -150,7 +103,7 @@ interface FormData {
     totalEmployees: string;
     totalSales: string;
     teamEmails: string;
-    selectedPlan: string;
+    selectedPlan: PlanTier;
 }
 
 const STORAGE_KEY_STEP = "cyberhook_onboarding_step";
@@ -167,7 +120,7 @@ const defaultFormData: FormData = {
     totalEmployees: "",
     totalSales: "",
     teamEmails: "",
-    selectedPlan: "",
+    selectedPlan: "growth",
 };
 
 function loadSavedStep(): number {
@@ -445,21 +398,71 @@ export default function OnboardingPage() {
                     </div>
                 )}
 
-                {/* Step 4 — Pricing */}
+                {/* Step 4 — Select Plan */}
                 {step === 4 && (
                     <div className="flex flex-col gap-8">
                         <div className="flex flex-col gap-1">
-                            <p className="text-sm font-semibold text-brand-secondary md:text-md">Pricing</p>
+                            <p className="text-sm font-semibold text-brand-secondary md:text-md">Select Plan</p>
                             <h2 className="text-display-xs font-semibold text-primary sm:text-display-md lg:text-display-lg">Simple, transparent pricing</h2>
                             <p className="mt-2 text-md text-tertiary sm:text-lg">
-                                All plans include a 5-day free trial. Cancel anytime.
+                                All plans include a 7-day free trial. No onboarding fees. Cancel anytime.
                             </p>
                         </div>
 
-                        <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 md:grid-cols-2 md:gap-8 xl:grid-cols-3">
-                            {pricingPlans.map((plan) => (
-                                <PricingTierCardCallout key={plan.title} {...plan} checkItemTextColor="success" />
-                            ))}
+                        <div className="grid w-full grid-cols-1 gap-4 sm:gap-6 md:grid-cols-3 md:gap-6">
+                            {PLAN_ORDER.map((tier) => {
+                                const plan = PLANS[tier];
+                                const isSelected = formData.selectedPlan === tier;
+                                return (
+                                    <button
+                                        key={tier}
+                                        type="button"
+                                        onClick={() => setFormData((prev) => ({ ...prev, selectedPlan: tier }))}
+                                        className={`relative flex flex-col rounded-2xl bg-primary shadow-lg text-left transition-all ${
+                                            isSelected
+                                                ? "ring-2 ring-brand-secondary border-brand-secondary"
+                                                : "ring-1 ring-secondary hover:ring-brand-secondary/50"
+                                        }`}
+                                    >
+                                        {plan.badge && (
+                                            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                                                <Badge color="brand" size="sm">{plan.badge}</Badge>
+                                            </div>
+                                        )}
+
+                                        <div className="flex flex-col items-center px-6 pt-10 text-center md:px-8">
+                                            <h2 className="text-display-md font-semibold text-primary md:text-display-lg">
+                                                {plan.priceLabel}<span className="text-lg font-normal text-tertiary">/mo</span>
+                                            </h2>
+                                            <p className="mt-3 text-xl font-semibold text-primary">{plan.name}</p>
+                                            <p className="mt-1 text-sm text-tertiary">{plan.tagline}</p>
+                                        </div>
+
+                                        <div className="px-6 pt-4 pb-1 md:px-8">
+                                            <p className="text-xs font-medium text-secondary">{plan.marketingDescription}</p>
+                                        </div>
+
+                                        <ul className="flex flex-col gap-3 px-6 pt-3 pb-6 md:px-8">
+                                            {plan.features.map((feat) => (
+                                                <li key={feat} className="flex items-start gap-2 text-sm text-secondary">
+                                                    <CheckCircle className="h-4 w-4 text-success-500 mt-0.5 shrink-0" />
+                                                    {feat}
+                                                </li>
+                                            ))}
+                                        </ul>
+
+                                        <div className="mt-auto px-6 pb-6 md:px-8">
+                                            <div className={`w-full rounded-lg py-2.5 text-center text-sm font-semibold transition ${
+                                                isSelected
+                                                    ? "bg-brand-solid text-white"
+                                                    : "bg-secondary_subtle text-secondary"
+                                            }`}>
+                                                {isSelected ? "Selected" : "Select Plan"}
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
 
                         {/* Payment Form */}
@@ -528,6 +531,8 @@ export default function OnboardingPage() {
                                             totalEmployees: formData.totalEmployees,
                                             totalSalesPeople: formData.totalSales,
                                             teamEmails: teamEmailsArray,
+                                            selectedPlanId: formData.selectedPlan,
+                                            planSelectedManually: formData.selectedPlan !== "growth",
                                         });
 
                                         if (result.success) {
@@ -557,7 +562,7 @@ export default function OnboardingPage() {
                                     }
                                 }}
                             >
-                                {isSubmitting ? "Setting up..." : "Start 5-day Free Trial"}
+                                {isSubmitting ? "Setting up..." : "Start 7-day Free Trial"}
                             </Button>
                         </div>
                     </div>

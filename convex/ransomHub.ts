@@ -210,6 +210,20 @@ export const internalCreate = internalMutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // Deduplicate: skip if an incident with the same company, source, and date already exists
+    const existing = await ctx.db
+      .query("ransomIncidents")
+      .withIndex("by_source", (q) => q.eq("source", args.source))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("companyName"), args.companyName),
+          q.eq(q.field("attackDate"), args.attackDate)
+        )
+      )
+      .first();
+
+    if (existing) return existing._id;
+
     const incidentId = await ctx.db.insert("ransomIncidents", {
       ...args,
       createdAt: Date.now(),
@@ -249,6 +263,20 @@ export const internalBulkCreate = internalMutation({
   handler: async (ctx, args) => {
     const ids = [];
     for (const incident of args.incidents) {
+      // Deduplicate: skip if an incident with the same company, source, and date already exists
+      const existing = await ctx.db
+        .query("ransomIncidents")
+        .withIndex("by_source", (q) => q.eq("source", incident.source))
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("companyName"), incident.companyName),
+            q.eq(q.field("attackDate"), incident.attackDate)
+          )
+        )
+        .first();
+
+      if (existing) continue;
+
       const id = await ctx.db.insert("ransomIncidents", {
         ...incident,
         createdAt: Date.now(),

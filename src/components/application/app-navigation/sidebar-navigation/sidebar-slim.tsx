@@ -165,7 +165,7 @@ export const SidebarNavigationSlim = ({ activeUrl, items, footerItems = [], hide
                         <div className="sticky bottom-0 mt-auto flex justify-between border-t border-secondary bg-primary px-2 py-5">
                             <div>
                                 <p className="text-sm font-semibold text-primary">Liron</p>
-                                <p className="text-sm text-tertiary">liron@cyberhook.com</p>
+                                <p className="text-sm text-tertiary">liron@cyberhook.ai</p>
                             </div>
                             <div className="absolute top-2.5 right-0">
                                 <ButtonUtility size="sm" color="tertiary" tooltip="Log out" icon={LogOut01} />
@@ -222,7 +222,7 @@ export const SidebarNavigationSlim = ({ activeUrl, items, footerItems = [], hide
                                 size="md"
                                 src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face"
                                 title="Liron"
-                                subtitle="liron@cyberhook.com"
+                                subtitle="liron@cyberhook.ai"
                             />
 
                             <div className="absolute top-1/2 right-0 -translate-y-1/2">

@@ -32,6 +32,8 @@ import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-menu";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useCompany } from "@/hooks/use-company";
+import { usePlanGate } from "@/hooks/use-plan-gate";
+import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
 import { generateExposureReport } from "@/lib/pdf-report";
 import { api } from "../../../../convex/_generated/api";
 import type { RedrokSearchResult } from "../../../../convex/redrokApi";
@@ -73,6 +75,8 @@ function getSeverityBadge(severity: number): { color: "error" | "warning" | "suc
 export default function LiveSearchPage() {
     const { user, companyId } = useCurrentUser();
     const { company: companyData, tokensRemaining, tokenAllocation, isLoading: isCompanyLoading } = useCompany();
+    const { searches, canPerformAction, planId } = usePlanGate();
+    const { showUpgradeModal } = useUpgradeModal();
     const isTrial = companyData?.status === "trial";
 
     // Fetch recent searches from Convex
@@ -114,11 +118,31 @@ export default function LiveSearchPage() {
             return;
         }
 
+        if (!canPerformAction("searches")) {
+            showUpgradeModal(planId, {
+                type: "usage",
+                resource: "Searches",
+                message: `You've used all ${searches.limit} searches this month. Upgrade to get more.`,
+            });
+            return;
+        }
+
         setSearchError(null);
+
+        // Strip protocol and trailing slashes, extract domain only
+        let searchDomain = domain.trim().toLowerCase();
+        searchDomain = searchDomain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "");
+
+        // Validate domain format (e.g. acme.com, acme.com.br)
+        const domainRegex = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z]{2,})+$/;
+        if (!domainRegex.test(searchDomain)) {
+            setSearchError("Please enter a valid domain (e.g. acme.com). Do not include http:// or paths.");
+            return;
+        }
+
         setSearchState("searching");
 
         try {
-            const searchDomain = domain.trim().toLowerCase();
 
             // Create search record in Convex (this also deducts a token)
             const searchId = await createSearch({
@@ -479,7 +503,7 @@ export default function LiveSearchPage() {
                             {isTrial && (
                                 <div className="flex items-center gap-2 text-sm text-warning-700 bg-warning-50 border border-warning-200 px-4 py-2.5 rounded-lg">
                                     <Lock01 className="w-4 h-4 shrink-0" />
-                                    <span>You&apos;re on a trial plan. Upgrade to view full credentials.</span>
+                                    <span>You&apos;re on a trial plan. Upgrade to access credentials.</span>
                                 </div>
                             )}
                             <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">

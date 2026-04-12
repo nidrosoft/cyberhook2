@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { toast } from "sonner";
 import { devError } from "@/utils/dev-error";
 import {
@@ -16,6 +16,7 @@ import {
     PauseCircle,
     PlayCircle,
     Plus,
+    RefreshCw01,
     SearchLg,
     Trash01,
 } from "@untitledui/icons";
@@ -26,12 +27,13 @@ import { Table, TableCard } from "@/components/application/table/table";
 import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { ButtonUtility } from "@/components/base/buttons/button-utility";
-import { Checkbox } from "@/components/base/checkbox/checkbox";
 import { Input, InputBase } from "@/components/base/input/input";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { usePlanGate } from "@/hooks/use-plan-gate";
+import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -89,6 +91,8 @@ function Toggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void 
 
 export default function WatchlistPage() {
     const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
+    const { watchlist, canPerformAction, planId } = usePlanGate();
+    const { showUpgradeModal } = useUpgradeModal();
 
     // Fetch watchlist data from Convex
     const watchlistItems = useQuery(
@@ -106,6 +110,7 @@ export default function WatchlistPage() {
     const pauseWatchlist = useMutation(api.watchlist.pause);
     const resumeWatchlist = useMutation(api.watchlist.resume);
     const updateUser = useMutation(api.users.update);
+    const rescanDomain = useAction(api.redrokApi.rescanDomain);
 
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
         column: "domain",
@@ -113,8 +118,8 @@ export default function WatchlistPage() {
     });
     const [newDomain, setNewDomain] = useState("");
     const [companyName, setCompanyName] = useState("");
-    const [emailAlerts, setEmailAlerts] = useState(true);
     const [isAdding, setIsAdding] = useState(false);
+    const [rescanning, setRescanning] = useState<string | null>(null);
 
     const [filterStatus, setFilterStatus] = useState("all");
     const [filterAlertLevel, setFilterAlertLevel] = useState("all");
@@ -177,6 +182,16 @@ export default function WatchlistPage() {
 
     async function handleAddDomain(close: () => void) {
         if (!companyId || !user || !newDomain.trim()) return;
+
+        if (!canPerformAction("watchlist")) {
+            showUpgradeModal(planId, {
+                type: "usage",
+                resource: "Watchlist Domains",
+                message: `You've reached the ${watchlist.limit} domain limit on your plan. Upgrade for more.`,
+            });
+            return;
+        }
+
         setIsAdding(true);
         try {
             await addToWatchlist({
@@ -184,7 +199,7 @@ export default function WatchlistPage() {
                 userId: user._id,
                 domain: newDomain.trim().toLowerCase(),
                 companyName: companyName.trim() || newDomain.split(".")[0].charAt(0).toUpperCase() + newDomain.split(".")[0].slice(1),
-                notifyByEmail: emailAlerts,
+                notifyByEmail: true,
             });
             setNewDomain("");
             setCompanyName("");
@@ -224,6 +239,24 @@ export default function WatchlistPage() {
         } catch (error) {
             devError("Failed to resume:", error);
             toast.error("Failed to resume monitoring");
+        }
+    }
+
+    async function handleRescan(id: Id<"watchlistItems">, domain: string) {
+        if (!companyId) return;
+        setRescanning(id);
+        try {
+            const result = await rescanDomain({ companyId, watchlistItemId: id, domain });
+            if (result.success) {
+                toast.success(`Scan complete: ${result.exposureCount} exposure${result.exposureCount !== 1 ? "s" : ""} found`);
+            } else {
+                toast.error(result.error || "Scan failed");
+            }
+        } catch (error) {
+            devError("Rescan failed:", error);
+            toast.error("Failed to rescan domain");
+        } finally {
+            setRescanning(null);
         }
     }
 
@@ -291,13 +324,6 @@ export default function WatchlistPage() {
                                                     onChange={setCompanyName}
                                                     className="max-w-md"
                                                 />
-                                                <div>
-                                                    <Checkbox
-                                                        label="Email Notifications"
-                                                        isSelected={emailAlerts}
-                                                        onChange={setEmailAlerts}
-                                                    />
-                                                </div>
                                             </div>
                                         </SlideoutMenu.Content>
                                         <SlideoutMenu.Footer>
@@ -463,6 +489,15 @@ export default function WatchlistPage() {
                                         <Table.Cell>
                                             <div className="flex items-center gap-1">
                                                 <Button color="link-gray" size="sm" iconLeading={Eye}>View</Button>
+                                                <Button
+                                                    color="link-gray"
+                                                    size="sm"
+                                                    iconLeading={rescanning === item._id ? Loading02 : RefreshCw01}
+                                                    onClick={() => handleRescan(item._id, item.domain)}
+                                                    isDisabled={rescanning === item._id}
+                                                >
+                                                    {rescanning === item._id ? "Scanning..." : "Rescan"}
+                                                </Button>
                                                 {isActive ? (
                                                     <Button 
                                                         color="link-gray" 
@@ -542,15 +577,17 @@ export default function WatchlistPage() {
                                 <div className="flex items-center gap-3">
                                     <Hash01 className="w-5 h-5 text-tertiary" />
                                     <span className="text-sm text-secondary">Slack notifications</span>
+                                    <Badge color="gray" size="sm">Coming Soon</Badge>
                                 </div>
-                                <Toggle enabled={slackNotif} onToggle={() => setSlackNotif(!slackNotif)} />
+                                <Toggle enabled={false} onToggle={() => {}} />
                             </div>
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <MessageSquare01 className="w-5 h-5 text-tertiary" />
                                     <span className="text-sm text-secondary">Teams notifications</span>
+                                    <Badge color="gray" size="sm">Coming Soon</Badge>
                                 </div>
-                                <Toggle enabled={teamsNotif} onToggle={() => setTeamsNotif(!teamsNotif)} />
+                                <Toggle enabled={false} onToggle={() => {}} />
                             </div>
                         </div>
                         <div className="flex flex-col gap-5">

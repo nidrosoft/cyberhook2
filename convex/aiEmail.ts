@@ -9,7 +9,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { generateText } from "ai";
 import { Resend } from "@convex-dev/resend";
 
-const resend = new Resend(components.resend, {});
+const resend = new Resend(components.resend, { testMode: false });
 
 // ─── Knowledge Base Context ──────────────────────────────────────────────────
 
@@ -291,7 +291,7 @@ export const sendCampaignEmails = action({
 
     if (messages.length === 0) throw new Error("No draft messages to send");
 
-    const fromEmail = company.salesEmail || `noreply@${company.website || "cyberhook.io"}`;
+    const fromEmail = company.salesEmail || `noreply@${company.website || "cyberhook.ai"}`;
     const fromName = company.name;
 
     let sentCount = 0;

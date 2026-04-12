@@ -160,6 +160,7 @@ interface LeadItem {
     employeeCount?: string;
     exposureCount?: number;
     exposureSeverity?: string;
+    contactEmail?: string;
 }
 
 function Step2({
@@ -304,7 +305,13 @@ function Step2({
                                         <span className="text-sm font-medium text-primary truncate">{lead.name}</span>
                                         <span className="text-sm text-tertiary">·</span>
                                         <span className="text-sm text-tertiary truncate">{lead.domain}</span>
-                                        {lead.industry && (
+                                        {lead.contactEmail && (
+                                            <>
+                                                <span className="text-sm text-tertiary">·</span>
+                                                <span className="text-xs text-brand-600 truncate">{lead.contactEmail}</span>
+                                            </>
+                                        )}
+                                        {!lead.contactEmail && lead.industry && (
                                             <>
                                                 <span className="text-sm text-tertiary">·</span>
                                                 <span className="text-xs text-quaternary truncate">{lead.industry}</span>
@@ -368,7 +375,7 @@ function Step3({
     setRequireApproval: (v: boolean) => void;
 }) {
     return (
-        <div className="flex flex-col gap-6 w-[80%] mx-auto">
+        <div className="flex flex-col gap-6 w-[80%] mx-auto max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
             <div className="rounded-xl border border-secondary bg-primary p-6 flex flex-col gap-6">
                 <div>
                     <h2 className="text-lg font-semibold text-primary">Cadence Pattern</h2>
@@ -723,6 +730,25 @@ export default function NewCampaignPage() {
         api.leads.list,
         companyId ? { companyId } : "skip"
     );
+    const contacts = useQuery(
+        api.contacts.getByCompanyId,
+        companyId ? { companyId } : "skip"
+    );
+
+    // Merge contact emails into leads — pick first contact email per lead
+    const leadsWithEmails = useMemo(() => {
+        if (!leads) return [];
+        const contactsByLead = new Map<string, string>();
+        for (const c of contacts ?? []) {
+            if (c.email && !contactsByLead.has(c.leadId)) {
+                contactsByLead.set(c.leadId, c.email);
+            }
+        }
+        return leads.map((l) => ({
+            ...l,
+            contactEmail: contactsByLead.get(l._id),
+        }));
+    }, [leads, contacts]);
 
     const [isLaunching, setIsLaunching] = useState(false);
     const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
@@ -745,9 +771,8 @@ export default function NewCampaignPage() {
     const [emailPreview, setEmailPreview] = useState<{ subject: string; body: string } | null>(null);
 
     const selectedLeads = useMemo(() => {
-        if (!leads) return [];
-        return leads.filter((l) => selectedLeadIds.has(l._id));
-    }, [leads, selectedLeadIds]);
+        return leadsWithEmails.filter((l) => selectedLeadIds.has(l._id));
+    }, [leadsWithEmails, selectedLeadIds]);
 
     const handleGeneratePreview = async () => {
         if (selectedLeads.length === 0 || !company) return;
@@ -819,6 +844,7 @@ export default function NewCampaignPage() {
                         domain: l.domain,
                         industry: l.industry,
                         exposureCount: l.exposureCount ?? 0,
+                        email: l.contactEmail,
                     })),
                     campaignName: campaignName || "Untitled Campaign",
                     campaignDescription: description || undefined,
@@ -865,7 +891,7 @@ export default function NewCampaignPage() {
                 )}
                 {currentStep === 2 && (
                     <Step2
-                        leads={(leads || []) as LeadItem[]}
+                        leads={leadsWithEmails as LeadItem[]}
                         selectedLeadIds={selectedLeadIds}
                         setSelectedLeadIds={setSelectedLeadIds}
                         audienceRegion={audienceRegion}
@@ -874,7 +900,7 @@ export default function NewCampaignPage() {
                         setAudienceSize={setAudienceSize}
                         audienceExposure={audienceExposure}
                         setAudienceExposure={setAudienceExposure}
-                        isLoading={leads === undefined}
+                        isLoading={leads === undefined || contacts === undefined}
                     />
                 )}
                 {currentStep === 3 && (

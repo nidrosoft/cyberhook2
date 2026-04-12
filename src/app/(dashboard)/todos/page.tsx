@@ -69,12 +69,7 @@ const priorityOptions = [
     { label: "Low", value: "Low" },
 ];
 
-const statusOptions = [
-    { label: "All Statuses", value: "all" },
-    { label: "To Do", value: "To Do" },
-    { label: "In Progress", value: "In Progress" },
-    { label: "Done", value: "Done" },
-];
+// Status filter removed per Sprint 3C — replaced with "Show Completed" toggle
 
 const sortOptions = [
     { label: "Due Date", value: "dueDate" },
@@ -123,7 +118,7 @@ export default function TodosPage() {
 
     const [search, setSearch] = useState("");
     const [priorityFilter, setPriorityFilter] = useState("all");
-    const [statusFilter, setStatusFilter] = useState("all");
+    const [showCompleted, setShowCompleted] = useState(false);
     const [sortBy, setSortBy] = useState("dueDate");
     const [viewMode, setViewMode] = useState<"list" | "board">("list");
 
@@ -184,11 +179,26 @@ export default function TodosPage() {
         try {
             if (currentStatus === "completed") {
                 await reopenTask({ id });
+                toast.success("Task reopened");
             } else {
                 await completeTask({ id });
+                toast.success("Task completed", {
+                    action: {
+                        label: "Undo",
+                        onClick: async () => {
+                            try {
+                                await reopenTask({ id });
+                            } catch (e) {
+                                devError("Failed to undo:", e);
+                                toast.error("Failed to undo");
+                            }
+                        },
+                    },
+                });
             }
         } catch (error) {
             devError("Failed to toggle task:", error);
+            toast.error("Failed to update task");
         }
     }
 
@@ -287,14 +297,7 @@ export default function TodosPage() {
         return tasks.filter((t) => {
             if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
             if (priorityFilter !== "all" && t.priority !== priorityFilter.toLowerCase()) return false;
-            if (statusFilter !== "all") {
-                const statusMap: Record<string, string> = {
-                    "To Do": "pending",
-                    "In Progress": "pending",
-                    "Done": "completed",
-                };
-                if (t.status !== statusMap[statusFilter]) return false;
-            }
+            if (!showCompleted && t.status === "completed") return false;
             return true;
         }).map((t) => ({
             ...t,
@@ -304,7 +307,7 @@ export default function TodosPage() {
             done: t.status === "completed",
             displayStatus: t.status === "completed" ? "Done" : "To Do",
         }));
-    }, [tasks, search, priorityFilter, statusFilter]);
+    }, [tasks, search, priorityFilter, showCompleted]);
 
     if (isUserLoading) {
         return (
@@ -614,12 +617,17 @@ export default function TodosPage() {
                             onChange={(v) => setPriorityFilter(v)}
                             options={priorityOptions}
                         />
-                        <FilterDropdown
-                            aria-label="Status"
-                            value={statusFilter}
-                            onChange={(v) => setStatusFilter(v)}
-                            options={statusOptions}
-                        />
+                        <button
+                            onClick={() => setShowCompleted(!showCompleted)}
+                            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                                showCompleted
+                                    ? "border-brand-300 bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:border-brand-700 dark:text-brand-300"
+                                    : "border-secondary bg-primary text-secondary hover:bg-secondary_hover"
+                            }`}
+                        >
+                            <CheckCircle className="w-4 h-4" />
+                            {showCompleted ? "Showing Completed" : "Show Completed"}
+                        </button>
                         <FilterDropdown
                             aria-label="Sort by"
                             value={sortBy}

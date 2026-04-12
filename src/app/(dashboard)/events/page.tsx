@@ -13,6 +13,11 @@ import {
     ChevronLeft,
     ChevronRight,
     VideoRecorder,
+    User01,
+    Ticket01,
+    Bell01,
+    Trash01,
+    Edit05,
 } from "@untitledui/icons";
 
 import { Table, TableCard } from "@/components/application/table/table";
@@ -34,6 +39,10 @@ const TYPE_LABELS: Record<string, string> = {
     conference: "Conference",
     webinar: "Webinar",
     call: "Call",
+    trade_show: "Trade Show",
+    networking: "Networking",
+    workshop: "Workshop",
+    lunch_and_learn: "Lunch & Learn",
     other: "Other",
 };
 
@@ -49,7 +58,11 @@ const CALENDAR_COLORS = [
 const typeFilterOptions = [
     { label: "All Types", value: "all" },
     { label: "Conference", value: "conference" },
+    { label: "Trade Show", value: "trade_show" },
     { label: "Webinar", value: "webinar" },
+    { label: "Workshop", value: "workshop" },
+    { label: "Networking", value: "networking" },
+    { label: "Lunch & Learn", value: "lunch_and_learn" },
     { label: "Meeting", value: "meeting" },
     { label: "Appointment", value: "appointment" },
     { label: "Call", value: "call" },
@@ -72,7 +85,11 @@ const locationFilterOptions = [
 
 const eventTypeOptions = [
     { label: "Conference", value: "conference" },
+    { label: "Trade Show", value: "trade_show" },
     { label: "Webinar", value: "webinar" },
+    { label: "Workshop", value: "workshop" },
+    { label: "Networking", value: "networking" },
+    { label: "Lunch & Learn", value: "lunch_and_learn" },
     { label: "Meeting", value: "meeting" },
     { label: "Appointment", value: "appointment" },
     { label: "Call", value: "call" },
@@ -83,11 +100,39 @@ function getFormatColor(isVirtual: boolean | undefined): "brand" | "success" {
     return isVirtual ? "success" : "brand";
 }
 
+function buildGoogleCalendarUrl(event: { title: string; startDate: number; endDate?: number; location?: string; description?: string; isVirtual?: boolean }) {
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const start = fmt(new Date(event.startDate));
+    const end = fmt(new Date(event.endDate || event.startDate + 60 * 60 * 1000));
+    const params = new URLSearchParams({
+        action: "TEMPLATE",
+        text: event.title,
+        dates: `${start}/${end}`,
+        ...(event.location && !event.isVirtual ? { location: event.location } : {}),
+        ...(event.description ? { details: event.description } : {}),
+    });
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function buildOutlookCalendarUrl(event: { title: string; startDate: number; endDate?: number; location?: string; description?: string; isVirtual?: boolean }) {
+    const iso = (d: Date) => d.toISOString();
+    const params = new URLSearchParams({
+        path: "/calendar/action/compose",
+        rru: "addevent",
+        subject: event.title,
+        startdt: iso(new Date(event.startDate)),
+        enddt: iso(new Date(event.endDate || event.startDate + 60 * 60 * 1000)),
+        ...(event.location && !event.isVirtual ? { location: event.location } : {}),
+        ...(event.description ? { body: event.description } : {}),
+    });
+    return `https://outlook.live.com/calendar/0/action/compose?${params.toString()}`;
+}
+
 function getTypeColor(type: string): "brand" | "success" | "warning" | "gray" | "error" {
-    if (type === "conference") return "brand";
-    if (type === "webinar") return "success";
-    if (type === "call") return "warning";
-    if (type === "meeting") return "gray";
+    if (type === "conference" || type === "trade_show") return "brand";
+    if (type === "webinar" || type === "workshop") return "success";
+    if (type === "call" || type === "lunch_and_learn") return "warning";
+    if (type === "meeting" || type === "networking") return "gray";
     if (type === "appointment") return "gray";
     return "error";
 }
@@ -227,6 +272,8 @@ export default function EventsPage() {
     );
 
     const createEvent = useMutation(api.events.create);
+    const updateEvent = useMutation(api.events.update);
+    const removeEvent = useMutation(api.events.remove);
 
     const [evtSearch, setEvtSearch] = useState("");
     const [typeFilter, setTypeFilter] = useState("all");
@@ -241,6 +288,10 @@ export default function EventsPage() {
     const [evtLocation, setEvtLocation] = useState("");
     const [evtIsVirtual, setEvtIsVirtual] = useState(false);
     const [evtDescription, setEvtDescription] = useState("");
+    const [evtOrganizer, setEvtOrganizer] = useState("");
+    const [evtTicketUrl, setEvtTicketUrl] = useState("");
+    const [evtTicketCost, setEvtTicketCost] = useState("");
+    const [evtReminderDays, setEvtReminderDays] = useState("");
 
     const [aptTitle, setAptTitle] = useState("");
     const [aptDate, setAptDate] = useState("");
@@ -249,6 +300,10 @@ export default function EventsPage() {
     const [aptNotes, setAptNotes] = useState("");
 
     const [viewingEvent, setViewingEvent] = useState<typeof events[0] | null>(null);
+    const [editingEventId, setEditingEventId] = useState<string | null>(null);
+    const [showEditSlideout, setShowEditSlideout] = useState(false);
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+    const [showArchived, setShowArchived] = useState(false);
 
     if (!userData) {
         return (
@@ -263,24 +318,63 @@ export default function EventsPage() {
 
     const events = allEvents ?? [];
 
-    const filteredEvents = events.filter((e) => {
-        if (evtSearch && !e.title.toLowerCase().includes(evtSearch.toLowerCase())) return false;
-        if (typeFilter !== "all" && e.type !== typeFilter) return false;
-        if (locFilter === "virtual" && !e.isVirtual) return false;
-        if (locFilter === "in-person" && e.isVirtual) return false;
-        if (dateRange !== "all") {
-            const now = Date.now();
-            if (dateRange === "week" && e.startDate > now + 7 * 24 * 60 * 60 * 1000) return false;
-            if (dateRange === "month" && e.startDate > now + 30 * 24 * 60 * 60 * 1000) return false;
-            if (dateRange === "30" && e.startDate > now + 30 * 24 * 60 * 60 * 1000) return false;
-            if (dateRange === "90" && e.startDate > now + 90 * 24 * 60 * 60 * 1000) return false;
-        }
-        return true;
-    });
+    const suggestedEvents = events.filter((e) => e.isSuggested && !e.isArchived);
+
+    const filteredEvents = events
+        .filter((e) => {
+            if (e.isSuggested) return false;
+            if (!showArchived && e.isArchived) return false;
+            if (showArchived && !e.isArchived) return false;
+            if (evtSearch && !e.title.toLowerCase().includes(evtSearch.toLowerCase())) return false;
+            if (typeFilter !== "all" && e.type !== typeFilter) return false;
+            if (locFilter === "virtual" && !e.isVirtual) return false;
+            if (locFilter === "in-person" && e.isVirtual) return false;
+            if (dateRange !== "all") {
+                const now = Date.now();
+                if (dateRange === "week" && e.startDate > now + 7 * 24 * 60 * 60 * 1000) return false;
+                if (dateRange === "month" && e.startDate > now + 30 * 24 * 60 * 60 * 1000) return false;
+                if (dateRange === "30" && e.startDate > now + 30 * 24 * 60 * 60 * 1000) return false;
+                if (dateRange === "90" && e.startDate > now + 90 * 24 * 60 * 60 * 1000) return false;
+            }
+            return true;
+        })
+        .sort((a, b) => sortOrder === "asc" ? a.startDate - b.startDate : b.startDate - a.startDate);
 
     const appointmentEvents = events.filter(
-        (e) => e.type === "meeting" || e.type === "appointment"
+        (e) => !e.isArchived && (e.type === "meeting" || e.type === "appointment")
     );
+
+    type EventType = "meeting" | "appointment" | "conference" | "webinar" | "call" | "trade_show" | "networking" | "workshop" | "lunch_and_learn" | "other";
+
+    function resetEvtForm() {
+        setEvtTitle(""); setEvtType("conference"); setEvtStartDate(""); setEvtStartTime("");
+        setEvtEndDate(""); setEvtLocation(""); setEvtIsVirtual(false); setEvtDescription("");
+        setEvtOrganizer(""); setEvtTicketUrl(""); setEvtTicketCost(""); setEvtReminderDays("");
+        setEditingEventId(null);
+    }
+
+    function populateEvtForm(ev: typeof events[0]) {
+        setEditingEventId(ev._id);
+        setEvtTitle(ev.title);
+        setEvtType(ev.type);
+        const sd = new Date(ev.startDate);
+        setEvtStartDate(`${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, "0")}-${String(sd.getDate()).padStart(2, "0")}`);
+        setEvtStartTime(`${String(sd.getHours()).padStart(2, "0")}:${String(sd.getMinutes()).padStart(2, "0")}`);
+        if (ev.endDate) {
+            const ed = new Date(ev.endDate);
+            setEvtEndDate(`${ed.getFullYear()}-${String(ed.getMonth() + 1).padStart(2, "0")}-${String(ed.getDate()).padStart(2, "0")}`);
+        } else { setEvtEndDate(""); }
+        setEvtLocation(ev.location || "");
+        setEvtIsVirtual(ev.isVirtual ?? false);
+        setEvtDescription(ev.description || "");
+        setEvtOrganizer(ev.organizer || "");
+        setEvtTicketUrl(ev.ticketUrl || "");
+        setEvtTicketCost(ev.ticketCost != null ? String(ev.ticketCost) : "");
+        if (ev.reminderDate && ev.startDate) {
+            const daysBefore = Math.round((ev.startDate - ev.reminderDate) / (24 * 60 * 60 * 1000));
+            setEvtReminderDays(daysBefore > 0 ? String(daysBefore) : "");
+        } else { setEvtReminderDays(""); }
+    }
 
     const handleCreateEvent = async (close: () => void) => {
         if (!evtTitle.trim() || !evtType || !evtStartDate || !companyId || !userId) return;
@@ -295,28 +389,65 @@ export default function EventsPage() {
             endMs = new Date(ey, em - 1, ed, 23, 59).getTime();
         }
 
-        await createEvent({
-            companyId,
-            createdByUserId: userId,
-            title: evtTitle,
-            type: evtType as "meeting" | "appointment" | "conference" | "webinar" | "call" | "other",
-            startDate: startMs,
-            endDate: endMs,
-            location: evtLocation || undefined,
-            isVirtual: evtIsVirtual,
-            description: evtDescription || undefined,
-        });
+        let reminderMs: number | undefined;
+        if (evtReminderDays && parseInt(evtReminderDays) > 0) {
+            reminderMs = startMs - parseInt(evtReminderDays) * 24 * 60 * 60 * 1000;
+        }
 
-        toast.success("Event created");
-        setEvtTitle("");
-        setEvtType("conference");
-        setEvtStartDate("");
-        setEvtStartTime("");
-        setEvtEndDate("");
-        setEvtLocation("");
-        setEvtIsVirtual(false);
-        setEvtDescription("");
+        if (editingEventId) {
+            await updateEvent({
+                id: editingEventId as any,
+                title: evtTitle,
+                type: evtType as EventType,
+                startDate: startMs,
+                endDate: endMs,
+                location: evtLocation || undefined,
+                isVirtual: evtIsVirtual,
+                description: evtDescription || undefined,
+                organizer: evtOrganizer.trim() || undefined,
+                ticketUrl: evtTicketUrl.trim() || undefined,
+                ticketCost: evtTicketCost ? parseFloat(evtTicketCost) : undefined,
+                reminderDate: reminderMs,
+            });
+            toast.success("Event updated");
+        } else {
+            await createEvent({
+                companyId,
+                createdByUserId: userId,
+                title: evtTitle,
+                type: evtType as EventType,
+                startDate: startMs,
+                endDate: endMs,
+                location: evtLocation || undefined,
+                isVirtual: evtIsVirtual,
+                description: evtDescription || undefined,
+                organizer: evtOrganizer.trim() || undefined,
+                ticketUrl: evtTicketUrl.trim() || undefined,
+                ticketCost: evtTicketCost ? parseFloat(evtTicketCost) : undefined,
+                reminderDate: reminderMs,
+            });
+            toast.success("Event created");
+        }
+
+        resetEvtForm();
         close();
+    };
+
+    const handleArchiveEvent = async (id: string, archive: boolean) => {
+        try {
+            await updateEvent({ id: id as any, isArchived: archive });
+            toast.success(archive ? "Event archived" : "Event restored");
+            if (viewingEvent?._id === id) setViewingEvent(null);
+        } catch { toast.error("Failed to update event"); }
+    };
+
+    const handleDeleteEvent = async (id: string) => {
+        if (!confirm("Delete this event?")) return;
+        try {
+            await removeEvent({ id: id as any });
+            toast.success("Event deleted");
+            if (viewingEvent?._id === id) setViewingEvent(null);
+        } catch { toast.error("Failed to delete event"); }
     };
 
     const handleSchedule = async (close: () => void) => {
@@ -354,7 +485,7 @@ export default function EventsPage() {
     return (
         <div className="flex h-full w-full flex-col bg-primary relative">
             <div className="flex-1 overflow-y-auto w-full">
-                <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-8 py-8 flex flex-col gap-8">
+                <div className="mx-auto w-full max-w-[1600px] px-4 sm:px-8 py-8 flex flex-col gap-8">
 
                     {/* Page Header */}
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
@@ -365,14 +496,14 @@ export default function EventsPage() {
                             </p>
                         </div>
                         <SlideoutMenu.Trigger>
-                            <Button size="md" color="primary" iconLeading={Plus}>
+                            <Button color="primary" size="sm" iconLeading={Plus} onClick={() => resetEvtForm()}>
                                 New Event
                             </Button>
                             <SlideoutMenu>
                                 {({ close }) => (
                                     <>
                                         <SlideoutMenu.Header onClose={close}>
-                                            <h2 className="text-lg font-semibold text-primary">New Event</h2>
+                                            <h2 className="text-lg font-semibold text-primary">{editingEventId ? "Edit Event" : "New Event"}</h2>
                                         </SlideoutMenu.Header>
                                         <SlideoutMenu.Content>
                                             <div className="flex flex-col gap-4">
@@ -496,12 +627,57 @@ export default function EventsPage() {
                                                         className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary resize-none"
                                                     />
                                                 </div>
+
+                                                {/* Organizer, Tickets & Reminder */}
+                                                <div className="border-t border-secondary pt-4 mt-1">
+                                                    <h3 className="text-sm font-semibold text-primary mb-3">Additional Details</h3>
+                                                    <div className="flex flex-col gap-4">
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Organizer</label>
+                                                            <input type="text" value={evtOrganizer} onChange={(e) => setEvtOrganizer(e.target.value)}
+                                                                placeholder="e.g. CompTIA, ConnectWise"
+                                                                className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Ticket URL</label>
+                                                                <input type="url" value={evtTicketUrl} onChange={(e) => setEvtTicketUrl(e.target.value)}
+                                                                    placeholder="https://..."
+                                                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Ticket Cost ($)</label>
+                                                                <input type="number" value={evtTicketCost} onChange={(e) => setEvtTicketCost(e.target.value)}
+                                                                    placeholder="0"
+                                                                    className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Reminder (days before)</label>
+                                                            <NativeSelect
+                                                                aria-label="Reminder"
+                                                                value={evtReminderDays}
+                                                                onChange={(e) => setEvtReminderDays(e.target.value)}
+                                                                options={[
+                                                                    { label: "No reminder", value: "" },
+                                                                    { label: "1 day before", value: "1" },
+                                                                    { label: "3 days before", value: "3" },
+                                                                    { label: "7 days before", value: "7" },
+                                                                    { label: "14 days before", value: "14" },
+                                                                    { label: "30 days before", value: "30" },
+                                                                ]}
+                                                                className="w-full"
+                                                                selectClassName="text-sm"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </SlideoutMenu.Content>
                                         <SlideoutMenu.Footer>
                                             <div className="flex items-center justify-end gap-3">
-                                                <Button color="secondary" onClick={close}>Cancel</Button>
-                                                <Button color="primary" onClick={() => handleCreateEvent(close)}>Create</Button>
+                                                <Button color="secondary" onClick={() => { resetEvtForm(); close(); }}>Cancel</Button>
+                                                <Button color="primary" onClick={() => handleCreateEvent(close)}>{editingEventId ? "Save Changes" : "Create"}</Button>
                                             </div>
                                         </SlideoutMenu.Footer>
                                     </>
@@ -514,10 +690,11 @@ export default function EventsPage() {
                     <Tabs className="w-full">
                         <Tabs.List
                             size="sm"
-                            type="button-border"
+                            type="underline"
                             className="mb-6"
                             items={[
                                 { id: "upcoming", label: "Upcoming Events" },
+                                { id: "suggested", label: `Suggested (${suggestedEvents.length})` },
                                 { id: "calendar", label: "Calendar" },
                                 { id: "appointments", label: "Appointments" },
                             ]}
@@ -588,12 +765,24 @@ export default function EventsPage() {
                                             onChange={(v) => setLocFilter(v)}
                                             options={locationFilterOptions}
                                         />
+                                        <button
+                                            onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary bg-primary text-sm text-secondary hover:bg-secondary_subtle transition-colors"
+                                        >
+                                            Date {sortOrder === "asc" ? "↑" : "↓"}
+                                        </button>
+                                        <button
+                                            onClick={() => setShowArchived(!showArchived)}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm transition-colors ${showArchived ? "border-brand-500 bg-brand-50 text-brand-700" : "border-primary bg-primary text-secondary hover:bg-secondary_subtle"}`}
+                                        >
+                                            {showArchived ? "Showing Archived" : "Show Archived"}
+                                        </button>
                                     </div>
                                 </div>
 
                                 {/* Events Table */}
                                 <TableCard.Root>
-                                    <TableCard.Header title="Upcoming Events" badge={`${filteredEvents.length} events`} />
+                                    <TableCard.Header title={showArchived ? "Archived Events" : "Upcoming Events"} badge={`${filteredEvents.length} events`} />
                                     <div className="overflow-x-auto">
                                     <Table aria-label="Events Schedule">
                                         <Table.Header>
@@ -603,7 +792,7 @@ export default function EventsPage() {
                                                 <Table.Head id="location">Location</Table.Head>
                                                 <Table.Head id="date">Date</Table.Head>
                                                 <Table.Head id="format">Format</Table.Head>
-                                                <Table.Head id="actions" className="w-[140px]">Actions</Table.Head>
+                                                <Table.Head id="actions" className="w-[180px]">Actions</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
                                         <Table.Body items={filteredEvents.map((e) => ({ ...e, id: e._id }))}>
@@ -641,9 +830,20 @@ export default function EventsPage() {
                                                         </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
-                                                        <Button size="sm" color="secondary" onClick={() => setViewingEvent(item)}>
-                                                            View Details
-                                                        </Button>
+                                                        <div className="flex items-center gap-1">
+                                                            <Button size="sm" color="secondary" onClick={() => setViewingEvent(item)}>
+                                                                View
+                                                            </Button>
+                                                            <button onClick={() => { populateEvtForm(item); setShowEditSlideout(true); }} className="p-1.5 rounded-md text-tertiary hover:text-brand-secondary hover:bg-brand-secondary_alt transition-colors" aria-label="Edit">
+                                                                <Edit05 className="w-4 h-4" />
+                                                            </button>
+                                                            <button onClick={() => handleArchiveEvent(item._id, !item.isArchived)} className="p-1.5 rounded-md text-tertiary hover:text-warning-primary hover:bg-warning-secondary transition-colors" aria-label={item.isArchived ? "Restore" : "Archive"} title={item.isArchived ? "Restore" : "Archive"}>
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-2-3H6L4 7m16 0v12a1 1 0 01-1 1H5a1 1 0 01-1-1V7m16 0H4m8 4v6m-3-3l3 3 3-3" /></svg>
+                                                            </button>
+                                                            <button onClick={() => handleDeleteEvent(item._id)} className="p-1.5 rounded-md text-tertiary hover:text-error-primary hover:bg-error-secondary transition-colors" aria-label="Delete">
+                                                                <Trash01 className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
                                                     </Table.Cell>
                                                 </Table.Row>
                                             )}
@@ -654,9 +854,89 @@ export default function EventsPage() {
                             </div>
                         </Tabs.Panel>
 
+                        {/* =================== SUGGESTED EVENTS TAB =================== */}
+                        <Tabs.Panel id="suggested">
+                            <div className="flex flex-col gap-6">
+                                <div className="flex flex-col gap-1">
+                                    <h3 className="text-lg font-semibold text-primary">Suggested Industry Events</h3>
+                                    <p className="text-sm text-tertiary">Curated events recommended for your team. Add them to your calendar to stay up to date.</p>
+                                </div>
+
+                                {suggestedEvents.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                        <Calendar className="w-10 h-10 text-quaternary" />
+                                        <p className="text-sm text-tertiary">No suggested events available right now.</p>
+                                        <p className="text-xs text-quaternary">Check back later for recommended industry events.</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {suggestedEvents
+                                            .sort((a, b) => a.startDate - b.startDate)
+                                            .map((ev) => (
+                                                <div key={ev._id} className="flex flex-col gap-3 p-5 border border-secondary rounded-xl bg-primary hover:border-brand-secondary transition-colors">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div className="flex flex-col gap-1 min-w-0">
+                                                            <span className="text-sm font-semibold text-primary truncate">{ev.title}</span>
+                                                            <Badge color={getTypeColor(ev.type)} size="sm">{TYPE_LABELS[ev.type] || ev.type}</Badge>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col gap-1.5 text-xs text-secondary">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <Calendar className="w-3.5 h-3.5 text-tertiary shrink-0" />
+                                                            <span>{formatEventDate(ev.startDate, ev.endDate)}</span>
+                                                        </div>
+                                                        {(ev.location || ev.isVirtual) && (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <MarkerPin01 className="w-3.5 h-3.5 text-tertiary shrink-0" />
+                                                                <span>{ev.isVirtual ? "Virtual" : ev.location}</span>
+                                                            </div>
+                                                        )}
+                                                        {ev.organizer && (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <User01 className="w-3.5 h-3.5 text-tertiary shrink-0" />
+                                                                <span>{ev.organizer}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {ev.description && (
+                                                        <p className="text-xs text-tertiary line-clamp-2">{ev.description}</p>
+                                                    )}
+                                                    <div className="flex items-center gap-2 mt-auto pt-2 border-t border-secondary">
+                                                        <a
+                                                            href={buildGoogleCalendarUrl(ev)}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-secondary bg-primary text-xs font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                            Google
+                                                        </a>
+                                                        <a
+                                                            href={buildOutlookCalendarUrl(ev)}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-secondary bg-primary text-xs font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                            Outlook
+                                                        </a>
+                                                        <button
+                                                            onClick={() => setViewingEvent(ev)}
+                                                            className="ml-auto text-xs font-medium text-brand-secondary hover:underline"
+                                                        >
+                                                            View Details
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                    </div>
+                                )}
+                            </div>
+                        </Tabs.Panel>
+
                         {/* =================== CALENDAR TAB =================== */}
                         <Tabs.Panel id="calendar">
-                            <EventCalendar events={events} />
+                            <EventCalendar events={events.filter(e => !e.isArchived && !e.isSuggested)} />
                         </Tabs.Panel>
 
                         {/* =================== APPOINTMENTS TAB =================== */}
@@ -919,6 +1199,45 @@ export default function EventsPage() {
                                             </Badge>
                                         </div>
                                     </div>
+
+                                    {viewingEvent.organizer && (
+                                        <div className="flex items-start gap-3">
+                                            <User01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="text-xs font-medium text-tertiary uppercase">Organizer</span>
+                                                <span className="text-sm text-primary">{viewingEvent.organizer}</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {(viewingEvent.ticketUrl || viewingEvent.ticketCost) && (
+                                        <div className="flex items-start gap-3">
+                                            <Ticket01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="text-xs font-medium text-tertiary uppercase">Tickets</span>
+                                                {viewingEvent.ticketCost != null && (
+                                                    <span className="text-sm text-primary">${viewingEvent.ticketCost.toLocaleString()}</span>
+                                                )}
+                                                {viewingEvent.ticketUrl && (
+                                                    <a href={viewingEvent.ticketUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-brand-secondary hover:underline truncate max-w-[280px]">
+                                                        {viewingEvent.ticketUrl}
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {viewingEvent.reminderDate && (
+                                        <div className="flex items-start gap-3">
+                                            <Bell01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="text-xs font-medium text-tertiary uppercase">Reminder</span>
+                                                <span className="text-sm text-primary">
+                                                    {new Date(viewingEvent.reminderDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {viewingEvent.description && (
@@ -930,10 +1249,114 @@ export default function EventsPage() {
                                         </div>
                                     </>
                                 )}
+
+                                <hr className="border-secondary" />
+                                <div className="flex flex-col gap-2">
+                                    <span className="text-xs font-medium text-tertiary uppercase">Add to Calendar</span>
+                                    <div className="flex items-center gap-2">
+                                        <a
+                                            href={buildGoogleCalendarUrl(viewingEvent)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                            Google Calendar
+                                        </a>
+                                        <a
+                                            href={buildOutlookCalendarUrl(viewingEvent)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                            Outlook
+                                        </a>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div className="px-6 py-4 border-t border-secondary">
-                            <Button size="md" color="secondary" className="w-full" onClick={() => setViewingEvent(null)}>Close</Button>
+                        <div className="px-6 py-4 border-t border-secondary flex items-center gap-3">
+                            <Button size="md" color="secondary" className="flex-1" onClick={() => setViewingEvent(null)}>Close</Button>
+                            <button onClick={() => { populateEvtForm(viewingEvent); setViewingEvent(null); setShowEditSlideout(true); }} className="px-4 py-2.5 rounded-lg border border-primary text-secondary hover:bg-secondary_subtle text-sm font-medium transition-colors">
+                                Edit
+                            </button>
+                            <button onClick={() => { handleArchiveEvent(viewingEvent._id, !viewingEvent.isArchived); }} className="px-4 py-2.5 rounded-lg border border-warning-secondary text-warning-primary hover:bg-warning-secondary text-sm font-medium transition-colors">
+                                {viewingEvent.isArchived ? "Restore" : "Archive"}
+                            </button>
+                            <button onClick={() => handleDeleteEvent(viewingEvent._id)} className="px-4 py-2.5 rounded-lg border border-error-secondary text-error-primary hover:bg-error-secondary text-sm font-medium transition-colors">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Event Slideout */}
+            {showEditSlideout && (
+                <div className="fixed inset-0 z-50 flex justify-end">
+                    <div className="absolute inset-0 bg-black/50" onClick={() => { setShowEditSlideout(false); resetEvtForm(); }} />
+                    <div className="relative w-full max-w-[480px] bg-primary border-l border-secondary shadow-xl flex flex-col h-full animate-in slide-in-from-right">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-secondary">
+                            <h2 className="text-lg font-semibold text-primary">Edit Event</h2>
+                            <button onClick={() => { setShowEditSlideout(false); resetEvtForm(); }} className="text-tertiary hover:text-secondary transition-colors text-xl">&times;</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-6 py-5">
+                            <div className="flex flex-col gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Title *</label>
+                                    <input type="text" value={evtTitle} onChange={(e) => setEvtTitle(e.target.value)} placeholder="Event title..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Type *</label>
+                                    <NativeSelect options={eventTypeOptions} value={evtType} onChange={(e) => setEvtType(e.target.value)} className="w-full" selectClassName="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Start Date *</label>
+                                    <DatePicker aria-label="Start Date" value={evtStartDate ? parseDate(evtStartDate) : undefined} onChange={(val) => setEvtStartDate(val ? val.toString() : "")} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Start Time</label>
+                                    <input type="time" value={evtStartTime} onChange={(e) => setEvtStartTime(e.target.value)} className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">End Date</label>
+                                    <DatePicker aria-label="End Date" value={evtEndDate ? parseDate(evtEndDate) : undefined} onChange={(val) => setEvtEndDate(val ? val.toString() : "")} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Location</label>
+                                    <input type="text" value={evtLocation} onChange={(e) => setEvtLocation(e.target.value)} placeholder="Location..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <Toggle isSelected={evtIsVirtual} onChange={setEvtIsVirtual} aria-label="Virtual" />
+                                    <span className="text-sm text-secondary">Virtual Event</span>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Description</label>
+                                    <textarea value={evtDescription} onChange={(e) => setEvtDescription(e.target.value)} placeholder="Description..." rows={3} className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary resize-none" />
+                                </div>
+                                <hr className="border-secondary" />
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Organizer</label>
+                                    <input type="text" value={evtOrganizer} onChange={(e) => setEvtOrganizer(e.target.value)} placeholder="Organizer name..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Ticket URL</label>
+                                    <input type="url" value={evtTicketUrl} onChange={(e) => setEvtTicketUrl(e.target.value)} placeholder="https://..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Ticket Cost ($)</label>
+                                    <input type="number" value={evtTicketCost} onChange={(e) => setEvtTicketCost(e.target.value)} placeholder="0.00" min="0" step="0.01" className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Reminder</label>
+                                    <NativeSelect options={[{ label: "No reminder", value: "" }, { label: "1 day before", value: "1" }, { label: "3 days before", value: "3" }, { label: "7 days before", value: "7" }, { label: "14 days before", value: "14" }, { label: "30 days before", value: "30" }]} value={evtReminderDays} onChange={(e) => setEvtReminderDays(e.target.value)} className="w-full" selectClassName="text-sm" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="px-6 py-4 border-t border-secondary flex items-center justify-end gap-3">
+                            <Button size="md" color="secondary" onClick={() => { setShowEditSlideout(false); resetEvtForm(); }}>Cancel</Button>
+                            <Button size="md" color="primary" onClick={() => { handleCreateEvent(() => setShowEditSlideout(false)); }}>Save Changes</Button>
                         </div>
                     </div>
                 </div>

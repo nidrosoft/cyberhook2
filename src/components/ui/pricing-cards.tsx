@@ -10,68 +10,77 @@ import { useAction } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { toast } from "sonner";
 
+const planTierOrder: Record<string, number> = {
+  solo: 0,
+  starter: 0,
+  growth: 1,
+  pro: 1,
+  scale: 2,
+  enterprise: 2,
+};
+
 const plans = [
   {
-    name: "Starter",
-    description: "For small teams getting started with cybersecurity sales intelligence",
+    name: "Solo",
+    description: "For individual reps exploring cybersecurity sales intelligence",
     price: 99,
     yearlyPrice: 950,
-    planId: "starter",
+    planId: "solo",
     stripePriceId: "price_1TILtWBs6XEduMNFnbOxNXbH",
     stripeYearlyPriceId: "price_1TILtWBs6XEduMNFmuGWVEav",
     features: [
       { text: "50 Live Searches/mo", icon: <Search size={18} /> },
-      { text: "2 Users", icon: <Users size={18} /> },
+      { text: "1 User", icon: <Users size={18} /> },
       { text: "Email Support", icon: <Headphones size={18} /> },
     ],
     includes: [
-      "Starter includes:",
+      "Solo includes:",
       "Live Search & Exposure Reports",
       "Live Leads Discovery",
-      "Watchlist Monitoring",
-      "Knowledge Base",
+      "10 Watchlist Domains",
+      "Basic Reporting",
     ],
   },
   {
     name: "Growth",
-    description: "For growing teams that need deeper intelligence and outreach tools",
-    price: 199,
-    yearlyPrice: 1910,
+    description: "For growing teams that need AI outreach and integrations",
+    price: 299,
+    yearlyPrice: 2870,
     planId: "growth",
     stripePriceId: "price_1TILtWBs6XEduMNFGSeE9yjS",
     stripeYearlyPriceId: "price_1TILtWBs6XEduMNFRE8Rc9SV",
+    popular: true,
     features: [
       { text: "200 Live Searches/mo", icon: <Search size={18} /> },
       { text: "5 Users", icon: <Users size={18} /> },
       { text: "Priority Support", icon: <Headphones size={18} /> },
     ],
     includes: [
-      "Everything in Starter, plus:",
+      "Everything in Solo, plus:",
       "AI Email Campaigns",
-      "RFP Hub & Answer Bank",
-      "Advanced Reporting",
       "CRM Integrations",
+      "50 Watchlist Domains",
+      "Advanced Reporting",
     ],
   },
   {
-    name: "Enterprise",
-    description: "Unlimited access with dedicated support for large sales organizations",
+    name: "Scale",
+    description: "Unlimited access with white-label and dedicated support",
     price: 499,
     yearlyPrice: 4790,
-    planId: "enterprise",
+    planId: "scale",
     stripePriceId: "price_1TILtXBs6XEduMNFxtWYdxHH",
     stripeYearlyPriceId: "price_1TILtXBs6XEduMNFY0oTCnSN",
-    popular: true,
     features: [
       { text: "Unlimited Searches", icon: <Search size={18} /> },
-      { text: "Unlimited Users", icon: <Users size={18} /> },
-      { text: "Dedicated Support", icon: <Shield size={18} /> },
+      { text: "Unlimited Users", icon: <Shield size={18} /> },
+      { text: "Dedicated Support", icon: <Headphones size={18} /> },
     ],
     includes: [
       "Everything in Growth, plus:",
-      "Custom Integrations",
-      "API Access",
-      "Multi-board Management",
+      "White-Label Reports",
+      "Unlimited Watchlist Domains",
+      "Unlimited Reports",
       "Dedicated Success Manager",
     ],
   },
@@ -143,9 +152,10 @@ const PricingSwitch = ({
 
 interface PricingCardsProps {
   currentPlanId: string;
+  onManagePlan?: () => void;
 }
 
-export default function PricingCards({ currentPlanId }: PricingCardsProps) {
+export default function PricingCards({ currentPlanId, onManagePlan }: PricingCardsProps) {
   const [isYearly, setIsYearly] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const createCheckout = useAction(api.stripe.createCheckoutSession);
@@ -153,9 +163,16 @@ export default function PricingCards({ currentPlanId }: PricingCardsProps) {
   const togglePricingPeriod = (value: string) =>
     setIsYearly(Number.parseInt(value) === 1);
 
+  const currentTier = planTierOrder[currentPlanId] ?? 0;
+
   const isCurrent = (planId: string) => {
     if (planId === "growth" && (currentPlanId === "pro" || currentPlanId === "growth")) return true;
     return currentPlanId === planId;
+  };
+
+  const isLowerTier = (planId: string) => {
+    const tier = planTierOrder[planId] ?? 0;
+    return tier < currentTier;
   };
 
   const handleSelectPlan = async (plan: typeof plans[number]) => {
@@ -191,7 +208,7 @@ export default function PricingCards({ currentPlanId }: PricingCardsProps) {
         <PricingSwitch onSwitch={togglePricingPeriod} className="shrink-0" />
       </div>
 
-      <div className="grid md:grid-cols-3 gap-5">
+      <div className="grid gap-5 md:grid-cols-3">
         {plans.map((plan) => (
           <Card
             key={plan.name}
@@ -265,27 +282,34 @@ export default function PricingCards({ currentPlanId }: PricingCardsProps) {
               </div>
             </CardContent>
             <CardFooter className="pb-6">
-              <button
-                disabled={isCurrent(plan.planId) || loadingPlan === plan.planId}
-                onClick={() => handleSelectPlan(plan)}
-                className={cn(
-                  "w-full p-3 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2",
-                  isCurrent(plan.planId)
-                    ? "bg-secondary_subtle border border-secondary text-tertiary cursor-not-allowed"
-                    : plan.popular
+              {isCurrent(plan.planId) ? (
+                <button
+                  onClick={onManagePlan}
+                  className="w-full p-2.5 text-sm font-semibold rounded-xl border border-secondary text-secondary hover:bg-secondary_subtle transition-colors flex items-center justify-center"
+                >
+                  Update Plan
+                </button>
+              ) : (
+                <button
+                  disabled={loadingPlan === plan.planId}
+                  onClick={() => handleSelectPlan(plan)}
+                  className={cn(
+                    "w-full p-2.5 text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2",
+                    plan.popular
                       ? "bg-brand-600 text-white border border-brand-700 shadow-sm hover:bg-brand-700"
                       : "bg-primary text-primary border-2 border-secondary hover:border-brand-secondary hover:bg-secondary_subtle"
-                )}
-              >
-                {loadingPlan === plan.planId && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                {isCurrent(plan.planId)
-                  ? "Current Plan"
-                  : loadingPlan === plan.planId
+                  )}
+                >
+                  {loadingPlan === plan.planId && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  {loadingPlan === plan.planId
                     ? "Redirecting..."
-                    : "Get started"}
-              </button>
+                    : isLowerTier(plan.planId)
+                      ? "Downgrade"
+                      : "Upgrade"}
+                </button>
+              )}
             </CardFooter>
           </Card>
         ))}

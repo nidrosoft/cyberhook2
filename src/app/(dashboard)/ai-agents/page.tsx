@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
+import { usePlanGate } from "@/hooks/use-plan-gate";
+import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
+import { PlanGateBadge } from "@/components/application/upgrade-modal/upgrade-modal";
 import type { SortDescriptor } from "react-aria-components";
 import {
     Calendar,
@@ -127,6 +130,9 @@ const kbTypeColor: Record<string, "brand" | "success" | "warning" | "blue"> = {
 export default function AiAgentsPage() {
     const { companyId, isLoading: isUserLoading } = useCurrentUser();
     const router = useRouter();
+    const { isFeatureGated, planId } = usePlanGate();
+    const { showUpgradeModal } = useUpgradeModal();
+    const isAiGated = isFeatureGated("aiAgents");
 
     const campaigns = useQuery(
         api.campaigns.list,
@@ -156,6 +162,19 @@ export default function AiAgentsPage() {
         column: "name",
         direction: "ascending",
     });
+
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!openMenu) return;
+        function handleClickOutside(e: MouseEvent) {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                setOpenMenu(null);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [openMenu]);
 
     const isLoading = isUserLoading || campaigns === undefined || stats === undefined;
 
@@ -239,22 +258,39 @@ export default function AiAgentsPage() {
     }
 
     return (
-        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto" onClick={() => openMenu && setOpenMenu(null)}>
+        <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
             <div className="flex flex-col gap-8">
                 {/* Page Header */}
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
                     <div className="flex flex-col gap-1">
-                        <h1 className="text-display-sm font-semibold text-primary">AI Agents</h1>
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-display-sm font-semibold text-primary">AI Agents</h1>
+                            {isAiGated && <PlanGateBadge />}
+                        </div>
                         <p className="text-md text-tertiary">
                             AI-powered email campaigns for cybersecurity sales outreach
                         </p>
                     </div>
                     <div className="flex items-center gap-3 mt-4 sm:mt-0">
-                        <Link href="/ai-agents/new">
-                            <Button color="primary" iconLeading={Plus}>
+                        {isAiGated ? (
+                            <Button
+                                color="primary"
+                                iconLeading={Plus}
+                                onClick={() => showUpgradeModal(planId, {
+                                    type: "feature",
+                                    feature: "AI Agents",
+                                    description: "AI-powered email campaigns are available on the Growth plan and above.",
+                                })}
+                            >
                                 New Campaign
                             </Button>
-                        </Link>
+                        ) : (
+                            <Link href="/ai-agents/new">
+                                <Button color="primary" iconLeading={Plus}>
+                                    New Campaign
+                                </Button>
+                            </Link>
+                        )}
                     </div>
                 </div>
 
@@ -409,7 +445,7 @@ export default function AiAgentsPage() {
                                                     <span className="text-secondary">{calcRate(item.emailsClicked, item.emailsSent)}%</span>
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="relative" ref={openMenu === item._id ? menuRef : undefined} onClick={(e) => e.stopPropagation()}>
                                                         <ButtonUtility
                                                             size="sm"
                                                             icon={DotsVertical}

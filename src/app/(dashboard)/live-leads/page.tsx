@@ -71,6 +71,7 @@ function getSeverityFromCount(count: number, severity?: string): ExposureSeverit
 
 const industryOptions = ["All", "Healthcare", "Finance", "Technology", "Construction", "Manufacturing", "Education", "Retail", "Government"];
 const exposureStatusOptions = ["All", "Has Exposures", "No Exposures", "Critical Only"];
+const sizeOptions = ["All", "1-50", "51-200", "201-500", "501-1000", "1000+"];
 const daysOptions = [
     { label: "Last 24 hours", value: "1" },
     { label: "Last 3 days", value: "3" },
@@ -159,8 +160,17 @@ export default function LiveLeadsPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [industry, setIndustry] = useState("All");
     const [exposureStatus, setExposureStatus] = useState("All");
+    const [sizeFilter, setSizeFilter] = useState("All");
     const [viewMode, setViewMode] = useState<Set<string>>(new Set(["list"]));
     const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+    // Pagination
+    const [myLeadsPage, setMyLeadsPage] = useState(1);
+    const [discoverPage, setDiscoverPage] = useState(1);
+    const pageSize = 25;
+
+    // Auto-load flag
+    const hasAutoLoaded = useRef(false);
 
     useEffect(() => {
         if (!openMenu) return;
@@ -296,8 +306,14 @@ export default function LiveLeadsPage() {
     }, [companyId, countriesLoaded, fetchCountries]);
 
     useEffect(() => {
-        if (activeTab === "discover") loadCountries();
-    }, [activeTab, loadCountries]);
+        if (activeTab === "discover") {
+            loadCountries();
+            if (!hasAutoLoaded.current && companyId && discoveredLeads.length === 0 && !isDiscovering) {
+                hasAutoLoaded.current = true;
+                handleDiscover();
+            }
+        }
+    }, [activeTab, loadCountries, companyId]);
 
     async function handleCountryChange(country: string) {
         setDiscoverCountry(country);
@@ -400,9 +416,30 @@ export default function LiveLeadsPage() {
                 if (exposureStatus === "No Exposures" && hasExposures) return false;
                 if (exposureStatus === "Critical Only" && lead.exposureSeverity !== "critical") return false;
             }
+            // Size filter
+            if (sizeFilter !== "All" && lead.employeeCount !== sizeFilter) {
+                return false;
+            }
             return true;
         });
-    }, [leads, searchQuery, industry, exposureStatus]);
+    }, [leads, searchQuery, industry, exposureStatus, sizeFilter]);
+
+    // Paginated slices
+    const myLeadsTotalPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
+    const paginatedMyLeads = useMemo(() => {
+        const start = (myLeadsPage - 1) * pageSize;
+        return filteredLeads.slice(start, start + pageSize);
+    }, [filteredLeads, myLeadsPage]);
+
+    const discoverTotalPages = Math.max(1, Math.ceil(discoveredLeads.length / pageSize));
+    const paginatedDiscoverLeads = useMemo(() => {
+        const start = (discoverPage - 1) * pageSize;
+        return discoveredLeads.slice(start, start + pageSize);
+    }, [discoveredLeads, discoverPage]);
+
+    // Reset page on filter change
+    useEffect(() => { setMyLeadsPage(1); }, [searchQuery, industry, exposureStatus, sizeFilter]);
+    useEffect(() => { setDiscoverPage(1); }, [discoveredLeads.length]);
 
     async function handleAddLead(close: () => void) {
         if (!leadCompany.trim() || !companyId || !user) return;
@@ -488,11 +525,12 @@ export default function LiveLeadsPage() {
         );
     }
 
-    const hasActiveFilters = industry !== "All" || exposureStatus !== "All";
+    const hasActiveFilters = industry !== "All" || exposureStatus !== "All" || sizeFilter !== "All";
 
     const clearFilters = () => {
         setIndustry("All");
         setExposureStatus("All");
+        setSizeFilter("All");
         setSearchQuery("");
     };
 
@@ -936,7 +974,7 @@ export default function LiveLeadsPage() {
                                         <Table.Head id="actions" label="" className="w-[160px]" />
                                     </Table.Header>
 
-                                    <Table.Body items={discoveredLeads.map((c, i) => ({ ...c, id: c.id || `discover-${i}` }))}>
+                                    <Table.Body items={paginatedDiscoverLeads.map((c, i) => ({ ...c, id: c.id || `discover-${(discoverPage - 1) * pageSize + i}` }))}>
                                         {(item) => (
                                             <Table.Row id={item.id}>
                                                 <Table.Cell>
@@ -990,8 +1028,15 @@ export default function LiveLeadsPage() {
 
                                 <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">
                                     <span className="text-sm text-tertiary">
-                                        Showing <span className="font-medium text-secondary">{discoveredLeads.length}</span> discovered companies
+                                        Showing <span className="font-medium text-secondary">{(discoverPage - 1) * pageSize + 1}–{Math.min(discoverPage * pageSize, discoveredLeads.length)}</span> of <span className="font-medium text-secondary">{discoveredLeads.length}</span> companies
                                     </span>
+                                    {discoverTotalPages > 1 && (
+                                        <div className="flex items-center gap-2">
+                                            <Button size="sm" color="secondary" isDisabled={discoverPage <= 1} onClick={() => setDiscoverPage((p) => p - 1)}>Previous</Button>
+                                            <span className="text-sm text-tertiary">Page {discoverPage} of {discoverTotalPages}</span>
+                                            <Button size="sm" color="secondary" isDisabled={discoverPage >= discoverTotalPages} onClick={() => setDiscoverPage((p) => p + 1)}>Next</Button>
+                                        </div>
+                                    )}
                                 </div>
                             </TableCard.Root>
                         )}
@@ -1000,9 +1045,9 @@ export default function LiveLeadsPage() {
                             <div className="flex flex-col items-center justify-center py-16 gap-4 rounded-xl border border-dashed border-secondary bg-secondary_subtle">
                                 <Compass className="w-12 h-12 text-tertiary" />
                                 <div className="text-center">
-                                    <h3 className="text-md font-semibold text-primary">Discover New Leads</h3>
+                                    <h3 className="text-md font-semibold text-primary">No Leads Found</h3>
                                     <p className="text-sm text-tertiary mt-1 max-w-md">
-                                        Use the filters above to find companies with recent dark web exposures. Select a time range and location to get started.
+                                        Try adjusting the filters above or expanding the time range to discover more companies with breach exposures.
                                     </p>
                                 </div>
                             </div>
@@ -1038,6 +1083,12 @@ export default function LiveLeadsPage() {
                         value={exposureStatus}
                         onChange={(v) => setExposureStatus(v)}
                         options={exposureStatusOptions.map((opt) => ({ label: opt === "All" ? "Exposure: All" : opt, value: opt }))}
+                    />
+                    <FilterDropdown
+                        aria-label="Company Size"
+                        value={sizeFilter}
+                        onChange={(v) => setSizeFilter(v)}
+                        options={sizeOptions.map((opt) => ({ label: opt === "All" ? "Size: All" : opt, value: opt }))}
                     />
 
                     {hasActiveFilters && (
@@ -1137,7 +1188,7 @@ export default function LiveLeadsPage() {
                             <Table.Head id="actions" className="w-[80px]" />
                         </Table.Header>
 
-                        <Table.Body items={filteredLeads.map((l) => ({ ...l, id: l._id }))}>
+                        <Table.Body items={paginatedMyLeads.map((l) => ({ ...l, id: l._id }))}>
                             {(item) => {
                                 const severity = getSeverityFromCount(item.exposureCount ?? 0, item.exposureSeverity);
                                 const sev = getSeverityIndicator(severity);
@@ -1245,8 +1296,15 @@ export default function LiveLeadsPage() {
                     {/* Footer */}
                     <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">
                         <span className="text-sm text-tertiary">
-                            Showing <span className="font-medium text-secondary">{filteredLeads.length}</span> of <span className="font-medium text-secondary">{leads?.length ?? 0}</span> leads
+                            Showing <span className="font-medium text-secondary">{filteredLeads.length > 0 ? (myLeadsPage - 1) * pageSize + 1 : 0}–{Math.min(myLeadsPage * pageSize, filteredLeads.length)}</span> of <span className="font-medium text-secondary">{filteredLeads.length}</span> leads
                         </span>
+                        {myLeadsTotalPages > 1 && (
+                            <div className="flex items-center gap-2">
+                                <Button size="sm" color="secondary" isDisabled={myLeadsPage <= 1} onClick={() => setMyLeadsPage((p) => p - 1)}>Previous</Button>
+                                <span className="text-sm text-tertiary">Page {myLeadsPage} of {myLeadsTotalPages}</span>
+                                <Button size="sm" color="secondary" isDisabled={myLeadsPage >= myLeadsTotalPages} onClick={() => setMyLeadsPage((p) => p + 1)}>Next</Button>
+                            </div>
+                        )}
                     </div>
                     {filteredLeads.length === 0 && (
                         <div className="px-5 py-8 text-center text-sm text-tertiary">
@@ -1262,7 +1320,7 @@ export default function LiveLeadsPage() {
                 {/* Grid View */}
                 {Array.from(viewMode).includes("grid") && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {filteredLeads.map((lead) => {
+                        {paginatedMyLeads.map((lead) => {
                             const severity = getSeverityFromCount(lead.exposureCount ?? 0, lead.exposureSeverity);
                             const indicator = getSeverityIndicator(severity);
                             return (
@@ -1294,22 +1352,34 @@ export default function LiveLeadsPage() {
                                                     : "Not Scanned"}
                                             </span>
                                         </div>
-                                        <Button 
-                                            size="sm" 
-                                            color="secondary-destructive"
-                                            onClick={() => setConfirmDeleteId(lead._id)}
-                                        >
-                                            Delete
-                                        </Button>
+                                        <div className="flex items-center gap-1">
+                                            <Button size="sm" color="secondary" onClick={() => handleGenerateReport(lead)}>Report</Button>
+                                            {lead.domain && (
+                                                <Button size="sm" color="secondary" onClick={() => handleAddToWatchlist(lead.domain!, lead.name)}>Watch</Button>
+                                            )}
+                                            <Button size="sm" color="secondary-destructive" onClick={() => setConfirmDeleteId(lead._id)}>Delete</Button>
+                                        </div>
                                     </div>
                                 </div>
                             );
                         })}
-                        {filteredLeads.length === 0 && (
+                        {paginatedMyLeads.length === 0 && (
                             <div className="col-span-full text-center py-12 text-sm text-tertiary">
                                 {leads?.length === 0 ? "No leads yet." : "No leads match your filters."}
                             </div>
                         )}
+                    </div>
+                )}
+                {Array.from(viewMode).includes("grid") && myLeadsTotalPages > 1 && (
+                    <div className="flex items-center justify-between rounded-xl border border-secondary bg-primary px-5 py-3.5">
+                        <span className="text-sm text-tertiary">
+                            Showing {(myLeadsPage - 1) * pageSize + 1}–{Math.min(myLeadsPage * pageSize, filteredLeads.length)} of {filteredLeads.length}
+                        </span>
+                        <div className="flex items-center gap-2">
+                            <Button size="sm" color="secondary" isDisabled={myLeadsPage <= 1} onClick={() => setMyLeadsPage((p) => p - 1)}>Previous</Button>
+                            <span className="text-sm text-tertiary">Page {myLeadsPage} of {myLeadsTotalPages}</span>
+                            <Button size="sm" color="secondary" isDisabled={myLeadsPage >= myLeadsTotalPages} onClick={() => setMyLeadsPage((p) => p + 1)}>Next</Button>
+                        </div>
                     </div>
                 )}
 

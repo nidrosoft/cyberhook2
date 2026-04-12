@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
 import { requireAuth, assertCompanyAccess } from "./lib/auth";
+import { getPlanLimits } from "./lib/plans";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,15 @@ export const add = mutation({
     const alreadyExists = existing.find((item) => item.domain === args.domain);
     if (alreadyExists) {
       throw new Error("Domain already in watchlist");
+    }
+
+    // Enforce plan limit
+    const company = await ctx.db.get(args.companyId);
+    if (company) {
+      const limits = getPlanLimits(company.planId);
+      if (existing.length >= limits.watchlistDomains) {
+        throw new Error("WATCHLIST_LIMIT_REACHED");
+      }
     }
 
     const watchlistId = await ctx.db.insert("watchlistItems", {

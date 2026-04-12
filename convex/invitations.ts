@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { requireAuth, assertCompanyAccess, requireRole } from "./lib/auth";
 
 export const list = query({
@@ -40,15 +41,27 @@ export const create = mutation({
     if (active) throw new Error("An invitation is already pending for this email");
 
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const email = args.email.toLowerCase().trim();
     const id = await ctx.db.insert("invitations", {
       companyId: args.companyId,
-      email: args.email.toLowerCase().trim(),
+      email,
       role: args.role,
       status: "pending",
       invitedByUserId: args.invitedByUserId,
       expiresAt: Date.now() + thirtyDaysMs,
       createdAt: Date.now(),
     });
+
+    // Send invite email via Resend
+    const company = await ctx.db.get(args.companyId);
+    const inviterName = `${user.firstName} ${user.lastName}`;
+    await ctx.scheduler.runAfter(0, internal.emails.sendInviteEmailInternal, {
+      inviterName,
+      companyName: company?.name ?? "CyberHook",
+      inviteeEmail: email,
+      role: args.role,
+    });
+
     return id;
   },
 });
@@ -66,7 +79,7 @@ export const cancel = mutation({
   },
 });
 
-export const resend = mutation({
+export const resendInvitation = mutation({
   args: { id: v.id("invitations") },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
@@ -79,6 +92,17 @@ export const resend = mutation({
       status: "pending",
       expiresAt: Date.now() + thirtyDaysMs,
     });
+
+    // Re-send invite email via Resend
+    const company = await ctx.db.get(inv.companyId);
+    const inviterName = `${user.firstName} ${user.lastName}`;
+    await ctx.scheduler.runAfter(0, internal.emails.sendInviteEmailInternal, {
+      inviterName,
+      companyName: company?.name ?? "CyberHook",
+      inviteeEmail: inv.email,
+      role: inv.role,
+    });
+
     return args.id;
   },
 });

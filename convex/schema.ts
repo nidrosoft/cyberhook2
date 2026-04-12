@@ -79,6 +79,13 @@ export default defineSchema({
         })
       )
     ),
+    // Brand & service area
+    brandPrimaryColor: v.optional(v.string()),
+    brandSecondaryColor: v.optional(v.string()),
+    serviceArea: v.optional(v.array(v.string())),
+    // Associations & programs
+    associations: v.optional(v.array(v.string())),
+    programs: v.optional(v.array(v.string())),
     // Legacy fields (kept for migration)
     country: v.optional(v.string()),
     streetAddress: v.optional(v.string()),
@@ -88,10 +95,15 @@ export default defineSchema({
     defaultCurrency: v.optional(v.string()),
     mrrTarget: v.optional(v.number()),
     appointmentTarget: v.optional(v.number()),
-    // Token system
+    // Token system (legacy — kept for migration)
     tokenAllocation: v.number(),
     tokensUsed: v.number(),
     tokenResetDate: v.number(),
+    // Plan-based usage tracking
+    searchesUsed: v.optional(v.number()),
+    reportsUsed: v.optional(v.number()),
+    usageResetDate: v.optional(v.number()),
+    planSelectedManually: v.optional(v.boolean()),
     // Stripe/Billing
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
@@ -624,6 +636,10 @@ export default defineSchema({
       v.literal("conference"),
       v.literal("webinar"),
       v.literal("call"),
+      v.literal("trade_show"),
+      v.literal("networking"),
+      v.literal("workshop"),
+      v.literal("lunch_and_learn"),
       v.literal("other")
     ),
     startDate: v.number(),
@@ -631,6 +647,17 @@ export default defineSchema({
     location: v.optional(v.string()),
     isVirtual: v.optional(v.boolean()),
     meetingUrl: v.optional(v.string()),
+    // Organizer
+    organizer: v.optional(v.string()),
+    // Tickets
+    ticketUrl: v.optional(v.string()),
+    ticketCost: v.optional(v.number()),
+    // Reminder
+    reminderDate: v.optional(v.number()),
+    // Archive
+    isArchived: v.optional(v.boolean()),
+    // Suggested events (admin-curated industry events)
+    isSuggested: v.optional(v.boolean()),
     // Linked entities
     linkedLeadId: v.optional(v.id("leads")),
     linkedContactId: v.optional(v.id("contacts")),
@@ -662,6 +689,7 @@ export default defineSchema({
     // Link to related entity
     relatedEntityType: v.optional(v.string()),
     relatedEntityId: v.optional(v.string()),
+    actionUrl: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])

@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import { mutation, action } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import { getPlanLimits, getTokenAllocationForPlan, DEFAULT_PLAN } from "./lib/plans";
+import type { PlanTier } from "./lib/plans";
 
 // Complete onboarding - creates company and user records
 export const completeOnboarding = mutation({
@@ -33,6 +35,9 @@ export const completeOnboarding = mutation({
     // Team & Branding (Step 3)
     logoUrl: v.optional(v.string()),
     teamEmails: v.optional(v.array(v.string())),
+    // Plan selection (Step 4)
+    selectedPlanId: v.optional(v.string()),
+    planSelectedManually: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -44,8 +49,13 @@ export const completeOnboarding = mutation({
     }
 
     const now = Date.now();
-    const defaultTokenAllocation = 1000;
-    const tokenResetDate = now + 30 * 24 * 60 * 60 * 1000;
+    const planId = (args.selectedPlanId === "solo" || args.selectedPlanId === "growth" || args.selectedPlanId === "scale")
+      ? args.selectedPlanId as PlanTier
+      : DEFAULT_PLAN;
+    const limits = getPlanLimits(planId);
+    const tokenAllocation = getTokenAllocationForPlan(planId);
+    const tokenResetDate = now + 7 * 24 * 60 * 60 * 1000;
+    const usageResetDate = now + 30 * 24 * 60 * 60 * 1000;
 
     // Check if user already exists (idempotent — safe to re-call)
     const existingUser = await ctx.db
@@ -96,9 +106,14 @@ export const completeOnboarding = mutation({
             },
           ]
         : undefined,
-      tokenAllocation: defaultTokenAllocation,
+      tokenAllocation,
       tokensUsed: 0,
       tokenResetDate,
+      searchesUsed: 0,
+      reportsUsed: 0,
+      usageResetDate,
+      planId,
+      planSelectedManually: args.planSelectedManually ?? false,
       status: "trial",
       createdAt: now,
       updatedAt: now,
@@ -123,9 +138,17 @@ export const completeOnboarding = mutation({
       ownerId: userId,
     });
 
+    // Send welcome email to the new user
+    await ctx.scheduler.runAfter(0, internal.emails.sendWelcomeEmail, {
+      email: args.email,
+      firstName: args.firstName,
+      companyName: args.companyName,
+    });
+
     // Create invitations for team members (if any)
     if (args.teamEmails && args.teamEmails.length > 0) {
       const expiresAt = now + 7 * 24 * 60 * 60 * 1000; // 7 days
+      const inviterName = `${args.firstName} ${args.lastName}`;
 
       for (const email of args.teamEmails) {
         if (email && email.trim() && email !== args.email) {
@@ -137,6 +160,14 @@ export const completeOnboarding = mutation({
             invitedByUserId: userId,
             expiresAt,
             createdAt: now,
+          });
+
+          // Send invite email to each team member
+          await ctx.scheduler.runAfter(0, internal.emails.sendInviteEmailInternal, {
+            inviterName,
+            companyName: args.companyName,
+            inviteeEmail: email.trim().toLowerCase(),
+            role: "sales_rep",
           });
         }
       }

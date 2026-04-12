@@ -165,18 +165,38 @@ export default function KnowledgeBasePage() {
     }
 
     async function handleExtractData() {
-        if (!kbUrl.trim()) { toast.error("Enter a URL first"); return; }
+        const trimmedUrl = kbUrl.trim();
+        if (!trimmedUrl) { toast.error("Enter a URL first"); return; }
+
+        if (!trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("http://")) {
+            toast.error("URL must start with https:// or http://");
+            return;
+        }
+
+        try {
+            new URL(trimmedUrl);
+        } catch {
+            toast.error("Invalid URL format — please check and try again");
+            return;
+        }
+
         setIsExtracting(true);
         try {
-            const result = await extractFromUrl({ url: kbUrl.trim() });
+            const result = await extractFromUrl({ url: trimmedUrl });
             if (result.success) {
                 setKbRichContent(result.content);
-                toast.success("Content extracted successfully");
+                toast.success(`Content extracted — ${result.content.length.toLocaleString()} characters`);
             } else {
-                toast.error(result.error || "Failed to extract content from URL");
+                toast.error(result.error || "Failed to extract content from URL", {
+                    duration: 6000,
+                    description: "Check the URL and try again, or use Rich Text to paste content manually.",
+                });
             }
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Extraction failed");
+            toast.error("Extraction failed — an unexpected error occurred", {
+                duration: 6000,
+                description: error instanceof Error ? error.message : "Please try again or use a different URL.",
+            });
         } finally {
             setIsExtracting(false);
         }
@@ -213,6 +233,12 @@ export default function KnowledgeBasePage() {
         }
         if (kbSourceType === "rich_text" && !kbRichContent.trim()) {
             toast.error("Please enter some content"); return;
+        }
+        if (kbSourceType === "web_crawler" && !kbUrl.trim()) {
+            toast.error("Please enter a URL"); return;
+        }
+        if (kbSourceType === "web_crawler" && !kbRichContent.trim()) {
+            toast.error("Please extract content from the URL first"); return;
         }
         if (kbSourceType === "file_upload" && !kbFileContent) {
             toast.error("Please select a file to upload"); return;
@@ -289,7 +315,7 @@ export default function KnowledgeBasePage() {
                 </div>
             )}
             <div className="flex-1 overflow-y-auto w-full">
-                <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-8 py-8 flex flex-col gap-8">
+                <div className="mx-auto w-full max-w-[1600px] px-4 sm:px-8 py-8 flex flex-col gap-8">
 
                     {/* Page Header */}
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">

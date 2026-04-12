@@ -29,6 +29,9 @@ import {
 import { api } from "../../../../convex/_generated/api";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useCompany } from "@/hooks/use-company";
+import { usePlanGate } from "@/hooks/use-plan-gate";
+import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
+import { getPlan } from "@/lib/plans";
 import { toast } from "sonner";
 import { ChartTooltipContent, ChartActiveDot } from "@/components/application/charts/charts-base";
 import { Table, TableCard } from "@/components/application/table/table";
@@ -55,6 +58,18 @@ const statusBadgeColor: Record<string, "success" | "warning" | "gray" | "blue"> 
 };
 
 const LEAD_SOURCE_COLORS = ["#7F56D9", "#12B76A", "#98A2B3"];
+
+const PIPELINE_STAGE_LABELS: Record<string, string> = {
+    new: "New",
+    contacted: "Contacted",
+    qualified: "Qualified",
+    proposal: "Proposal Sent",
+    negotiation: "Negotiation",
+    won: "Won / Converted",
+    lost: "Lost",
+    disqualified: "Disqualified",
+    unknown: "Uncategorized",
+};
 
 function LoadingState({ message = "Loading data..." }: { message?: string }) {
     return (
@@ -237,6 +252,8 @@ export default function ReportingPage() {
 
     const { companyId, user, isLoading: isUserLoading } = useCurrentUser();
     const { company } = useCompany();
+    const { reports, canPerformAction, planId } = usePlanGate();
+    const { showUpgradeModal } = useUpgradeModal();
 
     const searchStats = useQuery(
         api.searches.getStats,
@@ -339,17 +356,26 @@ export default function ReportingPage() {
     }, [filteredCampaigns]);
 
     const leadPipelineData = useMemo(() => {
-        if (!leadStats?.byStatus) return [];
-        const entries = Object.entries(leadStats.byStatus);
+        const leads = filteredLeads ?? [];
+        if (!leads.length) return [];
+
+        const byStatus: Record<string, number> = {};
+        leads.forEach((l) => {
+            const status = l.status || "unknown";
+            byStatus[status] = (byStatus[status] || 0) + 1;
+        });
+
+        const entries = Object.entries(byStatus);
         if (!entries.length) return [];
 
         const maxLeads = Math.max(...entries.map(([, count]) => count));
         return entries.map(([stage, count]) => ({
-            stage: stage.charAt(0).toUpperCase() + stage.slice(1).replace(/_/g, " "),
+            stage: PIPELINE_STAGE_LABELS[stage] ?? stage.charAt(0).toUpperCase() + stage.slice(1).replace(/_/g, " "),
+            rawStage: stage,
             leads: count,
             pct: maxLeads > 0 ? Math.round((count / maxLeads) * 100) : 0,
         }));
-    }, [leadStats]);
+    }, [filteredLeads]);
 
     const teamTableData = useMemo(() => {
         if (!teamMembers || !filteredSearches || !filteredLeads) return [];
@@ -385,6 +411,14 @@ export default function ReportingPage() {
     const dateRangeLabel = dateRangeOptions.find((o) => o.value === dateRange)?.label ?? dateRange;
 
     const generatePerformanceReport = useCallback(() => {
+        if (!canPerformAction("reports")) {
+            showUpgradeModal(planId, {
+                type: "usage",
+                resource: "Reports",
+                message: `You've used all ${reports.limit === -1 ? "" : reports.limit + " "}reports this month. Upgrade for more.`,
+            });
+            return;
+        }
         const doc = new jsPDF();
         const pageWidth = doc.internal.pageSize.getWidth();
         const margin = 20;
@@ -454,7 +488,7 @@ export default function ReportingPage() {
                 ["Company", company.name],
                 ["Website", company.website || "—"],
                 ["Phone", company.phone || "—"],
-                ["Plan", (company.planId ?? "Enterprise").charAt(0).toUpperCase() + (company.planId ?? "enterprise").slice(1)],
+                ["Plan", getPlan(company.planId).name],
                 ["Business Model", company.primaryBusinessModel || "—"],
                 ["Revenue Range", company.annualRevenue || "—"],
                 ["Geographic Coverage", (company.geographicCoverage ?? []).join(", ") || "—"],
@@ -592,7 +626,8 @@ export default function ReportingPage() {
         doc.text("CONFIDENTIAL — This report is intended for authorized recipients only. Do not distribute without permission.", margin, y);
 
         const dateStr = now.toISOString().slice(0, 10);
-        doc.save(`CyberHook_Performance_Report_${dateStr}.pdf`);
+        const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
+        doc.save(`${companySlug}_Performance_Report_${dateStr}.pdf`);
         toast.success("PDF report downloaded");
     }, [dateRangeLabel, filteredSearches, filteredLeads, filteredCampaigns, eventStats, searchStats, leadStats, teamTableData, teamTotals, campaignTableData, leadPipelineData, company, user]);
 
@@ -618,6 +653,7 @@ export default function ReportingPage() {
 
     const exportAllData = useCallback(() => {
         const dateStr = new Date().toISOString().slice(0, 10);
+        const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
         const headers = ["Category", "Name", "Status", "Value1", "Value2", "Value3", "Created"];
         const rows: string[][] = [];
 
@@ -650,12 +686,13 @@ export default function ReportingPage() {
             rows.push(["Lead", l.name, l.status ?? "new", l.domain, String(l.exposureCount ?? 0), l.source ?? "manual", new Date(l.createdAt).toLocaleDateString()]);
         }
 
-        downloadCSV(`CyberHook_Full_Report_${dateStr}.csv`, headers, rows);
+        downloadCSV(`${companySlug}_Full_Report_${dateStr}.csv`, headers, rows);
         setShowExportMenu(false);
-    }, [activityData, teamTableData, campaignTableData, leadPipelineData, allLeads, downloadCSV]);
+    }, [activityData, teamTableData, campaignTableData, leadPipelineData, allLeads, downloadCSV, company]);
 
     const exportLeadsCSV = useCallback(() => {
         const dateStr = new Date().toISOString().slice(0, 10);
+        const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
         const headers = ["Name", "Domain", "Status", "Source", "Exposures", "LinkedIn", "Created"];
         const rows = (allLeads ?? []).map((l) => [
             l.name,
@@ -666,25 +703,27 @@ export default function ReportingPage() {
             l.linkedinUrl ?? "",
             new Date(l.createdAt).toLocaleDateString(),
         ]);
-        downloadCSV(`CyberHook_Leads_${dateStr}.csv`, headers, rows);
+        downloadCSV(`${companySlug}_Leads_Export_${dateStr}.csv`, headers, rows);
         setShowExportMenu(false);
-    }, [allLeads, downloadCSV]);
+    }, [allLeads, downloadCSV, company]);
 
     const exportTeamCSV = useCallback(() => {
         const dateStr = new Date().toISOString().slice(0, 10);
+        const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
         const headers = ["Member", "Role", "Searches", "Leads Created"];
         const rows = teamTableData.map((m) => [m.name, m.role, String(m.searches), String(m.leads)]);
-        downloadCSV(`CyberHook_Team_Performance_${dateStr}.csv`, headers, rows);
+        downloadCSV(`${companySlug}_Team_Performance_${dateStr}.csv`, headers, rows);
         setShowExportMenu(false);
-    }, [teamTableData, downloadCSV]);
+    }, [teamTableData, downloadCSV, company]);
 
     const exportCampaignsCSV = useCallback(() => {
         const dateStr = new Date().toISOString().slice(0, 10);
+        const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
         const headers = ["Campaign", "Status", "Recipients", "Sent", "Opened", "Clicked", "Open Rate", "Click Rate"];
         const rows = campaignTableData.map((c) => [c.name, c.status, String(c.recipients), String(c.sent), String(c.opened), String(c.clicked), c.openRate, c.clickRate]);
-        downloadCSV(`CyberHook_Campaigns_${dateStr}.csv`, headers, rows);
+        downloadCSV(`${companySlug}_Campaigns_Export_${dateStr}.csv`, headers, rows);
         setShowExportMenu(false);
-    }, [campaignTableData, downloadCSV]);
+    }, [campaignTableData, downloadCSV, company]);
 
     if (isLoading) {
         return (
@@ -1015,32 +1054,32 @@ export default function ReportingPage() {
                                 {/* Pipeline KPI Cards */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                                     <MetricsChart04
-                                        title={leadStats?.total.toLocaleString() ?? "0"}
+                                        title={String(filteredLeads.length)}
                                         subtitle="Total Leads"
-                                        change={`${leadStats?.newThisWeek ?? 0}`}
+                                        change={`${leadPipelineData.length} stages`}
                                         changeTrend="positive"
-                                        changeDescription="new this week"
+                                        changeDescription="in pipeline"
                                         actions={false}
                                     />
                                     <MetricsChart04
-                                        title={String(leadStats?.byStatus?.["qualified"] ?? 0)}
-                                        subtitle="Qualified"
+                                        title={String(leadPipelineData.find(s => s.rawStage === "qualified")?.leads ?? 0)}
+                                        subtitle={PIPELINE_STAGE_LABELS["qualified"]}
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
                                         actions={false}
                                     />
                                     <MetricsChart04
-                                        title={String(leadStats?.byStatus?.["contacted"] ?? 0)}
-                                        subtitle="Contacted"
+                                        title={String(leadPipelineData.find(s => s.rawStage === "contacted")?.leads ?? 0)}
+                                        subtitle={PIPELINE_STAGE_LABELS["contacted"]}
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
                                         actions={false}
                                     />
                                     <MetricsChart04
-                                        title={String(leadStats?.byStatus?.["new"] ?? 0)}
-                                        subtitle="New Leads"
+                                        title={String(leadPipelineData.find(s => s.rawStage === "new")?.leads ?? 0)}
+                                        subtitle={PIPELINE_STAGE_LABELS["new"]}
                                         change=""
                                         changeTrend="positive"
                                         changeDescription=""
@@ -1054,8 +1093,8 @@ export default function ReportingPage() {
                                         <h3 className="text-lg font-semibold text-primary mb-5">Pipeline by Status</h3>
                                         <div className="flex flex-col gap-4">
                                             {leadPipelineData.map((s) => {
-                                                const isLost = s.stage.toLowerCase().includes("lost") || s.stage.toLowerCase().includes("disqualified");
-                                                const isWon = s.stage.toLowerCase().includes("won") || s.stage.toLowerCase().includes("converted");
+                                                const isLost = s.rawStage === "lost" || s.rawStage === "disqualified";
+                                                const isWon = s.rawStage === "won" || s.rawStage === "converted";
                                                 return (
                                                     <div key={s.stage} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
                                                         <span className="w-full sm:w-32 shrink-0 text-sm font-medium text-primary">{s.stage}</span>
@@ -1079,7 +1118,7 @@ export default function ReportingPage() {
 
                                 {/* Recent Leads Table */}
                                 <TableCard.Root>
-                                    <TableCard.Header title="Recent Leads" />
+                                    <TableCard.Header title="Recent Leads" badge={`${filteredLeads.length} in period`} />
                                     <div className="overflow-x-auto">
                                     <Table aria-label="Recent Leads" sortDescriptor={dealSort} onSortChange={setDealSort}>
                                         <Table.Header>
@@ -1092,7 +1131,7 @@ export default function ReportingPage() {
                                                 <Table.Head id="date" allowsSorting>Created</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
-                                        <Table.Body items={(allLeads ?? []).slice(0, 10).map((l) => ({ ...l, id: l._id }))}>
+                                        <Table.Body items={filteredLeads.slice(0, 10).map((l) => ({ ...l, id: l._id }))}>
                                             {(item) => (
                                                 <Table.Row id={item.id}>
                                                     <Table.Cell>
@@ -1107,11 +1146,13 @@ export default function ReportingPage() {
                                                                 item.status === "qualified" ? "success"
                                                                 : item.status === "contacted" ? "blue"
                                                                 : item.status === "new" ? "brand"
+                                                                : item.status === "won" ? "success"
+                                                                : item.status === "lost" || item.status === "disqualified" ? "error"
                                                                 : "gray"
                                                             }
                                                             size="sm"
                                                         >
-                                                            {(item.status ?? "new").charAt(0).toUpperCase() + (item.status ?? "new").slice(1)}
+                                                            {PIPELINE_STAGE_LABELS[item.status ?? "unknown"] ?? (item.status ?? "new").charAt(0).toUpperCase() + (item.status ?? "new").slice(1)}
                                                         </Badge>
                                                     </Table.Cell>
                                                     <Table.Cell>
@@ -1130,7 +1171,7 @@ export default function ReportingPage() {
                                         </Table.Body>
                                     </Table>
                                     </div>
-                                    {(allLeads ?? []).length === 0 && (
+                                    {filteredLeads.length === 0 && (
                                         <div className="flex items-center justify-center py-12">
                                             <p className="text-sm text-tertiary">No leads in pipeline yet</p>
                                         </div>

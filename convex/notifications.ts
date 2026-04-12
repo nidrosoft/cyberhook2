@@ -157,6 +157,7 @@ export const create = internalMutation({
     message: v.string(),
     relatedEntityType: v.optional(v.string()),
     relatedEntityId: v.optional(v.string()),
+    actionUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const notificationId = await ctx.db.insert("notifications", {
@@ -168,6 +169,7 @@ export const create = internalMutation({
       isRead: false,
       relatedEntityType: args.relatedEntityType,
       relatedEntityId: args.relatedEntityId,
+      actionUrl: args.actionUrl,
       createdAt: Date.now(),
     });
 
@@ -185,6 +187,7 @@ export const createBulk = internalMutation({
       message: v.string(),
       relatedEntityType: v.optional(v.string()),
       relatedEntityId: v.optional(v.string()),
+      actionUrl: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {

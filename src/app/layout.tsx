@@ -37,7 +37,7 @@ export default function RootLayout({
                         <RouteProvider>
                             <Theme>{children}</Theme>
                         </RouteProvider>
-                        <Toaster position="bottom-center" richColors closeButton duration={4000} />
+                        <Toaster position="top-right" richColors closeButton duration={4000} />
                     </body>
                 </html>
             </ConvexClientProvider>

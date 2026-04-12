@@ -34,8 +34,8 @@ export default function DeactivatedPage() {
                                 <p className="text-sm font-medium text-primary">Need to reactivate?</p>
                                 <p className="text-sm text-tertiary">
                                     Contact your account administrator or reach out to us at{" "}
-                                    <a href="mailto:support@cyberhook.com" className="text-brand-500 hover:text-brand-600">
-                                        support@cyberhook.com
+                                    <a href="mailto:support@cyberhook.ai" className="text-brand-500 hover:text-brand-600">
+                                        support@cyberhook.ai
                                     </a>{" "}
                                     to discuss reactivation options.
                                 </p>

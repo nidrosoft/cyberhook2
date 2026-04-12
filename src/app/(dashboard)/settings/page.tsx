@@ -1,21 +1,28 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
-import { useCurrentUser, useCompany, useTokens } from "@/hooks";
+import { useCurrentUser, useCompany, useTokens, useFileUpload, usePlanGate } from "@/hooks";
+import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
+import { PlanGateBadge } from "@/components/application/upgrade-modal/upgrade-modal";
+import { getPlan } from "@/lib/plans";
 import {
     CreditCard02,
+    Copy06,
     DownloadCloud01,
     DotsVertical,
     CheckCircle,
+    Edit05,
     FilterLines,
     Link01,
     Mail01,
     Plus,
     SearchLg,
+    Trash01,
+    XClose,
     Zap,
 } from "@untitledui/icons";
 import PricingCards from "@/components/ui/pricing-cards";
@@ -45,49 +52,49 @@ const tabs = [
 
 const integrationCategories = [
     {
+        label: "PAYMENTS",
+        items: [
+            { name: "Stripe", description: "Process payments and manage subscriptions", logo: "💳", logoColor: "bg-indigo-500", provider: "stripe" as const, available: true },
+        ],
+    },
+    {
         label: "EMAIL",
         items: [
-            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", logo: "OL", logoColor: "bg-blue-600", provider: "outlook_email" as const },
-            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", logo: "GM", logoColor: "bg-red-500", provider: "gmail" as const },
+            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", logo: "📧", logoColor: "bg-blue-600", provider: "outlook_email" as const, available: false },
+            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", logo: "✉️", logoColor: "bg-red-500", provider: "gmail" as const, available: false },
         ],
     },
     {
         label: "CALENDAR",
         items: [
-            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", logo: "OC", logoColor: "bg-blue-500", provider: "outlook_calendar" as const },
-            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", logo: "GC", logoColor: "bg-green-500", provider: "google_calendar" as const },
+            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", logo: "📅", logoColor: "bg-blue-500", provider: "outlook_calendar" as const, available: false },
+            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", logo: "📆", logoColor: "bg-green-500", provider: "google_calendar" as const, available: false },
         ],
     },
     {
         label: "CRM",
         items: [
-            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", logo: "HS", logoColor: "bg-orange-500", provider: "hubspot" as const },
-            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", logo: "GHL", logoColor: "bg-green-600", provider: "ghl" as const },
+            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", logo: "🔶", logoColor: "bg-orange-500", provider: "hubspot" as const, available: false },
+            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", logo: "🟢", logoColor: "bg-green-600", provider: "ghl" as const, available: false },
         ],
     },
     {
         label: "MESSAGING",
         items: [
-            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", logo: "MT", logoColor: "bg-indigo-600", provider: "teams" as const },
-            { name: "Slack", description: "Send notifications and alerts to Slack channels", logo: "SL", logoColor: "bg-purple-500", provider: "slack" as const },
+            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", logo: "💬", logoColor: "bg-indigo-600", provider: "teams" as const, available: false },
+            { name: "Slack", description: "Send notifications and alerts to Slack channels", logo: "💜", logoColor: "bg-purple-500", provider: "slack" as const, available: false },
         ],
     },
     {
         label: "SOCIAL",
         items: [
-            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", logo: "LI", logoColor: "bg-blue-700", provider: "linkedin" as const },
+            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", logo: "🔗", logoColor: "bg-blue-700", provider: "linkedin" as const, available: false },
         ],
     },
     {
         label: "PSA / RMM",
         items: [
-            { name: "ConnectWise", description: "Sync tickets, contacts, and companies with ConnectWise Manage", logo: "CW", logoColor: "bg-cyan-600", provider: "connectwise" as const },
-        ],
-    },
-    {
-        label: "PAYMENTS",
-        items: [
-            { name: "Stripe", description: "Process payments and manage subscriptions", logo: "ST", logoColor: "bg-indigo-500", provider: "stripe" as const },
+            { name: "ConnectWise", description: "Sync tickets, contacts, and companies with ConnectWise Manage", logo: "⚙️", logoColor: "bg-cyan-600", provider: "connectwise" as const, available: false },
         ],
     },
 ];
@@ -189,14 +196,38 @@ function LoadingSpinner() {
 }
 
 export default function SettingsPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex items-center justify-center min-h-[60vh]">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-border-secondary border-t-fg-brand-primary" />
+            </div>
+        }>
+            <SettingsPageContent />
+        </Suspense>
+    );
+}
+
+function SettingsPageContent() {
     const searchParams = useSearchParams();
     const validTabs = ["profile", "company", "team", "plan", "integrations", "audit", "usage"];
     const tabFromUrl = searchParams.get("tab");
     const [selectedTab, setSelectedTab] = useState<string>(
         tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "profile"
     );
+
+    // Sync tab when URL params change (e.g. returning from Stripe)
+    useEffect(() => {
+        if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== selectedTab) {
+            setSelectedTab(tabFromUrl);
+        }
+    }, [tabFromUrl]);
     const [uploadedAvatar, setUploadedAvatar] = useState<string | null>(null);
+    const [uploadedLogo, setUploadedLogo] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+
+    const { upload: uploadFile, isUploading: isFileUploading } = useFileUpload({
+        onError: (msg) => toast.error(`Upload failed: ${msg}`),
+    });
 
     const [userSort, setUserSort] = useState<SortDescriptor>({ column: "name", direction: "ascending" });
     const [auditSort, setAuditSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
@@ -213,9 +244,23 @@ export default function SettingsPage() {
     const [inviteRole, setInviteRole] = useState<"sales_rep" | "sales_admin" | "billing">("sales_rep");
     const [isInviting, setIsInviting] = useState(false);
 
+    // Location management
+    const [showLocationForm, setShowLocationForm] = useState(false);
+    const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+    const [locLabel, setLocLabel] = useState("");
+    const [locAddress, setLocAddress] = useState("");
+    const [locCity, setLocCity] = useState("");
+    const [locState, setLocState] = useState("");
+    const [locCountry, setLocCountry] = useState("");
+    const [locZip, setLocZip] = useState("");
+    const [locIsHQ, setLocIsHQ] = useState(false);
+
     const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
     const { company, isLoading: isCompanyLoading } = useCompany();
     const { tokensRemaining, tokenAllocation, tokenPercentage, resetDisplayText } = useTokens();
+    const { isFeatureGated, planId } = usePlanGate();
+    const { showUpgradeModal } = useUpgradeModal();
+    const isIntegrationsGated = isFeatureGated("integrations");
 
     const updateUser = useMutation(api.users.update);
     const updateCompany = useMutation(api.companies.update);
@@ -240,8 +285,113 @@ export default function SettingsPage() {
         companyId ? { companyId } : "skip"
     );
 
-    const handleAvatarUpload = (file: File) => {
+    const handleAvatarUpload = async (file: File) => {
+        if (!user) return;
         setUploadedAvatar(URL.createObjectURL(file));
+        const url = await uploadFile(file);
+        if (url) {
+            await updateUser({ id: user._id, imageUrl: url });
+            toast.success("Profile image saved");
+        }
+    };
+
+    const handleLogoUpload = async (file: File) => {
+        if (!company) return;
+        setUploadedLogo(URL.createObjectURL(file));
+        const url = await uploadFile(file);
+        if (url) {
+            await updateCompany({ id: company._id, logoUrl: url });
+            toast.success("Company logo saved");
+        }
+    };
+
+    const handleLogoDelete = async () => {
+        if (!company) return;
+        try {
+            await updateCompany({ id: company._id, logoUrl: "" });
+            setUploadedLogo(null);
+            toast.success("Company logo removed");
+        } catch {
+            toast.error("Failed to remove logo");
+        }
+    };
+
+    const resetLocationForm = () => {
+        setLocLabel("");
+        setLocAddress("");
+        setLocCity("");
+        setLocState("");
+        setLocCountry("");
+        setLocZip("");
+        setLocIsHQ(false);
+        setEditingLocationId(null);
+        setShowLocationForm(false);
+    };
+
+    const handleOpenAddLocation = () => {
+        resetLocationForm();
+        setShowLocationForm(true);
+    };
+
+    const handleOpenEditLocation = (loc: { id: string; label: string; address?: string; city?: string; state?: string; country?: string; zipCode?: string; isHeadquarters: boolean }) => {
+        setEditingLocationId(loc.id);
+        setLocLabel(loc.label);
+        setLocAddress(loc.address ?? "");
+        setLocCity(loc.city ?? "");
+        setLocState(loc.state ?? "");
+        setLocCountry(loc.country ?? "");
+        setLocZip(loc.zipCode ?? "");
+        setLocIsHQ(loc.isHeadquarters);
+        setShowLocationForm(true);
+    };
+
+    const handleSaveLocation = async () => {
+        if (!company || !locLabel.trim()) {
+            toast.error("Location label is required");
+            return;
+        }
+        const existingLocations = company.locations ?? [];
+        const newLoc = {
+            id: editingLocationId ?? `loc_${Date.now()}`,
+            label: locLabel.trim(),
+            address: locAddress.trim() || undefined,
+            city: locCity.trim() || undefined,
+            state: locState.trim() || undefined,
+            country: locCountry.trim() || undefined,
+            zipCode: locZip.trim() || undefined,
+            isHeadquarters: locIsHQ,
+        };
+
+        let updated;
+        if (editingLocationId) {
+            updated = existingLocations.map((l) => l.id === editingLocationId ? newLoc : l);
+        } else {
+            updated = [...existingLocations, newLoc];
+        }
+
+        // If this one is HQ, unset others
+        if (newLoc.isHeadquarters) {
+            updated = updated.map((l) => l.id === newLoc.id ? l : { ...l, isHeadquarters: false });
+        }
+
+        try {
+            await updateCompany({ id: company._id, locations: updated });
+            toast.success(editingLocationId ? "Location updated" : "Location added");
+            resetLocationForm();
+        } catch {
+            toast.error("Failed to save location");
+        }
+    };
+
+    const handleRemoveLocation = async (locationId: string) => {
+        if (!company) return;
+        const updated = (company.locations ?? []).filter((l) => l.id !== locationId);
+        try {
+            await updateCompany({ id: company._id, locations: updated });
+            toast.success("Location removed");
+        } catch {
+            toast.error("Failed to remove location");
+        }
     };
 
     const getStatusBadge = (status: string) => {
@@ -298,6 +448,20 @@ export default function SettingsPage() {
                 salesTeamSize: data.salesTeamSize as string,
                 mrrTarget: data.mrrTarget ? Number(data.mrrTarget) : undefined,
                 appointmentTarget: data.appointmentTarget ? Number(data.appointmentTarget) : undefined,
+                brandPrimaryColor: (data.brandPrimaryColor as string) || undefined,
+                brandSecondaryColor: (data.brandSecondaryColor as string) || undefined,
+                serviceArea: (data.serviceArea as string)?.trim()
+                    ? (data.serviceArea as string).split(",").map((s) => s.trim()).filter(Boolean)
+                    : undefined,
+                geographicCoverage: (data.geographicCoverage as string)?.trim()
+                    ? (data.geographicCoverage as string).split(",").map((s) => s.trim()).filter(Boolean)
+                    : undefined,
+                associations: (data.associations as string)?.trim()
+                    ? (data.associations as string).split(",").map((s) => s.trim()).filter(Boolean)
+                    : undefined,
+                programs: (data.programs as string)?.trim()
+                    ? (data.programs as string).split(",").map((s) => s.trim()).filter(Boolean)
+                    : undefined,
             });
             if (companyId && user) {
                 await createAuditLog({ companyId, userId: user._id, action: "company.updated", entityType: "company", entityId: company._id, details: "Company settings updated" });
@@ -327,7 +491,14 @@ export default function SettingsPage() {
             setInviteRole("sales_rep");
             setShowInviteModal(false);
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Failed to send invitation");
+            const msg = err instanceof Error ? err.message : "";
+            if (msg.includes("already pending")) {
+                toast.error("An invitation has already been sent to this email address.");
+            } else if (msg.includes("Forbidden")) {
+                toast.error("You don't have permission to send invitations.");
+            } else {
+                toast.error("Something went wrong. Please try again.");
+            }
         } finally {
             setIsInviting(false);
         }
@@ -352,9 +523,9 @@ export default function SettingsPage() {
         return u?.firstName?.charAt(0) ?? "?";
     };
 
-    const planLabel = company?.planId ?? "Enterprise";
-    const planPrice = company?.planId === "starter" ? "$99" : company?.planId === "pro" ? "$499" : "$1,250";
-    const currentPlanId = company?.planId ?? "enterprise";
+    const settingsPlan = getPlan(company?.planId);
+    const planLabel = settingsPlan.name;
+    const planPrice = settingsPlan.priceLabel;
 
     const menuRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -371,22 +542,38 @@ export default function SettingsPage() {
     }, [openUserMenu]);
 
     const handleRoleChange = async (userId: string, newRole: "sales_rep" | "sales_admin" | "billing") => {
-        await updateUser({ id: userId as Parameters<typeof updateUser>[0]["id"], role: newRole });
-        if (companyId && user) {
-            await createAuditLog({ companyId, userId: user._id, action: "user.updated", entityType: "user", entityId: userId, details: `Role changed to ${formatRole(newRole)}` });
+        if (user && userId === user._id) {
+            toast.error("You cannot change your own role");
+            return;
         }
-        toast.success(`Role updated to ${formatRole(newRole)}`);
+        try {
+            await updateUser({ id: userId as Parameters<typeof updateUser>[0]["id"], role: newRole });
+            if (companyId && user) {
+                await createAuditLog({ companyId, userId: user._id, action: "user.updated", entityType: "user", entityId: userId, details: `Role changed to ${formatRole(newRole)}` });
+            }
+            toast.success(`Role updated to ${formatRole(newRole)}`);
+        } catch {
+            toast.error("Failed to update role");
+        }
         setEditingRole(null);
         setOpenUserMenu(null);
     };
 
     const handleToggleStatus = async (userId: string, currentStatus: string) => {
-        const newStatus: "approved" | "deactivated" = currentStatus === "deactivated" ? "approved" : "deactivated";
-        await updateUser({ id: userId as Parameters<typeof updateUser>[0]["id"], status: newStatus });
-        if (companyId && user) {
-            await createAuditLog({ companyId, userId: user._id, action: newStatus === "deactivated" ? "user.deactivated" : "user.approved", entityType: "user", entityId: userId, details: newStatus === "deactivated" ? "User deactivated" : "User reactivated" });
+        if (user && userId === user._id) {
+            toast.error("You cannot deactivate your own account");
+            return;
         }
-        toast.success(newStatus === "deactivated" ? "User deactivated" : "User reactivated");
+        const newStatus: "approved" | "deactivated" = currentStatus === "deactivated" ? "approved" : "deactivated";
+        try {
+            await updateUser({ id: userId as Parameters<typeof updateUser>[0]["id"], status: newStatus });
+            if (companyId && user) {
+                await createAuditLog({ companyId, userId: user._id, action: newStatus === "deactivated" ? "user.deactivated" : "user.approved", entityType: "user", entityId: userId, details: newStatus === "deactivated" ? "User deactivated" : "User reactivated" });
+            }
+            toast.success(newStatus === "deactivated" ? "User deactivated" : "User reactivated");
+        } catch {
+            toast.error("Failed to update user status");
+        }
         setOpenUserMenu(null);
     };
 
@@ -433,8 +620,8 @@ export default function SettingsPage() {
                         options={tabs.map((tab) => ({ label: tab.label, value: tab.id }))}
                     />
                     <div className="-mx-4 -my-1 scrollbar-hide flex overflow-x-auto px-4 py-1 lg:-mx-8 lg:px-8">
-                        <Tabs className="hidden md:flex xl:w-full border-b border-secondary pb-px" selectedKey={selectedTab} onSelectionChange={(value) => setSelectedTab(value as string)}>
-                            <TabList type="button-minimal" className="w-full gap-4 min-w-max" items={tabs} />
+                        <Tabs className="hidden md:flex xl:w-full" selectedKey={selectedTab} onSelectionChange={(value) => setSelectedTab(value as string)}>
+                            <TabList type="underline" className="w-full gap-4 min-w-max" items={tabs} />
                         </Tabs>
                     </div>
 
@@ -501,9 +688,30 @@ export default function SettingsPage() {
                                             <Label>Your photo <span className="text-brand-tertiary">*</span></Label>
                                             <p className="text-sm text-tertiary">This will be displayed on your profile.</p>
                                         </div>
-                                        <div className="flex flex-col gap-5 lg:flex-row">
-                                            <Avatar size="2xl" src={uploadedAvatar || user?.imageUrl || undefined} initials={user ? `${user.firstName.charAt(0)}${user.lastName.charAt(0)}` : undefined} />
-                                            <FileUpload.DropZone className="w-full" onDropFiles={(files) => handleAvatarUpload(files[0])} />
+                                        <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+                                            <div className="relative group shrink-0">
+                                                <Avatar size="2xl" src={uploadedAvatar || user?.imageUrl || undefined} initials={user ? `${user.firstName.charAt(0)}${user.lastName.charAt(0)}` : undefined} />
+                                                {(uploadedAvatar || user?.imageUrl) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={async () => {
+                                                            if (!user) return;
+                                                            try {
+                                                                await updateUser({ id: user._id, imageUrl: "" });
+                                                                setUploadedAvatar(null);
+                                                                toast.success("Profile photo removed");
+                                                            } catch {
+                                                                toast.error("Failed to remove photo");
+                                                            }
+                                                        }}
+                                                        className="absolute -top-1 -right-1 flex items-center justify-center size-5 rounded-full bg-error-primary text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-sm cursor-pointer"
+                                                        title="Remove photo"
+                                                    >
+                                                        <XClose className="size-3" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <FileUpload.DropZone className="w-full" accept="image/*" allowsMultiple={false} hint="SVG, PNG or JPG (max. 2MB)" maxSize={2 * 1024 * 1024} onDropFiles={(files) => handleAvatarUpload(files[0])} />
                                         </div>
                                     </div>
                                 </div>
@@ -540,10 +748,23 @@ export default function SettingsPage() {
                                             <Label>Company Name</Label>
                                             <InputBase size="md" />
                                         </TextField>
-                                        <TextField name="locationId" defaultValue={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`} isDisabled>
+                                        <div className="flex flex-col gap-1.5">
                                             <Label>Location ID</Label>
-                                            <InputBase size="md" />
-                                        </TextField>
+                                            <div className="flex items-center gap-2">
+                                                <InputBase size="md" value={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`} isDisabled className="flex-1" />
+                                                <Button
+                                                    color="secondary"
+                                                    size="md"
+                                                    onClick={() => {
+                                                        const locId = company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`;
+                                                        navigator.clipboard.writeText(locId);
+                                                        toast.success("Location ID copied!");
+                                                    }}
+                                                >
+                                                    <Copy06 className="size-4" />
+                                                </Button>
+                                            </div>
+                                        </div>
                                         <Select name="companyType" label="Company Type" defaultSelectedKey={company?.companyType ?? company?.primaryBusinessModel ?? "msp"}>
                                             <Select.Item id="msp">MSP/MSSP</Select.Item>
                                             <Select.Item id="var">Value Added Reseller</Select.Item>
@@ -557,6 +778,39 @@ export default function SettingsPage() {
                                             <Label>Main Phone</Label>
                                             <InputBase size="md" />
                                         </TextField>
+                                    </div>
+
+                                    {/* Company Logo */}
+                                    <div className="flex flex-col gap-2 pt-4">
+                                        <Label>Company Logo</Label>
+                                        <p className="text-sm text-tertiary">Upload your company logo. This will appear across the platform.</p>
+                                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                                            {(uploadedLogo || company?.logoUrl) ? (
+                                                <div className="relative group shrink-0">
+                                                    <img
+                                                        src={uploadedLogo || company?.logoUrl}
+                                                        alt="Company logo"
+                                                        className="h-16 w-16 rounded-lg border border-secondary object-contain bg-white"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleLogoDelete}
+                                                        className="absolute -top-2 -right-2 flex items-center justify-center size-5 rounded-full bg-error-primary text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-sm cursor-pointer"
+                                                        title="Remove logo"
+                                                    >
+                                                        <XClose className="size-3" />
+                                                    </button>
+                                                </div>
+                                            ) : null}
+                                            <FileUpload.DropZone
+                                                className="flex-1"
+                                                accept="image/*"
+                                                allowsMultiple={false}
+                                                hint="SVG, PNG or JPG (max. 2MB)"
+                                                maxSize={2 * 1024 * 1024}
+                                                onDropFiles={(files) => handleLogoUpload(files[0])}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 
@@ -618,12 +872,122 @@ export default function SettingsPage() {
 
                                 <hr className="h-px w-full border-none bg-border-secondary" />
 
+                                {/* BRAND COLORS */}
+                                <div className="flex flex-col gap-5">
+                                    <h3 className="text-sm font-semibold text-primary mb-2">BRAND COLORS</h3>
+                                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-sm font-medium text-secondary">Primary Color</label>
+                                            <div className="flex items-center gap-3">
+                                                <input
+                                                    type="color"
+                                                    name="brandPrimaryColor"
+                                                    defaultValue={company?.brandPrimaryColor || "#6941C6"}
+                                                    className="h-10 w-12 cursor-pointer rounded-lg border border-secondary bg-primary p-1"
+                                                />
+                                                <InputBase size="md" name="brandPrimaryColorHex" defaultValue={company?.brandPrimaryColor || "#6941C6"} className="flex-1" />
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-sm font-medium text-secondary">Secondary Color</label>
+                                            <div className="flex items-center gap-3">
+                                                <input
+                                                    type="color"
+                                                    name="brandSecondaryColor"
+                                                    defaultValue={company?.brandSecondaryColor || "#3538CD"}
+                                                    className="h-10 w-12 cursor-pointer rounded-lg border border-secondary bg-primary p-1"
+                                                />
+                                                <InputBase size="md" name="brandSecondaryColorHex" defaultValue={company?.brandSecondaryColor || "#3538CD"} className="flex-1" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <hr className="h-px w-full border-none bg-border-secondary" />
+
+                                {/* SERVICE AREA */}
+                                <div className="flex flex-col gap-5">
+                                    <h3 className="text-sm font-semibold text-primary mb-2">SERVICE AREA</h3>
+                                    <p className="text-sm text-tertiary -mt-3">Define the regions or areas your company serves (comma-separated).</p>
+                                    <TextField name="serviceArea" defaultValue={company?.serviceArea?.join(", ") ?? ""}>
+                                        <Label>Service Regions</Label>
+                                        <InputBase size="md" placeholder="e.g. Northeast US, Midwest US, Canada" />
+                                    </TextField>
+                                </div>
+
+                                <hr className="h-px w-full border-none bg-border-secondary" />
+
+                                {/* ASSOCIATIONS & PROGRAMS */}
+                                <div className="flex flex-col gap-5">
+                                    <h3 className="text-sm font-semibold text-primary mb-2">ASSOCIATIONS & PROGRAMS</h3>
+                                    <p className="text-sm text-tertiary -mt-3">Industry associations and vendor programs your company participates in (comma-separated).</p>
+                                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
+                                        <TextField name="associations" defaultValue={company?.associations?.join(", ") ?? ""}>
+                                            <Label>Associations</Label>
+                                            <InputBase size="md" placeholder="e.g. CompTIA, ISACA, (ISC)²" />
+                                        </TextField>
+                                        <TextField name="programs" defaultValue={company?.programs?.join(", ") ?? ""}>
+                                            <Label>Programs</Label>
+                                            <InputBase size="md" placeholder="e.g. Microsoft Partner, AWS Partner" />
+                                        </TextField>
+                                    </div>
+                                </div>
+
+                                <hr className="h-px w-full border-none bg-border-secondary" />
+
                                 {/* OFFICE LOCATIONS */}
                                 <div className="flex flex-col gap-5">
                                     <div className="flex items-center justify-between">
                                         <h3 className="text-sm font-semibold text-primary mb-2">OFFICE LOCATIONS</h3>
-                                        <Button size="sm" color="secondary" iconLeading={Plus}>Add Location</Button>
+                                        <Button size="sm" color="secondary" iconLeading={Plus} onClick={handleOpenAddLocation}>Add Location</Button>
                                     </div>
+
+                                    {/* Add / Edit Location Form */}
+                                    {showLocationForm && (
+                                        <div className="flex flex-col gap-4 p-4 border border-brand-secondary rounded-lg bg-brand-primary_alt">
+                                            <div className="flex items-center justify-between">
+                                                <h4 className="text-sm font-semibold text-primary">{editingLocationId ? "Edit Location" : "New Location"}</h4>
+                                                <button type="button" onClick={resetLocationForm} className="text-tertiary hover:text-primary transition-colors cursor-pointer">
+                                                    <XClose className="size-4" />
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-sm font-medium text-secondary">Label *</label>
+                                                    <input type="text" value={locLabel} onChange={(e) => setLocLabel(e.target.value)} placeholder="e.g. Headquarters" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-sm font-medium text-secondary">Address</label>
+                                                    <input type="text" value={locAddress} onChange={(e) => setLocAddress(e.target.value)} placeholder="Street address" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-sm font-medium text-secondary">City</label>
+                                                    <input type="text" value={locCity} onChange={(e) => setLocCity(e.target.value)} placeholder="City" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-sm font-medium text-secondary">State / Province</label>
+                                                    <input type="text" value={locState} onChange={(e) => setLocState(e.target.value)} placeholder="State" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-sm font-medium text-secondary">Country</label>
+                                                    <input type="text" value={locCountry} onChange={(e) => setLocCountry(e.target.value)} placeholder="Country" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary" />
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="text-sm font-medium text-secondary">ZIP / Postal Code</label>
+                                                    <input type="text" value={locZip} onChange={(e) => setLocZip(e.target.value)} placeholder="ZIP code" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary" />
+                                                </div>
+                                            </div>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input type="checkbox" checked={locIsHQ} onChange={(e) => setLocIsHQ(e.target.checked)} className="rounded border-secondary text-brand-secondary focus:ring-brand-secondary" />
+                                                <span className="text-sm text-secondary">Set as primary / headquarters</span>
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                <Button size="sm" color="primary" onClick={handleSaveLocation}>{editingLocationId ? "Update" : "Add"}</Button>
+                                                <Button size="sm" color="secondary" onClick={resetLocationForm}>Cancel</Button>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="flex flex-col gap-3">
                                         {company?.locations && company.locations.length > 0 ? (
                                             company.locations.map((loc) => (
@@ -634,19 +998,21 @@ export default function SettingsPage() {
                                                             {loc.isHeadquarters && <Badge size="sm" color="brand">Primary</Badge>}
                                                         </div>
                                                         <span className="text-sm text-tertiary break-words">
-                                                            {[loc.address, loc.city, loc.state, loc.zipCode, loc.country].filter(Boolean).join(", ")}
+                                                            {[loc.address, loc.city, loc.state, loc.zipCode, loc.country].filter(Boolean).join(", ") || "No address details"}
                                                         </span>
                                                     </div>
                                                     <div className="flex gap-2 shrink-0">
-                                                        <Button size="sm" color="secondary">Edit</Button>
-                                                        <Button size="sm" color="secondary">Remove</Button>
+                                                        <Button size="sm" color="secondary" iconLeading={Edit05} onClick={() => handleOpenEditLocation(loc)}>Edit</Button>
+                                                        <Button size="sm" color="secondary" iconLeading={Trash01} onClick={() => handleRemoveLocation(loc.id)}>Remove</Button>
                                                     </div>
                                                 </div>
                                             ))
                                         ) : (
-                                            <div className="p-6 border border-dashed border-secondary rounded-lg text-center">
-                                                <p className="text-sm text-tertiary">No office locations added yet. Click "Add Location" to get started.</p>
-                                            </div>
+                                            !showLocationForm && (
+                                                <div className="p-6 border border-dashed border-secondary rounded-lg text-center">
+                                                    <p className="text-sm text-tertiary">No office locations added yet. Click &quot;Add Location&quot; to get started.</p>
+                                                </div>
+                                            )
                                         )}
                                     </div>
                                 </div>
@@ -781,7 +1147,18 @@ export default function SettingsPage() {
 
                                 <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
                                     <div className="xl:col-span-3">
-                                        <PricingCards currentPlanId={currentPlanId} />
+                                        <PricingCards currentPlanId={company?.planId ?? "growth"} onManagePlan={async () => {
+                                            try {
+                                                const result = await openPortal({
+                                                    returnUrl: `${window.location.origin}/settings?tab=plan`,
+                                                });
+                                                if (result?.url && (result.url.startsWith("https://checkout.stripe.com") || result.url.startsWith("https://billing.stripe.com"))) {
+                                                    window.location.href = result.url;
+                                                }
+                                            } catch (err) {
+                                                toast.error(err instanceof Error ? err.message : "Failed to open billing portal");
+                                            }
+                                        }} />
                                     </div>
 
                                     <div className="flex flex-col gap-6 p-6 border border-secondary rounded-2xl bg-primary">
@@ -823,9 +1200,30 @@ export default function SettingsPage() {
                             <div className="flex flex-col gap-8">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-5">
                                     <div className="flex flex-col gap-1">
-                                        <h2 className="text-lg font-semibold text-primary">Connected Integrations</h2>
-                                        <p className="text-sm text-tertiary">Manage your third-party connections for email, CRM, calendar, and more.</p>
+                                        <div className="flex items-center gap-2">
+                                            <h2 className="text-lg font-semibold text-primary">Connected Integrations</h2>
+                                            {isIntegrationsGated && <PlanGateBadge />}
+                                        </div>
+                                        <p className="text-sm text-tertiary">
+                                            {isIntegrationsGated
+                                                ? "Integrations are available on the Growth plan and above."
+                                                : "Manage your third-party connections for email, CRM, calendar, and more."
+                                            }
+                                        </p>
                                     </div>
+                                    {isIntegrationsGated && (
+                                        <Button
+                                            color="primary"
+                                            size="md"
+                                            onClick={() => showUpgradeModal(planId, {
+                                                type: "feature",
+                                                feature: "Integrations",
+                                                description: "Third-party integrations are available on the Growth plan and above.",
+                                            })}
+                                        >
+                                            Upgrade to Unlock
+                                        </Button>
+                                    )}
                                 </div>
 
                                 {integrationCategories.map((category) => (
@@ -834,19 +1232,22 @@ export default function SettingsPage() {
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             {category.items.map((item) => {
                                                 const isConnected = item.provider === "stripe" && !!company?.stripeCustomerId;
+                                                const comingSoon = !item.available;
                                                 return (
                                                     <div
                                                         key={item.name}
-                                                        className="flex flex-col gap-4 p-5 border border-secondary rounded-xl bg-primary hover:border-brand-secondary transition-colors"
+                                                        className={`flex flex-col gap-4 p-5 border rounded-xl transition-colors ${comingSoon ? "border-secondary bg-secondary_subtle opacity-75" : "border-secondary bg-primary hover:border-brand-secondary"}`}
                                                     >
                                                         <div className="flex items-start justify-between">
                                                             <div className="flex items-center gap-3">
-                                                                <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-white text-xs font-bold ${item.logoColor}`}>
+                                                                <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-lg ${item.logoColor}`}>
                                                                     {item.logo}
                                                                 </div>
                                                                 <div className="flex flex-col gap-0.5">
                                                                     <span className="font-semibold text-primary">{item.name}</span>
-                                                                    {isConnected ? (
+                                                                    {comingSoon ? (
+                                                                        <Badge color="warning" size="sm">Coming Soon</Badge>
+                                                                    ) : isConnected ? (
                                                                         <Badge color="success" size="sm">Connected</Badge>
                                                                     ) : (
                                                                         <Badge color="gray" size="sm">Not Connected</Badge>
@@ -856,7 +1257,11 @@ export default function SettingsPage() {
                                                         </div>
                                                         <p className="text-sm text-tertiary">{item.description}</p>
                                                         <div className="mt-auto pt-2">
-                                                            {isConnected ? (
+                                                            {comingSoon ? (
+                                                                <Button size="sm" color="secondary" className="w-full" isDisabled>Coming Soon</Button>
+                                                            ) : isIntegrationsGated ? (
+                                                                <Button size="sm" color="secondary" className="w-full" isDisabled>Upgrade Required</Button>
+                                                            ) : isConnected ? (
                                                                 <Button size="sm" color="secondary" className="w-full">Disconnect</Button>
                                                             ) : (
                                                                 <Button size="sm" color="primary" className="w-full" iconLeading={Link01}>Connect</Button>
@@ -1094,7 +1499,7 @@ export default function SettingsPage() {
                         <div className="flex items-center justify-end gap-3 mt-6">
                             <Button color="secondary" size="md" onClick={() => { setShowInviteModal(false); setInviteEmail(""); setInviteName(""); }}>Cancel</Button>
                             <Button color="primary" size="md" onClick={handleInviteUser} isDisabled={!inviteEmail.trim() || isInviting} isLoading={isInviting}>
-                                Send Invitation
+                                Send Invite
                             </Button>
                         </div>
                     </div>

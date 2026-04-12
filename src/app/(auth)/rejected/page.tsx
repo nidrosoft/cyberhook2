@@ -48,8 +48,8 @@ export default function RejectedPage() {
                                 <p className="text-sm font-medium text-primary">Appeal this decision</p>
                                 <p className="text-sm text-tertiary">
                                     If you believe this was a mistake, please contact us at{" "}
-                                    <a href="mailto:support@cyberhook.com" className="text-brand-500 hover:text-brand-600">
-                                        support@cyberhook.com
+                                    <a href="mailto:support@cyberhook.ai" className="text-brand-500 hover:text-brand-600">
+                                        support@cyberhook.ai
                                     </a>{" "}
                                     with additional information about your business.
                                 </p>

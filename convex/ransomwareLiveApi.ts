@@ -197,3 +197,70 @@ export const getApiStats = action({
     }
   },
 });
+
+// ─── Internal Action: Daily fetch for cron ────────────────────────────────────
+
+export const fetchRecentAndStore = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ success: boolean; stored: number; error?: string }> => {
+    const apiKey = process.env.RANSOMWARE_LIVE_API_KEY;
+    if (!apiKey) {
+      return { success: false, stored: 0, error: "API key not configured" };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/victims/recent`, {
+        method: "GET",
+        headers: {
+          "X-API-KEY": apiKey,
+          "Accept": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        return { success: false, stored: 0, error: `API returned ${response.status}` };
+      }
+
+      const data = await response.json();
+      const victims: RansomwareLiveVictim[] = data.victims || data || [];
+
+      if (victims.length === 0) {
+        return { success: true, stored: 0 };
+      }
+
+      // Batch insert — Convex has a limit per mutation so chunk into groups of 50
+      const chunkSize = 50;
+      let stored = 0;
+      for (let i = 0; i < victims.length; i += chunkSize) {
+        const chunk = victims.slice(i, i + chunkSize);
+        const incidents = chunk.map((victim) => {
+          const attackDate = victim.published
+            ? new Date(victim.published).getTime()
+            : Date.now();
+          return {
+            companyName: victim.post_title,
+            domain: victim.website || undefined,
+            industry: victim.activity !== "Not Found" ? victim.activity : undefined,
+            country: victim.country || undefined,
+            attackDate: isNaN(attackDate) ? Date.now() : attackDate,
+            ransomwareGroup: victim.group_name,
+            incidentType: "ransomware" as const,
+            source: "ransomware_live" as const,
+            sourceUrl: victim.permalink || undefined,
+            description: victim.description !== "N/A" ? victim.description : undefined,
+          };
+        });
+        await ctx.runMutation(internal.ransomHub.internalBulkCreate, { incidents });
+        stored += incidents.length;
+      }
+
+      return { success: true, stored };
+    } catch (error) {
+      return {
+        success: false,
+        stored: 0,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  },
+});

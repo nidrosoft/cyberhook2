@@ -18,6 +18,9 @@ import {
     UploadCloud02,
     Trash01,
     Loading02,
+    Edit05,
+    CheckCircle,
+    XCircle,
 } from "@untitledui/icons";
 import type { SortDescriptor } from "react-aria-components";
 
@@ -106,6 +109,8 @@ export default function RfpHubPage() {
     const removeRfpAnswer = useMutation(api.rfpHub.removeRfpAnswer);
     const removeRfpDownload = useMutation(api.rfpHub.removeRfpDownload);
     const createRfpDownload = useMutation(api.rfpHub.createRfpDownload);
+    const updateRfpEntry = useMutation(api.rfpHub.updateRfpEntry);
+    const updateUseCase = useMutation(api.rfpHub.updateUseCase);
     const downloadFileRef = useRef<HTMLInputElement>(null);
 
     // ─── Local state ─────────────────────────────────────
@@ -128,7 +133,17 @@ export default function RfpHubPage() {
     const [ucScope, setUcScope] = useState("");
     const [ucHelp, setUcHelp] = useState("");
     const [ucApproved, setUcApproved] = useState(false);
+    const [ucRefCompany, setUcRefCompany] = useState("");
+    const [ucRefContact, setUcRefContact] = useState("");
+    const [ucRefEmail, setUcRefEmail] = useState("");
+    const [ucRefPhone, setUcRefPhone] = useState("");
+    const [ucRefWebsite, setUcRefWebsite] = useState("");
+    const [ucRefSummary, setUcRefSummary] = useState("");
     const [isUcSubmitting, setIsUcSubmitting] = useState(false);
+
+    // Edit states
+    const [editingRfpId, setEditingRfpId] = useState<string | null>(null);
+    const [editingUcId, setEditingUcId] = useState<string | null>(null);
 
     // Slideout form state — Certification
     const [certName, setCertName] = useState("");
@@ -208,20 +223,47 @@ export default function RfpHubPage() {
         setTimeout(() => setCopiedId(null), 2000);
     };
 
+    function resetUcForm() {
+        setUcTitle(""); setUcIndustry(""); setUcProblem(""); setUcScope(""); setUcHelp(""); setUcApproved(false);
+        setUcRefCompany(""); setUcRefContact(""); setUcRefEmail(""); setUcRefPhone(""); setUcRefWebsite(""); setUcRefSummary("");
+        setEditingUcId(null);
+    }
+
+    function populateUcForm(item: any) {
+        setUcTitle(item.title || ""); setUcIndustry(item.industry || ""); setUcProblem(item.problemStatement || "");
+        setUcScope(item.scopeOfWork || ""); setUcHelp(item.howWeHelp || ""); setUcApproved(item.isApprovedReference ?? false);
+        setUcRefCompany(item.referenceCompanyName || ""); setUcRefContact(item.referenceContactName || "");
+        setUcRefEmail(item.referenceContactEmail || ""); setUcRefPhone(item.referenceContactPhone || "");
+        setUcRefWebsite(item.referenceWebsite || ""); setUcRefSummary(item.referenceProjectsSummary || "");
+        setEditingUcId(item._id);
+    }
+
     async function handleCreateUseCase(close: () => void) {
         if (!companyId || !user || !ucTitle.trim()) return;
         setIsUcSubmitting(true);
         try {
-            await createUseCase({
-                companyId, createdByUserId: user._id,
+            const payload = {
                 title: ucTitle.trim(), industry: ucIndustry || undefined,
                 problemStatement: ucProblem || undefined, scopeOfWork: ucScope || undefined,
                 howWeHelp: ucHelp || undefined, isApprovedReference: ucApproved,
-            });
-            toast.success("Use case created");
-            setUcTitle(""); setUcIndustry(""); setUcProblem(""); setUcScope(""); setUcHelp(""); setUcApproved(false);
+                referenceCompanyName: ucRefCompany.trim() || undefined,
+                referenceContactName: ucRefContact.trim() || undefined,
+                referenceContactEmail: ucRefEmail.trim() || undefined,
+                referenceContactPhone: ucRefPhone.trim() || undefined,
+                referenceWebsite: ucRefWebsite.trim() || undefined,
+                referenceProjectsSummary: ucRefSummary.trim() || undefined,
+            };
+
+            if (editingUcId) {
+                await updateUseCase({ id: editingUcId as Id<"useCases">, ...payload });
+                toast.success("Use case updated");
+            } else {
+                await createUseCase({ companyId, createdByUserId: user._id, ...payload });
+                toast.success("Use case created");
+            }
+            resetUcForm();
             close();
-        } catch (e) { devError("rfp:", e); toast.error("Failed to create use case"); } finally { setIsUcSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error(editingUcId ? "Failed to update use case" : "Failed to create use case"); } finally { setIsUcSubmitting(false); }
     }
 
     async function handleCreateCert(close: () => void) {
@@ -239,22 +281,48 @@ export default function RfpHubPage() {
         } catch (e) { devError("rfp:", e); toast.error("Failed to add certification"); } finally { setIsCertSubmitting(false); }
     }
 
+    function resetRfpForm() {
+        setRfpTitle(""); setRfpClient(""); setRfpDeadline(""); setRfpStatus("draft"); setRfpValue(""); setRfpAssignee(""); setRfpLink("");
+        setEditingRfpId(null);
+    }
+
+    function populateRfpForm(item: any) {
+        setRfpTitle(item.title || ""); setRfpClient(item.clientProspect || "");
+        setRfpDeadline(item.submissionDeadline ? new Date(item.submissionDeadline).toISOString().slice(0, 16) : "");
+        setRfpStatus(item.status || "draft"); setRfpValue(item.estimatedValue?.toString() || "");
+        setRfpAssignee(item.assigneeName || ""); setRfpLink(item.rfpLink || "");
+        setEditingRfpId(item._id);
+    }
+
     async function handleCreateRfpEntry(close: () => void) {
         if (!companyId || !user || !rfpTitle.trim() || !rfpClient.trim() || !rfpDeadline) return;
         setIsRfpSubmitting(true);
         try {
-            await createRfpEntry({
-                companyId, createdByUserId: user._id,
+            const payload = {
                 title: rfpTitle.trim(), clientProspect: rfpClient.trim(),
                 submissionDeadline: new Date(rfpDeadline).getTime(), status: rfpStatus,
                 estimatedValue: rfpValue ? parseFloat(rfpValue) : undefined,
                 assigneeName: rfpAssignee.trim() || undefined,
                 rfpLink: rfpLink.trim() || undefined,
-            });
-            toast.success("RFP entry created");
-            setRfpTitle(""); setRfpClient(""); setRfpDeadline(""); setRfpStatus("draft"); setRfpValue(""); setRfpAssignee(""); setRfpLink("");
+            };
+
+            if (editingRfpId) {
+                await updateRfpEntry({ id: editingRfpId as Id<"rfpEntries">, ...payload });
+                toast.success("RFP entry updated");
+            } else {
+                await createRfpEntry({ companyId, createdByUserId: user._id, ...payload });
+                toast.success("RFP entry created");
+            }
+            resetRfpForm();
             close();
-        } catch (e) { devError("rfp:", e); toast.error("Failed to create RFP entry"); } finally { setIsRfpSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error(editingRfpId ? "Failed to update RFP entry" : "Failed to create RFP entry"); } finally { setIsRfpSubmitting(false); }
+    }
+
+    async function handleRfpStatusChange(id: Id<"rfpEntries">, status: "won" | "lost") {
+        try {
+            await updateRfpEntry({ id, status });
+            toast.success(`RFP marked as ${status === "won" ? "Won" : "Lost"}`);
+        } catch (e) { devError("rfp:", e); toast.error("Failed to update status"); }
     }
 
     async function handleCreateAnswer(close: () => void) {
@@ -372,7 +440,7 @@ export default function RfpHubPage() {
                 </div>
             )}
             <div className="flex-1 overflow-y-auto w-full">
-                <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-8 py-8 flex flex-col gap-8">
+                <div className="mx-auto w-full max-w-[1600px] px-4 sm:px-8 py-8 flex flex-col gap-8">
 
                     {/* Page Header */}
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
@@ -391,7 +459,7 @@ export default function RfpHubPage() {
 
                     {/* Main Content Area */}
                     <Tabs className="w-full">
-                        <Tabs.List size="sm" type="button-border" className="mb-6 overflow-x-auto" items={[
+                        <Tabs.List size="sm" type="underline" className="mb-6 overflow-x-auto" items={[
                             { id: "use-cases", label: "Use Cases" },
                             { id: "certifications", label: "Certifications" },
                             { id: "tracker", label: "RFP Tracker" },
@@ -433,13 +501,13 @@ export default function RfpHubPage() {
                                         </div>
                                     </div>
                                     <SlideoutMenu.Trigger>
-                                        <Button size="md" color="primary" iconLeading={Plus}>New Use Case</Button>
+                                        <Button size="md" color="primary" iconLeading={Plus} onClick={() => resetUcForm()}>New Use Case</Button>
                                         <SlideoutMenu className="max-w-[600px]">
                                             {({ close }) => (
                                                 <>
-                                                    <SlideoutMenu.Header onClose={close}>
-                                                        <h2 className="text-lg font-semibold text-primary">New Use Case</h2>
-                                                        <p className="text-sm text-tertiary mt-1">Create a structured use case for sales reference</p>
+                                                    <SlideoutMenu.Header onClose={() => { resetUcForm(); close(); }}>
+                                                        <h2 className="text-lg font-semibold text-primary">{editingUcId ? "Edit Use Case" : "New Use Case"}</h2>
+                                                        <p className="text-sm text-tertiary mt-1">{editingUcId ? "Update this use case" : "Create a structured use case for sales reference"}</p>
                                                     </SlideoutMenu.Header>
                                                     <SlideoutMenu.Content>
                                                         <div className="flex flex-col gap-5">
@@ -452,13 +520,30 @@ export default function RfpHubPage() {
                                                                 <input type="checkbox" checked={ucApproved} onChange={(e) => setUcApproved(e.target.checked)} className="size-4 accent-brand-600" />
                                                                 <span className="text-sm text-secondary">Approved Reference</span>
                                                             </label>
+
+                                                            {/* Reference Client Info */}
+                                                            <div className="border-t border-secondary pt-4 mt-1">
+                                                                <h3 className="text-sm font-semibold text-primary mb-3">Reference Client Details</h3>
+                                                                <div className="flex flex-col gap-4">
+                                                                    {formInput("Company Name", ucRefCompany, setUcRefCompany, "e.g. Acme Corp")}
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        {formInput("Contact Name", ucRefContact, setUcRefContact, "e.g. John Smith")}
+                                                                        {formInput("Contact Email", ucRefEmail, setUcRefEmail, "e.g. john@acme.com")}
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        {formInput("Contact Phone", ucRefPhone, setUcRefPhone, "e.g. (555) 123-4567")}
+                                                                        {formInput("Website", ucRefWebsite, setUcRefWebsite, "https://acme.com")}
+                                                                    </div>
+                                                                    {formTextarea("Projects Summary", ucRefSummary, setUcRefSummary, "Summary of projects delivered for this client")}
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </SlideoutMenu.Content>
                                                     <SlideoutMenu.Footer>
                                                         <div className="flex items-center justify-end gap-3">
-                                                            <Button color="secondary" onClick={close}>Cancel</Button>
+                                                            <Button color="secondary" onClick={() => { resetUcForm(); close(); }}>Cancel</Button>
                                                             <Button color="primary" onClick={() => handleCreateUseCase(close)} isDisabled={!ucTitle.trim() || isUcSubmitting}>
-                                                                {isUcSubmitting ? "Creating..." : "Create Use Case"}
+                                                                {isUcSubmitting ? "Saving..." : editingUcId ? "Update Use Case" : "Create Use Case"}
                                                             </Button>
                                                         </div>
                                                     </SlideoutMenu.Footer>
@@ -497,7 +582,12 @@ export default function RfpHubPage() {
                                                         <Table.Cell>
                                                             <div className="flex items-center gap-3">
                                                                 <Folder className="w-5 h-5 text-tertiary" />
-                                                                <span className="font-medium text-primary">{item.title}</span>
+                                                                <div className="flex flex-col">
+                                                                    <span className="font-medium text-primary">{item.title}</span>
+                                                                    {item.referenceCompanyName && (
+                                                                        <span className="text-sm text-tertiary">{item.referenceCompanyName}</span>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </Table.Cell>
                                                         <Table.Cell><Badge size="sm" color="gray">{item.industry || "—"}</Badge></Table.Cell>
@@ -508,7 +598,57 @@ export default function RfpHubPage() {
                                                             }
                                                         </Table.Cell>
                                                         <Table.Cell>
-                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("use case", () => handleDeleteUseCase(item._id))} />
+                                                            <div className="flex items-center gap-1">
+                                                                <SlideoutMenu.Trigger>
+                                                                    <ButtonUtility size="sm" color="tertiary" icon={Edit05} aria-label="Edit" onClick={() => populateUcForm(item)} />
+                                                                    <SlideoutMenu className="max-w-[600px]">
+                                                                        {({ close }) => (
+                                                                            <>
+                                                                                <SlideoutMenu.Header onClose={() => { resetUcForm(); close(); }}>
+                                                                                    <h2 className="text-lg font-semibold text-primary">Edit Use Case</h2>
+                                                                                </SlideoutMenu.Header>
+                                                                                <SlideoutMenu.Content>
+                                                                                    <div className="flex flex-col gap-5">
+                                                                                        {formInput("Title", ucTitle, setUcTitle, "e.g. Healthcare Provider – Ransomware Recovery")}
+                                                                                        {formInput("Industry", ucIndustry, setUcIndustry, "e.g. Healthcare")}
+                                                                                        {formTextarea("Problem Statement", ucProblem, setUcProblem, "What problem was solved?")}
+                                                                                        {formTextarea("Scope of Work", ucScope, setUcScope, "What was delivered?")}
+                                                                                        {formTextarea("How We Help", ucHelp, setUcHelp, "How the MSP helped")}
+                                                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                                                            <input type="checkbox" checked={ucApproved} onChange={(e) => setUcApproved(e.target.checked)} className="size-4 accent-brand-600" />
+                                                                                            <span className="text-sm text-secondary">Approved Reference</span>
+                                                                                        </label>
+                                                                                        <div className="border-t border-secondary pt-4 mt-1">
+                                                                                            <h3 className="text-sm font-semibold text-primary mb-3">Reference Client Details</h3>
+                                                                                            <div className="flex flex-col gap-4">
+                                                                                                {formInput("Company Name", ucRefCompany, setUcRefCompany, "e.g. Acme Corp")}
+                                                                                                <div className="grid grid-cols-2 gap-3">
+                                                                                                    {formInput("Contact Name", ucRefContact, setUcRefContact, "e.g. John Smith")}
+                                                                                                    {formInput("Contact Email", ucRefEmail, setUcRefEmail, "e.g. john@acme.com")}
+                                                                                                </div>
+                                                                                                <div className="grid grid-cols-2 gap-3">
+                                                                                                    {formInput("Contact Phone", ucRefPhone, setUcRefPhone, "e.g. (555) 123-4567")}
+                                                                                                    {formInput("Website", ucRefWebsite, setUcRefWebsite, "https://acme.com")}
+                                                                                                </div>
+                                                                                                {formTextarea("Projects Summary", ucRefSummary, setUcRefSummary, "Summary of projects delivered")}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </SlideoutMenu.Content>
+                                                                                <SlideoutMenu.Footer>
+                                                                                    <div className="flex items-center justify-end gap-3">
+                                                                                        <Button color="secondary" onClick={() => { resetUcForm(); close(); }}>Cancel</Button>
+                                                                                        <Button color="primary" onClick={() => handleCreateUseCase(close)} isDisabled={!ucTitle.trim() || isUcSubmitting}>
+                                                                                            {isUcSubmitting ? "Saving..." : "Update Use Case"}
+                                                                                        </Button>
+                                                                                    </div>
+                                                                                </SlideoutMenu.Footer>
+                                                                            </>
+                                                                        )}
+                                                                    </SlideoutMenu>
+                                                                </SlideoutMenu.Trigger>
+                                                                <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("use case", () => handleDeleteUseCase(item._id))} />
+                                                            </div>
                                                         </Table.Cell>
                                                     </Table.Row>
                                                 )}
@@ -643,12 +783,12 @@ export default function RfpHubPage() {
                                         <InputBase type="text" size="md" placeholder="Search proposals..." className="w-full shadow-sm" icon={SearchLg} />
                                     </div>
                                     <SlideoutMenu.Trigger>
-                                        <Button size="md" color="primary" iconLeading={Plus}>New Proposal</Button>
+                                        <Button size="md" color="primary" iconLeading={Plus} onClick={() => resetRfpForm()}>New Proposal</Button>
                                         <SlideoutMenu className="max-w-[600px]">
                                             {({ close }) => (
                                                 <>
-                                                    <SlideoutMenu.Header onClose={close}>
-                                                        <h2 className="text-lg font-semibold text-primary">New RFP Entry</h2>
+                                                    <SlideoutMenu.Header onClose={() => { resetRfpForm(); close(); }}>
+                                                        <h2 className="text-lg font-semibold text-primary">{editingRfpId ? "Edit RFP Entry" : "New RFP Entry"}</h2>
                                                     </SlideoutMenu.Header>
                                                     <SlideoutMenu.Content>
                                                         <div className="flex flex-col gap-5">
@@ -677,9 +817,9 @@ export default function RfpHubPage() {
                                                     </SlideoutMenu.Content>
                                                     <SlideoutMenu.Footer>
                                                         <div className="flex items-center justify-end gap-3">
-                                                            <Button color="secondary" onClick={close}>Cancel</Button>
+                                                            <Button color="secondary" onClick={() => { resetRfpForm(); close(); }}>Cancel</Button>
                                                             <Button color="primary" onClick={() => handleCreateRfpEntry(close)} isDisabled={!rfpTitle.trim() || !rfpClient.trim() || !rfpDeadline || isRfpSubmitting}>
-                                                                {isRfpSubmitting ? "Creating..." : "Create Entry"}
+                                                                {isRfpSubmitting ? "Saving..." : editingRfpId ? "Update Entry" : "Create Entry"}
                                                             </Button>
                                                         </div>
                                                     </SlideoutMenu.Footer>
@@ -711,7 +851,7 @@ export default function RfpHubPage() {
                                                     <Table.Head id="value" allowsSorting>Est. Value</Table.Head>
                                                     <Table.Head id="assignee" allowsSorting>Assignee</Table.Head>
                                                     <Table.Head id="deadline" allowsSorting>Due Date</Table.Head>
-                                                    <Table.Head id="actions" className="w-12"></Table.Head>
+                                                    <Table.Head id="actions" className="w-32"></Table.Head>
                                                 </Table.Row>
                                             </Table.Header>
                                             <Table.Body items={rfpEntries.map((item) => ({ ...item, id: item._id }))}>
@@ -754,7 +894,57 @@ export default function RfpHubPage() {
                                                             </div>
                                                         </Table.Cell>
                                                         <Table.Cell>
-                                                            <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("RFP entry", () => handleDeleteRfp(item._id))} />
+                                                            <div className="flex items-center gap-1">
+                                                                <SlideoutMenu.Trigger>
+                                                                    <ButtonUtility size="sm" color="tertiary" icon={Edit05} aria-label="Edit" onClick={() => populateRfpForm(item)} />
+                                                                    <SlideoutMenu className="max-w-[600px]">
+                                                                        {({ close }) => (
+                                                                            <>
+                                                                                <SlideoutMenu.Header onClose={() => { resetRfpForm(); close(); }}>
+                                                                                    <h2 className="text-lg font-semibold text-primary">Edit RFP Entry</h2>
+                                                                                </SlideoutMenu.Header>
+                                                                                <SlideoutMenu.Content>
+                                                                                    <div className="flex flex-col gap-5">
+                                                                                        {formInput("RFP Title", rfpTitle, setRfpTitle, "e.g. City of Houston IT Infrastructure")}
+                                                                                        {formInput("Client / Prospect", rfpClient, setRfpClient, "Who issued the RFP?")}
+                                                                                        <div>
+                                                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Submission Deadline</label>
+                                                                                            <input type="datetime-local" value={rfpDeadline} onChange={(e) => setRfpDeadline(e.target.value)}
+                                                                                                className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Status</label>
+                                                                                            <NativeSelect aria-label="Status" value={rfpStatus} onChange={(e) => setRfpStatus(e.target.value as any)}
+                                                                                                options={rfpStatuses.map((s) => ({ label: rfpStatusLabels[s], value: s }))}
+                                                                                                className="w-full" selectClassName="text-sm" />
+                                                                                        </div>
+                                                                                        {formInput("Estimated Value ($)", rfpValue, setRfpValue, "e.g. 125000", "number")}
+                                                                                        {formInput("Assignee", rfpAssignee, setRfpAssignee, "e.g. John Smith")}
+                                                                                        {formInput("RFP Link", rfpLink, setRfpLink, "https://...", "url")}
+                                                                                    </div>
+                                                                                </SlideoutMenu.Content>
+                                                                                <SlideoutMenu.Footer>
+                                                                                    <div className="flex items-center justify-end gap-3">
+                                                                                        <Button color="secondary" onClick={() => { resetRfpForm(); close(); }}>Cancel</Button>
+                                                                                        <Button color="primary" onClick={() => handleCreateRfpEntry(close)} isDisabled={!rfpTitle.trim() || !rfpClient.trim() || !rfpDeadline || isRfpSubmitting}>
+                                                                                            {isRfpSubmitting ? "Saving..." : "Update Entry"}
+                                                                                        </Button>
+                                                                                    </div>
+                                                                                </SlideoutMenu.Footer>
+                                                                            </>
+                                                                        )}
+                                                                    </SlideoutMenu>
+                                                                </SlideoutMenu.Trigger>
+                                                                {item.status !== "won" && item.status !== "lost" && (
+                                                                    <>
+                                                                        <ButtonUtility size="sm" color="tertiary" icon={CheckCircle} aria-label="Mark Won"
+                                                                            onClick={() => handleRfpStatusChange(item._id, "won")} />
+                                                                        <ButtonUtility size="sm" color="tertiary" icon={XCircle} aria-label="Mark Lost"
+                                                                            onClick={() => handleRfpStatusChange(item._id, "lost")} />
+                                                                    </>
+                                                                )}
+                                                                <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("RFP entry", () => handleDeleteRfp(item._id))} />
+                                                            </div>
                                                         </Table.Cell>
                                                     </Table.Row>
                                                 )}

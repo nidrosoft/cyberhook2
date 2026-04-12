@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { requireAuth, assertCompanyAccess } from "./lib/auth";
+import { getPlanLimits } from "./lib/plans";
 
 // ============================================
 // QUERIES
@@ -186,6 +187,13 @@ export const update = mutation({
         })
       )
     ),
+    // Brand & service area
+    brandPrimaryColor: v.optional(v.string()),
+    brandSecondaryColor: v.optional(v.string()),
+    serviceArea: v.optional(v.array(v.string())),
+    // Associations & programs
+    associations: v.optional(v.array(v.string())),
+    programs: v.optional(v.array(v.string())),
     // Legacy
     country: v.optional(v.string()),
     streetAddress: v.optional(v.string()),
@@ -291,8 +299,118 @@ export const resetTokens = internalMutation({
     await ctx.db.patch(args.id, {
       tokensUsed: 0,
       tokenResetDate: nextResetDate,
+      searchesUsed: 0,
+      reportsUsed: 0,
+      usageResetDate: nextResetDate,
       updatedAt: now,
     });
+  },
+});
+
+// ============================================
+// PLAN-BASED USAGE
+// ============================================
+
+export const getUsageLimits = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .first();
+    if (!user) return null;
+
+    const company = await ctx.db.get(user.companyId);
+    if (!company) return null;
+
+    const limits = getPlanLimits(company.planId);
+    const searchesUsed = company.searchesUsed ?? 0;
+    const reportsUsed = company.reportsUsed ?? 0;
+
+    // Count watchlist domains
+    const watchlistItems = await ctx.db
+      .query("watchlistItems")
+      .withIndex("by_companyId", (q) => q.eq("companyId", company._id))
+      .collect();
+    const watchlistCount = watchlistItems.length;
+
+    // Count active users
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_companyId", (q) => q.eq("companyId", company._id))
+      .collect();
+    const activeUsers = users.filter((u) => u.status === "approved").length;
+
+    return {
+      planId: company.planId ?? "growth",
+      searches: { used: searchesUsed, limit: limits.searchesPerMonth },
+      reports: { used: reportsUsed, limit: limits.reportsPerMonth },
+      watchlist: { used: watchlistCount, limit: limits.watchlistDomains },
+      users: { active: activeUsers, limit: limits.maxUsers },
+      aiAgents: limits.aiAgents,
+      integrations: limits.integrations,
+      usageResetDate: company.usageResetDate ?? company.tokenResetDate,
+    };
+  },
+});
+
+export const consumeSearch = mutation({
+  args: { id: v.id("companies") },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.id);
+
+    const company = await ctx.db.get(args.id);
+    if (!company) throw new Error("Company not found");
+
+    const limits = getPlanLimits(company.planId);
+    const searchesUsed = company.searchesUsed ?? 0;
+
+    if (searchesUsed >= limits.searchesPerMonth) {
+      throw new Error("SEARCH_LIMIT_REACHED");
+    }
+
+    await ctx.db.patch(args.id, {
+      searchesUsed: searchesUsed + 1,
+      tokensUsed: company.tokensUsed + 1,
+      updatedAt: Date.now(),
+    });
+
+    return {
+      searchesUsed: searchesUsed + 1,
+      remaining: limits.searchesPerMonth - searchesUsed - 1,
+    };
+  },
+});
+
+export const consumeReport = mutation({
+  args: { id: v.id("companies") },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.id);
+
+    const company = await ctx.db.get(args.id);
+    if (!company) throw new Error("Company not found");
+
+    const limits = getPlanLimits(company.planId);
+    const reportsUsed = company.reportsUsed ?? 0;
+
+    if (limits.reportsPerMonth !== -1 && reportsUsed >= limits.reportsPerMonth) {
+      throw new Error("REPORT_LIMIT_REACHED");
+    }
+
+    await ctx.db.patch(args.id, {
+      reportsUsed: reportsUsed + 1,
+      updatedAt: Date.now(),
+    });
+
+    return {
+      reportsUsed: reportsUsed + 1,
+      remaining: limits.reportsPerMonth === -1 ? -1 : limits.reportsPerMonth - reportsUsed - 1,
+    };
   },
 });
 
@@ -434,5 +552,46 @@ export const internalConsumeToken = internalMutation({
       tokensUsed: company.tokensUsed + 1,
       remaining: remaining - 1,
     };
+  },
+});
+
+// ─── Admin: Upgrade a user's company by email ────────────────────────────────
+export const adminUpgradePlan = internalMutation({
+  args: {
+    email: v.string(),
+    planId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .filter((q) => q.eq(q.field("email"), args.email))
+      .first();
+    if (!user) throw new Error(`User not found: ${args.email}`);
+
+    const company = await ctx.db.get(user.companyId);
+    if (!company) throw new Error("Company not found");
+
+    const limits = getPlanLimits(args.planId);
+
+    await ctx.db.patch(company._id, {
+      planId: args.planId,
+      planStatus: "active",
+      status: "active",
+      tokenAllocation: limits.searchesPerMonth,
+      searchesUsed: 0,
+      reportsUsed: 0,
+      usageResetDate: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      updatedAt: Date.now(),
+    });
+
+    // Also approve the user so they can access the dashboard
+    if (user.status !== "approved") {
+      await ctx.db.patch(user._id, {
+        status: "approved",
+        updatedAt: Date.now(),
+      });
+    }
+
+    return { companyId: company._id, companyName: company.name, planId: args.planId, userApproved: true };
   },
 });

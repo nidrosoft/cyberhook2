@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery } from "convex/react";
+import { useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import { toast } from "sonner";
 import {
     Calendar,
     CheckCircle,
@@ -23,35 +25,17 @@ import { Button } from "@/components/base/buttons/button";
 import { ButtonUtility } from "@/components/base/buttons/button-utility";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useTokens } from "@/hooks/use-tokens";
+import { usePlanGate } from "@/hooks/use-plan-gate";
+import { getPlan, getUpgradeTarget, PLANS, PLAN_ORDER, formatLimit, type PlanTier } from "@/lib/plans";
 
-const PLAN_DISPLAY_NAMES: Record<string, string> = {
-    starter: "Starter Plan",
-    growth: "Growth Plan",
-    enterprise: "Enterprise Plan",
-};
-
-const PLAN_PRICES: Record<string, string> = {
-    starter: "$299",
-    growth: "$599",
-    enterprise: "$1,250",
-};
-
-const planFeatures = [
-    "Unlimited AI Email Campaigns",
-    "Custom Knowledge Base Uploads (Up to 50GB)",
-    "CRM Integrations (Salesforce, HubSpot)",
-    "Ransomware & Dark Web Monitoring",
-    "Dedicated Success Manager",
-];
-
-// Placeholder invoices — will be replaced once Stripe billing is connected
-const invoices = [
-    { id: "INV-2026-006", date: "Mar 01, 2026", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2026-005", date: "Feb 01, 2026", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2026-004", date: "Jan 01, 2026", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2025-003", date: "Dec 01, 2025", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2025-002", date: "Nov 01, 2025", amount: "$1,250.00", plan: "Enterprise", status: "Paid" },
-    { id: "INV-2025-001", date: "Oct 01, 2025", amount: "$599.00", plan: "Growth", status: "Paid" },
+// Placeholder invoices — used as fallback when no Stripe data exists
+const placeholderInvoices = [
+    { id: "INV-2026-006", date: "Mar 01, 2026", amount: "$299.00", plan: "Growth", status: "Paid" },
+    { id: "INV-2026-005", date: "Feb 01, 2026", amount: "$299.00", plan: "Growth", status: "Paid" },
+    { id: "INV-2026-004", date: "Jan 01, 2026", amount: "$299.00", plan: "Growth", status: "Paid" },
+    { id: "INV-2025-003", date: "Dec 01, 2025", amount: "$299.00", plan: "Growth", status: "Paid" },
+    { id: "INV-2025-002", date: "Nov 01, 2025", amount: "$299.00", plan: "Growth", status: "Paid" },
+    { id: "INV-2025-001", date: "Oct 01, 2025", amount: "$99.00", plan: "Solo", status: "Paid" },
 ];
 
 function formatNumber(n: number): string {
@@ -109,6 +93,35 @@ function generateSparklineData(total: number, points: number = 6): { value: numb
     }));
 }
 
+function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
+    const isUnlimited = limit === -1;
+    const pct = isUnlimited ? 0 : limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+    const status: "healthy" | "warning" | "critical" = pct >= 90 ? "critical" : pct >= 70 ? "warning" : "healthy";
+    const barColor = status === "critical" ? "bg-error-500" : status === "warning" ? "bg-warning-500" : "bg-success-500";
+
+    return (
+        <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-secondary">{label}</span>
+                <span className="text-xs font-semibold text-primary">
+                    {formatNumber(used)} / {isUnlimited ? "∞" : formatNumber(limit)}
+                </span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary_subtle">
+                <div
+                    className={`h-full rounded-full transition-all ${barColor}`}
+                    style={{ width: isUnlimited ? "0%" : `${pct}%` }}
+                />
+            </div>
+            {!isUnlimited && pct >= 80 && (
+                <span className="text-xs text-warning-primary">
+                    {pct >= 100 ? "Limit reached" : "Approaching limit"}
+                </span>
+            )}
+        </div>
+    );
+}
+
 export default function BillingPage() {
     const { companyId } = useCurrentUser();
     const {
@@ -140,6 +153,11 @@ export default function BillingPage() {
         companyId ? { companyId } : "skip"
     );
 
+    // Stripe data queries
+    const stripeSubscriptions = useQuery(api.stripe.getUserSubscriptions);
+    const stripePayments = useQuery(api.stripe.getUserPayments);
+    const createPortalSession = useAction(api.stripe.createPortalSession);
+
     const [invoiceSort, setInvoiceSort] = useState<SortDescriptor>({
         column: "date",
         direction: "descending",
@@ -152,10 +170,42 @@ export default function BillingPage() {
         campaignStats === undefined ||
         eventStats === undefined;
 
-    const planId = company?.planId ?? "enterprise";
-    const planDisplayName = PLAN_DISPLAY_NAMES[planId] ?? `${planId.charAt(0).toUpperCase()}${planId.slice(1)} Plan`;
-    const planPrice = PLAN_PRICES[planId] ?? "—";
-    const planStatus = company?.planStatus ?? company?.status;
+    const { planId: gatePlanId, plan: gatePlan, searches, reports, watchlist, activeUsers, userLimit } = usePlanGate();
+
+    // Sync plan from Stripe subscription if available
+    const activeSub = stripeSubscriptions?.find(
+        (s: { status: string }) => s.status === "active" || s.status === "trialing"
+    ) as { status: string; metadata?: Record<string, string>; currentPeriodEnd?: number } | undefined;
+    const syncedPlanId = activeSub?.metadata?.planId ?? company?.planId ?? "growth";
+    const plan = getPlan(syncedPlanId);
+    const planDisplayName = `${plan.name} Plan`;
+    const planPrice = plan.priceLabel;
+    const upgradeTarget = getUpgradeTarget(plan.id);
+    const planStatus = activeSub
+        ? (activeSub.status === "trialing" ? "trial" : activeSub.status === "active" ? "active" : company?.planStatus ?? company?.status)
+        : (company?.planStatus ?? company?.status);
+
+    // Build invoices from Stripe payments or fallback to placeholders
+    const invoiceData = (stripePayments && stripePayments.length > 0)
+        ? stripePayments.map((p: { stripePaymentIntentId?: string; created?: number; amount?: number; status?: string }, i: number) => ({
+            id: p.stripePaymentIntentId ? `INV-${p.stripePaymentIntentId.slice(-6).toUpperCase()}` : `INV-${i + 1}`,
+            date: p.created ? new Date(p.created).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) : "\u2014",
+            amount: p.amount ? `$${(p.amount / 100).toFixed(2)}` : "\u2014",
+            plan: planDisplayName.replace(" Plan", ""),
+            status: p.status === "succeeded" ? "Paid" : p.status === "pending" ? "Pending" : (p.status ?? "Unknown"),
+        }))
+        : placeholderInvoices;
+
+    const handleManageSubscription = useCallback(async () => {
+        try {
+            const { url } = await createPortalSession({
+                returnUrl: window.location.href,
+            });
+            if (url) window.location.href = url;
+        } catch {
+            toast.error("Unable to open billing portal. Please try again.");
+        }
+    }, [createPortalSession]);
 
     const usedPercent = tokenAllocation > 0
         ? ((tokensUsed / tokenAllocation) * 100).toFixed(1)
@@ -232,8 +282,8 @@ export default function BillingPage() {
                                     Manage your subscription, monitor usage, and view billing history.
                                 </p>
                             </div>
-                            <Button color="secondary" size="md" iconLeading={Settings01}>
-                                Manage
+                            <Button color="secondary" size="md" iconLeading={Settings01} onClick={handleManageSubscription}>
+                                Manage Subscription
                             </Button>
                         </div>
                     </div>
@@ -250,66 +300,60 @@ export default function BillingPage() {
                                     <Badge color={getStatusBadgeColor(planStatus)} size="sm">
                                         {getStatusLabel(planStatus)}
                                     </Badge>
+                                    {plan.badge && <Badge color="brand" size="sm">{plan.badge}</Badge>}
                                 </div>
                                 {renewalDate && (
                                     <p className="text-sm text-tertiary">Renews on {renewalDate}</p>
                                 )}
+                                <p className="text-sm text-tertiary mt-1">{plan.tagline}</p>
                             </div>
                             <h3 className="text-2xl font-semibold text-primary sm:text-display-sm">
                                 {planPrice}<span className="text-md font-normal text-tertiary">/mo</span>
                             </h3>
                         </div>
 
-                        <div className="flex flex-col gap-3">
-                            {planFeatures.map((feature) => (
+                        <div className="grid grid-cols-2 gap-3">
+                            {plan.features.map((feature) => (
                                 <div key={feature} className="flex items-center gap-2">
-                                    <CheckCircle className="h-5 w-5 shrink-0 text-brand-secondary" />
+                                    <CheckCircle className="h-4 w-4 shrink-0 text-brand-secondary" />
                                     <span className="text-sm text-secondary">{feature}</span>
                                 </div>
                             ))}
                         </div>
 
                         <div className="flex items-center gap-3 border-t border-secondary pt-5">
-                            <Button color="primary" size="md" iconLeading={Zap}>
-                                Upgrade Plan
-                            </Button>
-                            <Button color="secondary" size="md">
-                                Cancel Subscription
+                            {upgradeTarget && (
+                                <Button color="primary" size="md" iconLeading={Zap} onClick={handleManageSubscription}>
+                                    Upgrade to {getPlan(upgradeTarget).name}
+                                </Button>
+                            )}
+                            <Button color="secondary" size="md" onClick={handleManageSubscription}>
+                                {upgradeTarget ? "Manage Subscription" : "Manage Subscription"}
                             </Button>
                         </div>
                     </div>
 
-                    {/* Token Usage Card */}
-                    <div className="flex flex-col gap-6 rounded-2xl border border-secondary bg-primary p-6">
+                    {/* Usage Overview Card */}
+                    <div className="flex flex-col gap-5 rounded-2xl border border-secondary bg-primary p-6">
                         <div className="flex flex-col gap-1">
                             <div className="flex items-center justify-between">
-                                <h3 className="text-md font-semibold text-primary">Live Search Tokens</h3>
+                                <h3 className="text-md font-semibold text-primary">Usage Overview</h3>
                                 <BadgeWithIcon size="sm" color="gray" iconLeading={Zap}>
                                     {resetDisplayText}
                                 </BadgeWithIcon>
                             </div>
-                            <p className="text-sm text-tertiary">Used for Live Search queries</p>
+                            <p className="text-sm text-tertiary">Monthly plan limits</p>
                         </div>
 
-                        <div className="flex flex-col gap-3 mt-auto">
-                            <div className="flex items-end justify-between">
-                                <span className="text-display-xs font-semibold text-primary">
-                                    {formatNumber(tokensUsed)}
-                                </span>
-                                <span className="pb-1 text-sm font-medium text-tertiary">
-                                    / {formatNumber(tokenAllocation)}
-                                </span>
-                            </div>
-                            <div className="h-3 w-full overflow-hidden rounded-full border border-secondary bg-secondary_subtle">
-                                <div
-                                    className={`h-full rounded-full transition-all ${getProgressBarColor(tokenStatus)}`}
-                                    style={{ width: `${usedPercent}%` }}
-                                />
-                            </div>
-                            <div className="flex items-center justify-between text-xs text-tertiary">
-                                <span>{formatNumber(tokensUsed)} used</span>
-                                <span>{formatNumber(tokensRemaining)} remaining</span>
-                            </div>
+                        <div className="flex flex-col gap-4 mt-auto">
+                            {/* Searches */}
+                            <UsageMeter label="Searches" used={searches.used} limit={searches.limit} />
+                            {/* Reports */}
+                            <UsageMeter label="Reports" used={reports.used} limit={reports.limit} />
+                            {/* Watchlist */}
+                            <UsageMeter label="Watchlist Domains" used={watchlist.used} limit={watchlist.limit} />
+                            {/* Users */}
+                            <UsageMeter label="Team Members" used={activeUsers} limit={userLimit} />
                         </div>
                     </div>
                 </div>
@@ -335,7 +379,7 @@ export default function BillingPage() {
                     </div>
                 </div>
 
-                {/* Billing History Table — placeholder until Stripe integration is connected */}
+                {/* Billing History Table */}
                 <div className="px-4 lg:px-8">
                     <TableCard.Root className="rounded-xl">
                         <TableCard.Header title="Billing History" />
@@ -353,7 +397,7 @@ export default function BillingPage() {
                                 <Table.Head id="status" label="Status" allowsSorting />
                                 <Table.Head id="actions" />
                             </Table.Header>
-                            <Table.Body items={invoices}>
+                            <Table.Body items={invoiceData}>
                                 {(item) => (
                                     <Table.Row id={item.id}>
                                         <Table.Cell>
@@ -388,18 +432,21 @@ export default function BillingPage() {
                         </div>
                         <div className="border-t border-secondary px-5 py-3">
                             <p className="text-xs text-tertiary">
-                                Invoice history will appear once Stripe is connected.
+                                {stripePayments && stripePayments.length > 0
+                                    ? `Showing ${stripePayments.length} payment${stripePayments.length === 1 ? "" : "s"} from Stripe.`
+                                    : "Invoice history will sync automatically when Stripe billing is active."
+                                }
                             </p>
                         </div>
                     </TableCard.Root>
                 </div>
 
-                {/* Payment Method — placeholder until Stripe integration is connected */}
+                {/* Payment Method */}
                 <div className="px-4 lg:px-8">
                     <div className="flex flex-col gap-5 rounded-2xl border border-secondary bg-secondary_subtle p-6">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                             <h2 className="text-lg font-semibold text-primary">Payment Method</h2>
-                            <Button color="secondary" size="md" iconLeading={CreditCard02}>
+                            <Button color="secondary" size="md" iconLeading={CreditCard02} onClick={handleManageSubscription}>
                                 Update Payment Method
                             </Button>
                         </div>
@@ -418,7 +465,10 @@ export default function BillingPage() {
                         </div>
 
                         <p className="text-xs text-tertiary">
-                            Payment method management will be available once Stripe is connected.
+                            {stripeSubscriptions && stripeSubscriptions.length > 0
+                                ? "Manage your payment method via the Stripe billing portal."
+                                : "Payment method management will be available once Stripe is connected."
+                            }
                         </p>
                     </div>
                 </div>

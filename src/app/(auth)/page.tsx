@@ -226,7 +226,7 @@ export default function AuthPage() {
                                 <p className="min-h-[1.25rem] text-sm text-tertiary">
                                     {isLogin
                                         ? "Enter your credentials to access your workspace."
-                                        : "Start your 30-day free trial."}
+                                        : "Start your 7-day free trial."}
                                 </p>
                             </div>
                         </div>
@@ -436,9 +436,9 @@ export default function AuthPage() {
 
                 <footer className="hidden justify-between px-8 py-4 md:flex">
                     <p className="text-sm text-tertiary">© CyberHook 2026</p>
-                    <a href="mailto:help@cyberhook.com" className="flex items-center gap-2 text-sm text-tertiary">
+                    <a href="mailto:help@cyberhook.ai" className="flex items-center gap-2 text-sm text-tertiary">
                         <Mail01 className="size-4 text-fg-quaternary" />
-                        help@cyberhook.com
+                        help@cyberhook.ai
                     </a>
                 </footer>
             </div>

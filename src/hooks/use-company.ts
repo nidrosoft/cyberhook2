@@ -36,6 +36,13 @@ export interface Company {
         zipCode?: string;
         isHeadquarters: boolean;
     }>;
+    // Brand & service area
+    brandPrimaryColor?: string;
+    brandSecondaryColor?: string;
+    serviceArea?: string[];
+    // Associations & programs
+    associations?: string[];
+    programs?: string[];
     // Targets
     mrrTarget?: number;
     appointmentTarget?: number;
@@ -45,6 +52,11 @@ export interface Company {
     tokenAllocation: number;
     tokensUsed: number;
     tokenResetDate: number;
+    // Plan-based usage tracking
+    searchesUsed?: number;
+    reportsUsed?: number;
+    usageResetDate?: number;
+    planSelectedManually?: boolean;
     // Billing
     stripeCustomerId?: string;
     stripeSubscriptionId?: string;
