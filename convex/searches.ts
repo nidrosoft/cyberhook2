@@ -102,6 +102,64 @@ export const getStats = query({
   },
 });
 
+/**
+ * Month-by-month search + token usage for the last N calendar months
+ * (yellow 6.3 — Billing "Usage" section historical chart).
+ *
+ * Buckets are month-start timestamps so the chart can label each bar.
+ * Defaults to 6 months so one year of history is visible at a glance
+ * without scrolling.
+ */
+export const getMonthlyUsage = query({
+  args: {
+    companyId: v.id("companies"),
+    months: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    assertCompanyAccess(currentUser.companyId, args.companyId);
+
+    const monthCount = Math.min(Math.max(args.months ?? 6, 1), 24);
+    const now = new Date();
+    const buckets: Array<{
+      monthStart: number;
+      label: string;
+      searches: number;
+      tokens: number;
+    }> = [];
+
+    // Generate the bucket list oldest-first so the chart renders
+    // chronologically left-to-right.
+    for (let i = monthCount - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      buckets.push({
+        monthStart: d.getTime(),
+        label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+        searches: 0,
+        tokens: 0,
+      });
+    }
+
+    const earliest = buckets[0].monthStart;
+    const searches = await ctx.db
+      .query("searches")
+      .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
+      .collect();
+
+    for (const s of searches) {
+      if (s.createdAt < earliest) continue;
+      const d = new Date(s.createdAt);
+      const bucketStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+      const bucket = buckets.find((b) => b.monthStart === bucketStart);
+      if (!bucket) continue;
+      bucket.searches += 1;
+      bucket.tokens += s.tokensConsumed ?? 0;
+    }
+
+    return buckets;
+  },
+});
+
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
 export const create = mutation({

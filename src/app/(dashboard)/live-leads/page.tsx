@@ -70,8 +70,8 @@ function getSeverityFromCount(count: number, severity?: string): ExposureSeverit
 }
 
 const industryOptions = ["All", "Healthcare", "Finance", "Technology", "Construction", "Manufacturing", "Education", "Retail", "Government"];
-const exposureStatusOptions = ["All", "Has Exposures", "No Exposures", "Critical Only"];
-const sizeOptions = ["All", "1-50", "51-200", "201-500", "501-1000", "1000+"];
+// Employee-count ranges — aligned with app.cyberhook.ai per yellow item 9.5.
+const sizeOptions = ["All", "1-10", "11-50", "51-200", "201-1000", "1001-5000", "5000+"];
 const daysOptions = [
     { label: "Last 24 hours", value: "1" },
     { label: "Last 3 days", value: "3" },
@@ -159,22 +159,26 @@ export default function LiveLeadsPage() {
     const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
     const [searchQuery, setSearchQuery] = useState("");
     const [industry, setIndustry] = useState("All");
-    const [exposureStatus, setExposureStatus] = useState("All");
     const [sizeFilter, setSizeFilter] = useState("All");
     const [viewMode, setViewMode] = useState<Set<string>>(new Set(["list"]));
     const [openMenu, setOpenMenu] = useState<string | null>(null);
+    // Anchor coords for the row-actions popover so it renders as a fixed
+    // overlay instead of an absolute child that pushes the table layout
+    // (orange item 9.2).
+    const [openMenuAnchor, setOpenMenuAnchor] = useState<{ top: number; left: number } | null>(null);
 
-    // Pagination
+    // Pagination (white item 8.6 — user-selectable page size).
     const [myLeadsPage, setMyLeadsPage] = useState(1);
     const [discoverPage, setDiscoverPage] = useState(1);
-    const pageSize = 25;
+    const [pageSize, setPageSize] = useState(20);
+    const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
     // Auto-load flag
     const hasAutoLoaded = useRef(false);
 
     useEffect(() => {
         if (!openMenu) return;
-        function handleClick() { setOpenMenu(null); }
+        function handleClick() { setOpenMenu(null); setOpenMenuAnchor(null); }
         document.addEventListener("click", handleClick);
         return () => document.removeEventListener("click", handleClick);
     }, [openMenu]);
@@ -409,37 +413,30 @@ export default function LiveLeadsPage() {
             if (industry !== "All" && lead.industry !== industry) {
                 return false;
             }
-            // Exposure status filter
-            if (exposureStatus !== "All") {
-                const hasExposures = (lead.exposureCount ?? 0) > 0;
-                if (exposureStatus === "Has Exposures" && !hasExposures) return false;
-                if (exposureStatus === "No Exposures" && hasExposures) return false;
-                if (exposureStatus === "Critical Only" && lead.exposureSeverity !== "critical") return false;
-            }
             // Size filter
             if (sizeFilter !== "All" && lead.employeeCount !== sizeFilter) {
                 return false;
             }
             return true;
         });
-    }, [leads, searchQuery, industry, exposureStatus, sizeFilter]);
+    }, [leads, searchQuery, industry, sizeFilter]);
 
     // Paginated slices
     const myLeadsTotalPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
     const paginatedMyLeads = useMemo(() => {
         const start = (myLeadsPage - 1) * pageSize;
         return filteredLeads.slice(start, start + pageSize);
-    }, [filteredLeads, myLeadsPage]);
+    }, [filteredLeads, myLeadsPage, pageSize]);
 
     const discoverTotalPages = Math.max(1, Math.ceil(discoveredLeads.length / pageSize));
     const paginatedDiscoverLeads = useMemo(() => {
         const start = (discoverPage - 1) * pageSize;
         return discoveredLeads.slice(start, start + pageSize);
-    }, [discoveredLeads, discoverPage]);
+    }, [discoveredLeads, discoverPage, pageSize]);
 
-    // Reset page on filter change
-    useEffect(() => { setMyLeadsPage(1); }, [searchQuery, industry, exposureStatus, sizeFilter]);
-    useEffect(() => { setDiscoverPage(1); }, [discoveredLeads.length]);
+    // Reset page on filter or page-size change.
+    useEffect(() => { setMyLeadsPage(1); }, [searchQuery, industry, sizeFilter, pageSize]);
+    useEffect(() => { setDiscoverPage(1); }, [discoveredLeads.length, pageSize]);
 
     async function handleAddLead(close: () => void) {
         if (!leadCompany.trim() || !companyId || !user) return;
@@ -525,11 +522,10 @@ export default function LiveLeadsPage() {
         );
     }
 
-    const hasActiveFilters = industry !== "All" || exposureStatus !== "All" || sizeFilter !== "All";
+    const hasActiveFilters = industry !== "All" || sizeFilter !== "All";
 
     const clearFilters = () => {
         setIndustry("All");
-        setExposureStatus("All");
         setSizeFilter("All");
         setSearchQuery("");
     };
@@ -1079,12 +1075,6 @@ export default function LiveLeadsPage() {
                         options={industryOptions.map((opt) => ({ label: opt === "All" ? "Industry: All" : opt, value: opt }))}
                     />
                     <FilterDropdown
-                        aria-label="Exposure Status"
-                        value={exposureStatus}
-                        onChange={(v) => setExposureStatus(v)}
-                        options={exposureStatusOptions.map((opt) => ({ label: opt === "All" ? "Exposure: All" : opt, value: opt }))}
-                    />
-                    <FilterDropdown
                         aria-label="Company Size"
                         value={sizeFilter}
                         onChange={(v) => setSizeFilter(v)}
@@ -1241,50 +1231,25 @@ export default function LiveLeadsPage() {
                                             <span className="text-sm text-tertiary">{formatDate(item.createdAt)}</span>
                                         </Table.Cell>
                                         <Table.Cell className="px-4">
-                                            <div className="relative" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+                                            <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
                                                 <ButtonUtility
                                                     size="sm"
                                                     icon={DotsVertical}
                                                     aria-label="Actions"
-                                                    onClick={() => setOpenMenu(openMenu === item._id ? null : item._id)}
+                                                    onClick={(e: React.MouseEvent) => {
+                                                        if (openMenu === item._id) {
+                                                            setOpenMenu(null);
+                                                            setOpenMenuAnchor(null);
+                                                            return;
+                                                        }
+                                                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                        setOpenMenuAnchor({
+                                                            top: rect.bottom + 4,
+                                                            left: rect.right - 180, // 180 = min-w of menu
+                                                        });
+                                                        setOpenMenu(item._id);
+                                                    }}
                                                 />
-                                                {openMenu === item._id && (
-                                                    <div className="absolute right-0 top-8 z-50 min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg">
-                                                        <button
-                                                            type="button"
-                                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleGenerateReport(item);
-                                                                setOpenMenu(null);
-                                                            }}
-                                                        >
-                                                            Generate Report
-                                                        </button>
-                                                        {item.domain && (
-                                                            <button 
-                                                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle" 
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleAddToWatchlist(item.domain!, item.name);
-                                                                    setOpenMenu(null);
-                                                                }}
-                                                            >
-                                                                Add to Watchlist
-                                                            </button>
-                                                        )}
-                                                        <button 
-                                                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error-600 hover:bg-secondary_subtle" 
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setConfirmDeleteId(item._id);
-                                                                setOpenMenu(null);
-                                                            }}
-                                                        >
-                                                            Delete Lead
-                                                        </button>
-                                                    </div>
-                                                )}
                                             </div>
                                         </Table.Cell>
                                     </Table.Row>
@@ -1293,11 +1258,26 @@ export default function LiveLeadsPage() {
                         </Table.Body>
                     </Table>
 
-                    {/* Footer */}
-                    <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">
-                        <span className="text-sm text-tertiary">
-                            Showing <span className="font-medium text-secondary">{filteredLeads.length > 0 ? (myLeadsPage - 1) * pageSize + 1 : 0}–{Math.min(myLeadsPage * pageSize, filteredLeads.length)}</span> of <span className="font-medium text-secondary">{filteredLeads.length}</span> leads
-                        </span>
+                    {/* Footer — user-selectable rows-per-page (white 8.6) */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-secondary px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm text-tertiary">
+                                Showing <span className="font-medium text-secondary">{filteredLeads.length > 0 ? (myLeadsPage - 1) * pageSize + 1 : 0}–{Math.min(myLeadsPage * pageSize, filteredLeads.length)}</span> of <span className="font-medium text-secondary">{filteredLeads.length}</span> leads
+                            </span>
+                            <label className="flex items-center gap-1.5 text-xs text-tertiary">
+                                Rows per page:
+                                <select
+                                    value={pageSize}
+                                    onChange={(e) => setPageSize(Number(e.target.value))}
+                                    className="rounded-md border border-secondary bg-primary px-2 py-1 text-xs text-secondary focus:outline-none focus:ring-2 focus:ring-brand-500"
+                                    aria-label="Rows per page"
+                                >
+                                    {PAGE_SIZE_OPTIONS.map((n) => (
+                                        <option key={n} value={n}>{n}</option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
                         {myLeadsTotalPages > 1 && (
                             <div className="flex items-center gap-2">
                                 <Button size="sm" color="secondary" isDisabled={myLeadsPage <= 1} onClick={() => setMyLeadsPage((p) => p - 1)}>Previous</Button>
@@ -1385,6 +1365,64 @@ export default function LiveLeadsPage() {
 
                 </>}
             </div>
+
+            {/* Fixed-position row-actions popover (orange item 9.2). Rendered
+                outside the table so it doesn't disrupt table layout or get
+                clipped by overflow. */}
+            {openMenu && openMenuAnchor && (() => {
+                const item = leads?.find((l) => l._id === openMenu);
+                if (!item) return null;
+                const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
+                const viewportW = typeof window !== "undefined" ? window.innerWidth : 1280;
+                const top = Math.min(openMenuAnchor.top, viewportH - 160);
+                const left = Math.max(8, Math.min(openMenuAnchor.left, viewportW - 200));
+                return (
+                    <div
+                        className="fixed z-[70] min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg"
+                        style={{ top, left }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            type="button"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleGenerateReport(item);
+                                setOpenMenu(null);
+                                setOpenMenuAnchor(null);
+                            }}
+                        >
+                            Generate Report
+                        </button>
+                        {item.domain && (
+                            <button
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-secondary hover:bg-secondary_subtle"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAddToWatchlist(item.domain!, item.name);
+                                    setOpenMenu(null);
+                                    setOpenMenuAnchor(null);
+                                }}
+                            >
+                                Add to Watchlist
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error-600 hover:bg-secondary_subtle"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(item._id);
+                                setOpenMenu(null);
+                                setOpenMenuAnchor(null);
+                            }}
+                        >
+                            Delete Lead
+                        </button>
+                    </div>
+                );
+            })()}
         </div>
     );
 }

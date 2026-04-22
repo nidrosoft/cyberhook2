@@ -203,9 +203,23 @@ export const getApiStats = action({
 export const fetchRecentAndStore = internalAction({
   args: {},
   handler: async (ctx): Promise<{ success: boolean; stored: number; error?: string }> => {
+    // Record every run to syncLogs (red item 11.2 — "Log every sync run").
+    const startedAt = Date.now();
+    const logResult = async (result: { success: boolean; stored: number; error?: string }) => {
+      await ctx.runMutation(internal.syncLogs.record, {
+        source: "ransomware_live",
+        startedAt,
+        finishedAt: Date.now(),
+        success: result.success,
+        stored: result.stored,
+        errorMessage: result.error,
+      });
+      return result;
+    };
+
     const apiKey = process.env.RANSOMWARE_LIVE_API_KEY;
     if (!apiKey) {
-      return { success: false, stored: 0, error: "API key not configured" };
+      return logResult({ success: false, stored: 0, error: "API key not configured" });
     }
 
     try {
@@ -218,14 +232,14 @@ export const fetchRecentAndStore = internalAction({
       });
 
       if (!response.ok) {
-        return { success: false, stored: 0, error: `API returned ${response.status}` };
+        return logResult({ success: false, stored: 0, error: `API returned ${response.status}` });
       }
 
       const data = await response.json();
       const victims: RansomwareLiveVictim[] = data.victims || data || [];
 
       if (victims.length === 0) {
-        return { success: true, stored: 0 };
+        return logResult({ success: true, stored: 0 });
       }
 
       // Batch insert — Convex has a limit per mutation so chunk into groups of 50
@@ -233,34 +247,42 @@ export const fetchRecentAndStore = internalAction({
       let stored = 0;
       for (let i = 0; i < victims.length; i += chunkSize) {
         const chunk = victims.slice(i, i + chunkSize);
-        const incidents = chunk.map((victim) => {
-          const attackDate = victim.published
-            ? new Date(victim.published).getTime()
-            : Date.now();
-          return {
-            companyName: victim.post_title,
-            domain: victim.website || undefined,
-            industry: victim.activity !== "Not Found" ? victim.activity : undefined,
-            country: victim.country || undefined,
-            attackDate: isNaN(attackDate) ? Date.now() : attackDate,
-            ransomwareGroup: victim.group_name,
-            incidentType: "ransomware" as const,
-            source: "ransomware_live" as const,
-            sourceUrl: victim.permalink || undefined,
-            description: victim.description !== "N/A" ? victim.description : undefined,
-          };
-        });
-        await ctx.runMutation(internal.ransomHub.internalBulkCreate, { incidents });
-        stored += incidents.length;
+        // Defensive filter: ransomware.live occasionally returns rows
+        // with missing post_title or group_name. Those rows don't meet
+        // our required-field schema and would fail the whole chunk, so
+        // drop them here and continue with the rest.
+        const incidents = chunk
+          .filter((v) => v.post_title && v.group_name)
+          .map((victim) => {
+            const attackDate = victim.published
+              ? new Date(victim.published).getTime()
+              : Date.now();
+            return {
+              companyName: victim.post_title,
+              domain: victim.website || undefined,
+              industry: victim.activity !== "Not Found" ? victim.activity : undefined,
+              country: victim.country || undefined,
+              attackDate: isNaN(attackDate) ? Date.now() : attackDate,
+              ransomwareGroup: victim.group_name,
+              incidentType: "ransomware" as const,
+              source: "ransomware_live" as const,
+              sourceUrl: victim.permalink || undefined,
+              description: victim.description !== "N/A" ? victim.description : undefined,
+            };
+          });
+        if (incidents.length > 0) {
+          await ctx.runMutation(internal.ransomHub.internalBulkCreate, { incidents });
+          stored += incidents.length;
+        }
       }
 
-      return { success: true, stored };
+      return logResult({ success: true, stored });
     } catch (error) {
-      return {
+      return logResult({
         success: false,
         stored: 0,
         error: error instanceof Error ? error.message : "Unknown error",
-      };
+      });
     }
   },
 });

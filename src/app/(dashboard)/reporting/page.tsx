@@ -59,10 +59,15 @@ const statusBadgeColor: Record<string, "success" | "warning" | "gray" | "blue"> 
 
 const LEAD_SOURCE_COLORS = ["#7F56D9", "#12B76A", "#98A2B3"];
 
+// Pipeline stage labels.
+// Per client orange items 16.1 / 16.2: "Qualified" displays as "Won" and
+// "Contacted" displays as "Lost". Only the display label is changed; the
+// underlying enum values (`qualified`, `contacted`) remain for backwards
+// compatibility with existing records.
 const PIPELINE_STAGE_LABELS: Record<string, string> = {
     new: "New",
-    contacted: "Contacted",
-    qualified: "Qualified",
+    contacted: "Lost",
+    qualified: "Won",
     proposal: "Proposal Sent",
     negotiation: "Negotiation",
     won: "Won / Converted",
@@ -245,6 +250,10 @@ function LeadSourcesChart({ leads }: { leads: Array<{ source?: string }> }) {
 
 export default function ReportingPage() {
     const [dateRange, setDateRange] = useState("this-month");
+    // Custom date-range bounds (orange item 16.4). Only applied when
+    // dateRange === "custom".
+    const [customFrom, setCustomFrom] = useState<string>("");
+    const [customTo, setCustomTo] = useState<string>("");
     const [teamSort, setTeamSort] = useState<SortDescriptor>({ column: "searches", direction: "descending" });
     const [campaignSort, setCampaignSort] = useState<SortDescriptor>({ column: "sent", direction: "descending" });
     const [dealSort, setDealSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
@@ -300,6 +309,8 @@ export default function ReportingPage() {
     const dateFrom = useMemo(() => {
         const now = new Date();
         switch (dateRange) {
+            case "custom":
+                return customFrom ? new Date(customFrom).getTime() : 0;
             case "this-month":
                 return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
             case "last-30":
@@ -311,21 +322,28 @@ export default function ReportingPage() {
             default:
                 return 0;
         }
-    }, [dateRange]);
+    }, [dateRange, customFrom]);
+
+    // Upper bound: only relevant for the "custom" range.
+    const dateTo = useMemo(() => {
+        if (dateRange !== "custom" || !customTo) return Number.MAX_SAFE_INTEGER;
+        // Inclusive end-of-day.
+        return new Date(customTo).getTime() + 24 * 60 * 60 * 1000 - 1;
+    }, [dateRange, customTo]);
 
     const filteredSearches = useMemo(
-        () => (allSearches ?? []).filter((s) => s.createdAt >= dateFrom),
-        [allSearches, dateFrom],
+        () => (allSearches ?? []).filter((s) => s.createdAt >= dateFrom && s.createdAt <= dateTo),
+        [allSearches, dateFrom, dateTo],
     );
 
     const filteredLeads = useMemo(
-        () => (allLeads ?? []).filter((l) => l.createdAt >= dateFrom),
-        [allLeads, dateFrom],
+        () => (allLeads ?? []).filter((l) => l.createdAt >= dateFrom && l.createdAt <= dateTo),
+        [allLeads, dateFrom, dateTo],
     );
 
     const filteredCampaigns = useMemo(
-        () => (allCampaigns ?? []).filter((c) => c.createdAt >= dateFrom),
-        [allCampaigns, dateFrom],
+        () => (allCampaigns ?? []).filter((c) => c.createdAt >= dateFrom && c.createdAt <= dateTo),
+        [allCampaigns, dateFrom, dateTo],
     );
 
     const activityData = useMemo(() => {
@@ -654,36 +672,40 @@ export default function ReportingPage() {
     const exportAllData = useCallback(() => {
         const dateStr = new Date().toISOString().slice(0, 10);
         const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
-        const headers = ["Category", "Name", "Status", "Value1", "Value2", "Value3", "Created"];
+        // Per orange item 16.5: use human-readable labels for each section.
+        // The CSV is a composite report — each section has its own column
+        // semantics, so we emit a generic 7-column frame with descriptive
+        // section-specific header rows rather than a single generic header.
+        const headers = ["Section", "Column 1", "Column 2", "Column 3", "Column 4", "Column 5", "Column 6"];
         const rows: string[][] = [];
 
-        rows.push(["--- KPI Summary ---", "", "", "", "", "", ""]);
+        rows.push(["--- KPI Summary ---", "Metric", "Current", "Previous", "Label", "", ""]);
         for (const a of activityData) {
-            rows.push(["KPI", a.metric, "", String(a.current), String(a.recent), a.label, ""]);
+            rows.push(["KPI", a.metric, String(a.current), String(a.recent), a.label, "", ""]);
         }
 
         rows.push(["", "", "", "", "", "", ""]);
-        rows.push(["--- Team Performance ---", "", "", "", "", "", ""]);
+        rows.push(["--- Team Performance ---", "Team Member", "Role", "Searches", "Leads", "", ""]);
         for (const m of teamTableData) {
             rows.push(["Team", m.name, m.role, String(m.searches), String(m.leads), "", ""]);
         }
 
         rows.push(["", "", "", "", "", "", ""]);
-        rows.push(["--- Campaigns ---", "", "", "", "", "", ""]);
+        rows.push(["--- Campaigns ---", "Campaign Name", "Status", "Sent", "Open Rate", "Click Rate", ""]);
         for (const c of campaignTableData) {
             rows.push(["Campaign", c.name, c.status, String(c.sent), c.openRate, c.clickRate, ""]);
         }
 
         rows.push(["", "", "", "", "", "", ""]);
-        rows.push(["--- Pipeline ---", "", "", "", "", "", ""]);
+        rows.push(["--- Pipeline ---", "Stage", "Leads", "Percentage", "", "", ""]);
         for (const s of leadPipelineData) {
-            rows.push(["Pipeline", s.stage, "", String(s.leads), `${s.pct}%`, "", ""]);
+            rows.push(["Pipeline", s.stage, String(s.leads), `${s.pct}%`, "", "", ""]);
         }
 
         rows.push(["", "", "", "", "", "", ""]);
-        rows.push(["--- Recent Leads ---", "", "", "", "", "", ""]);
+        rows.push(["--- Recent Leads ---", "Lead Name", "Status", "Domain", "Source", "Created", ""]);
         for (const l of (allLeads ?? []).slice(0, 50)) {
-            rows.push(["Lead", l.name, l.status ?? "new", l.domain, String(l.exposureCount ?? 0), l.source ?? "manual", new Date(l.createdAt).toLocaleDateString()]);
+            rows.push(["Lead", l.name, l.status ?? "new", l.domain, (l.source ?? "manual").replace(/_/g, " "), new Date(l.createdAt).toLocaleDateString(), ""]);
         }
 
         downloadCSV(`${companySlug}_Full_Report_${dateStr}.csv`, headers, rows);
@@ -693,13 +715,12 @@ export default function ReportingPage() {
     const exportLeadsCSV = useCallback(() => {
         const dateStr = new Date().toISOString().slice(0, 10);
         const companySlug = (company?.name ?? "CyberHook").replace(/[^a-zA-Z0-9]/g, "_");
-        const headers = ["Name", "Domain", "Status", "Source", "Exposures", "LinkedIn", "Created"];
+        const headers = ["Name", "Domain", "Status", "Source", "LinkedIn", "Created"];
         const rows = (allLeads ?? []).map((l) => [
             l.name,
             l.domain,
             l.status ?? "new",
             (l.source ?? "manual").replace(/_/g, " "),
-            String(l.exposureCount ?? 0),
             l.linkedinUrl ?? "",
             new Date(l.createdAt).toLocaleDateString(),
         ]);
@@ -757,6 +778,39 @@ export default function ReportingPage() {
                                 onChange={(v) => setDateRange(v)}
                                 options={dateRangeOptions}
                             />
+                            {/* Custom date pickers + Clear All (orange item 16.4). */}
+                            {dateRange === "custom" && (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="date"
+                                        aria-label="From date"
+                                        value={customFrom}
+                                        onChange={(e) => setCustomFrom(e.target.value)}
+                                        className="rounded-md border border-secondary bg-primary px-2 py-1.5 text-sm text-primary"
+                                    />
+                                    <span className="text-sm text-tertiary">to</span>
+                                    <input
+                                        type="date"
+                                        aria-label="To date"
+                                        value={customTo}
+                                        onChange={(e) => setCustomTo(e.target.value)}
+                                        className="rounded-md border border-secondary bg-primary px-2 py-1.5 text-sm text-primary"
+                                    />
+                                </div>
+                            )}
+                            {(dateRange !== "this-month" || customFrom || customTo) && (
+                                <Button
+                                    size="sm"
+                                    color="link-gray"
+                                    onClick={() => {
+                                        setDateRange("this-month");
+                                        setCustomFrom("");
+                                        setCustomTo("");
+                                    }}
+                                >
+                                    Clear All
+                                </Button>
+                            )}
                             <Button size="md" color="secondary" iconLeading={FileCheck02} onClick={generatePerformanceReport}>
                                 Generate PDF Report
                             </Button>
@@ -1127,7 +1181,6 @@ export default function ReportingPage() {
                                                 <Table.Head id="domain">Domain</Table.Head>
                                                 <Table.Head id="status">Status</Table.Head>
                                                 <Table.Head id="source">Source</Table.Head>
-                                                <Table.Head id="exposures" allowsSorting>Exposures</Table.Head>
                                                 <Table.Head id="date" allowsSorting>Created</Table.Head>
                                             </Table.Row>
                                         </Table.Header>
@@ -1157,9 +1210,6 @@ export default function ReportingPage() {
                                                     </Table.Cell>
                                                     <Table.Cell>
                                                         <span className="text-tertiary">{(item.source ?? "manual").replace(/_/g, " ")}</span>
-                                                    </Table.Cell>
-                                                    <Table.Cell>
-                                                        <span className="text-secondary">{item.exposureCount ?? 0}</span>
                                                     </Table.Cell>
                                                     <Table.Cell>
                                                         <span className="text-secondary">

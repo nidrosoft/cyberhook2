@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireAuth, assertCompanyAccess, requireRole } from "./lib/auth";
 
@@ -50,12 +50,14 @@ export const create = mutation({
       invitedByUserId: args.invitedByUserId,
       expiresAt: Date.now() + thirtyDaysMs,
       createdAt: Date.now(),
+      emailDeliveryStatus: "pending",
     });
 
     // Send invite email via Resend
     const company = await ctx.db.get(args.companyId);
     const inviterName = `${user.firstName} ${user.lastName}`;
     await ctx.scheduler.runAfter(0, internal.emails.sendInviteEmailInternal, {
+      invitationId: id,
       inviterName,
       companyName: company?.name ?? "CyberHook",
       inviteeEmail: email,
@@ -63,6 +65,24 @@ export const create = mutation({
     });
 
     return id;
+  },
+});
+
+// Internal mutation used by the email action to update delivery status.
+export const updateEmailDeliveryStatus = internalMutation({
+  args: {
+    invitationId: v.id("invitations"),
+    status: v.union(v.literal("sent"), v.literal("failed")),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const inv = await ctx.db.get(args.invitationId);
+    if (!inv) return;
+    await ctx.db.patch(args.invitationId, {
+      emailDeliveryStatus: args.status,
+      emailLastAttemptAt: Date.now(),
+      emailError: args.error,
+    });
   },
 });
 
@@ -91,12 +111,15 @@ export const resendInvitation = mutation({
     await ctx.db.patch(args.id, {
       status: "pending",
       expiresAt: Date.now() + thirtyDaysMs,
+      emailDeliveryStatus: "pending",
+      emailError: undefined,
     });
 
     // Re-send invite email via Resend
     const company = await ctx.db.get(inv.companyId);
     const inviterName = `${user.firstName} ${user.lastName}`;
     await ctx.scheduler.runAfter(0, internal.emails.sendInviteEmailInternal, {
+      invitationId: args.id,
       inviterName,
       companyName: company?.name ?? "CyberHook",
       inviteeEmail: inv.email,

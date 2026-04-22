@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalMutation, internalQuery } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 const REDROK_BASE_URL = "https://dash-api.redrok.io";
@@ -146,6 +146,27 @@ async function getOrRefreshToken(
   return token;
 }
 
+/**
+ * Restrict Redrok search results to rows whose domain (or empDomain /
+ * computerDomainName fallback) is either an exact match for the queried
+ * domain or a subdomain of it (orange item 8.2). Prevents leaking results
+ * from unrelated companies (e.g. `acmecorp.net` when querying `acme.com`).
+ */
+function filterToQueriedDomain(
+  rows: RedrokSearchResult[],
+  queryDomain: string,
+): RedrokSearchResult[] {
+  const target = queryDomain.toLowerCase().trim();
+  if (!target) return rows;
+  return rows.filter((r) => {
+    const candidates = [r.domain, r.empDomain, r.computerDomainName, r.url]
+      .map((d) => (d || "").toLowerCase().trim())
+      .filter(Boolean);
+    if (candidates.length === 0) return true; // keep when Redrok didn't supply a domain
+    return candidates.some((d) => d === target || d.endsWith(`.${target}`));
+  });
+}
+
 async function redrokFetch(
   token: string,
   endpoint: string,
@@ -230,8 +251,12 @@ export const liveSearch = action({
         domain: args.domain,
       });
 
-      const data: RedrokSearchResult[] = result.data || [];
-      const count = result.count || data.length;
+      // Constrain results to the queried domain / its subdomains (8.2).
+      const data: RedrokSearchResult[] = filterToQueriedDomain(
+        result.data || [],
+        args.domain,
+      );
+      const count = data.length;
 
       await ctx.runMutation(internal.searches.internalUpdateWithResults, {
         id: args.searchId,
@@ -256,8 +281,11 @@ export const liveSearch = action({
             domain: args.domain,
           });
 
-          const data: RedrokSearchResult[] = result.data || [];
-          const count = result.count || data.length;
+          const data: RedrokSearchResult[] = filterToQueriedDomain(
+            result.data || [],
+            args.domain,
+          );
+          const count = data.length;
 
           await ctx.runMutation(internal.searches.internalUpdateWithResults, {
             id: args.searchId,
@@ -592,7 +620,10 @@ export const rescanDomain = action({
         domain: args.domain,
       });
 
-      const count = result.count || (result.data ? result.data.length : 0);
+      // Apply the same domain-scope filter as Live Search (8.2) so the
+      // exposure count reflects only this domain / its subdomains.
+      const filtered = filterToQueriedDomain(result.data || [], args.domain);
+      const count = filtered.length;
 
       await ctx.runMutation(internal.watchlist.updateFromCheck, {
         id: args.watchlistItemId,
@@ -645,6 +676,56 @@ export const generateReport = action({
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    }
+  },
+});
+
+/**
+ * Internal-action shim around `rescanDomain` so mutations (which can't call
+ * actions directly) can schedule it. Used by `watchlist.add` to trigger an
+ * immediate scan on the freshly-added row (orange items 10.1 / 10.2).
+ */
+export const rescanDomainInternal = internalAction({
+  args: {
+    companyId: v.id("companies"),
+    watchlistItemId: v.id("watchlistItems"),
+    domain: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ success: boolean; exposureCount: number; error?: string }> => {
+    const company = await ctx.runQuery(internal.redrokApi.getCompanyCredentials, {
+      companyId: args.companyId,
+    });
+    if (!company) return { success: false, exposureCount: 0, error: "Company not found" };
+
+    const email = company.redrokEmail || process.env.REDROK_EMAIL;
+    const password = company.redrokPassword || process.env.REDROK_PASSWORD;
+    if (!email || !password) {
+      return { success: false, exposureCount: 0, error: "Redrok credentials not configured" };
+    }
+
+    try {
+      const token = await getOrRefreshToken(
+        ctx, args.companyId, email, password,
+        company.redrokToken, company.redrokTokenExpiresAt
+      );
+
+      const result = await redrokFetch(token, "/search/LiveSearch", { domain: args.domain });
+      const filtered = filterToQueriedDomain(result.data || [], args.domain);
+      const count = filtered.length;
+
+      await ctx.runMutation(internal.watchlist.updateFromCheck, {
+        id: args.watchlistItemId,
+        exposureCount: count,
+        hasNewExposures: count > 0,
+      });
+
+      return { success: true, exposureCount: count };
+    } catch (error) {
+      return {
+        success: false,
+        exposureCount: 0,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
   },
 });

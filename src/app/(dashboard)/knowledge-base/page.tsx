@@ -86,6 +86,8 @@ export default function KnowledgeBasePage() {
     const createEntry = useMutation(api.knowledgeBase.create);
     const removeEntry = useMutation(api.knowledgeBase.remove);
     const extractFromUrl = useAction(api.knowledgeBase.extractFromUrl);
+    // Seeds the canonical cadence templates (orange item 4.2). Idempotent.
+    const seedTemplates = useMutation(api.knowledgeBase.seedStarterTemplates);
 
     // ─── Local state ─────────────────────────────────────────────────
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
@@ -331,6 +333,21 @@ export default function KnowledgeBasePage() {
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
+                            <Button
+                                size="md"
+                                color="secondary"
+                                onClick={async () => {
+                                    if (!companyId) return;
+                                    try {
+                                        const r = await seedTemplates({ companyId });
+                                        toast.success(`Seeded ${r.created} cadence templates (${r.skipped} already existed)`);
+                                    } catch (err) {
+                                        toast.error(err instanceof Error ? err.message : "Failed to seed templates");
+                                    }
+                                }}
+                            >
+                                Seed Cadence Templates
+                            </Button>
                             <SlideoutMenu.Trigger>
                                 <Button size="md" color="primary" iconLeading={Plus}>Add Source</Button>
                                 <SlideoutMenu className="max-w-[600px]">

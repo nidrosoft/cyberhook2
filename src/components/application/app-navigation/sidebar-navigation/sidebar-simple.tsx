@@ -54,7 +54,6 @@ export const SidebarNavigationSimple = ({
         >
             <div className="flex flex-col gap-5 px-4 lg:px-5">
                 <CyberHookLogo className="h-8" />
-                <Input shortcut size="sm" aria-label="Search" placeholder="Search" icon={SearchLg} />
             </div>
 
             <NavList activeUrl={activeUrl} items={items} />

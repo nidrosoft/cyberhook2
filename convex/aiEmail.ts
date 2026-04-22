@@ -120,7 +120,9 @@ export const generateCampaignEmails = action({
     companyId: v.id("companies"),
     recipients: v.array(
       v.object({
-        leadId: v.id("leads"),
+        // Optional — contact-only recipients from the Contacts repository
+        // (orange item 4.1) have no linked lead.
+        leadId: v.optional(v.id("leads")),
         name: v.string(),
         domain: v.string(),
         industry: v.optional(v.string()),
@@ -147,7 +149,7 @@ export const generateCampaignEmails = action({
     });
 
     const results: Array<{
-      leadId: string;
+      leadId?: string;
       name: string;
       email: string;
       subject: string;
@@ -459,7 +461,7 @@ export const saveGeneratedEmails = internalMutation({
     companyId: v.id("companies"),
     emails: v.array(
       v.object({
-        leadId: v.string(),
+        leadId: v.optional(v.string()),
         name: v.string(),
         email: v.string(),
         subject: v.string(),

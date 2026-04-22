@@ -50,51 +50,57 @@ const tabs = [
     { id: "usage", label: "Usage" },
 ];
 
+// Per orange item 7.2: use real brand SVG logos from SimpleIcons
+// (https://simpleicons.org) instead of emoji placeholders. Each logo is a
+// publicly-hosted CDN SVG so there's no extra dependency to bundle.
+// The slug format is https://cdn.simpleicons.org/{slug}/{hexColor}.
+const simpleIcon = (slug: string, color = "FFFFFF") => `https://cdn.simpleicons.org/${slug}/${color}`;
+
 const integrationCategories = [
     {
         label: "PAYMENTS",
         items: [
-            { name: "Stripe", description: "Process payments and manage subscriptions", logo: "💳", logoColor: "bg-indigo-500", provider: "stripe" as const, available: true },
+            { name: "Stripe", description: "Process payments and manage subscriptions", logoUrl: simpleIcon("stripe"), logoColor: "bg-[#635BFF]", provider: "stripe" as const, available: true },
         ],
     },
     {
         label: "EMAIL",
         items: [
-            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", logo: "📧", logoColor: "bg-blue-600", provider: "outlook_email" as const, available: false },
-            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", logo: "✉️", logoColor: "bg-red-500", provider: "gmail" as const, available: false },
+            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_email" as const, available: false },
+            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", logoUrl: simpleIcon("gmail"), logoColor: "bg-[#EA4335]", provider: "gmail" as const, available: false },
         ],
     },
     {
         label: "CALENDAR",
         items: [
-            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", logo: "📅", logoColor: "bg-blue-500", provider: "outlook_calendar" as const, available: false },
-            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", logo: "📆", logoColor: "bg-green-500", provider: "google_calendar" as const, available: false },
+            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_calendar" as const, available: false },
+            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", logoUrl: simpleIcon("googlecalendar"), logoColor: "bg-[#4285F4]", provider: "google_calendar" as const, available: false },
         ],
     },
     {
         label: "CRM",
         items: [
-            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", logo: "🔶", logoColor: "bg-orange-500", provider: "hubspot" as const, available: false },
-            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", logo: "🟢", logoColor: "bg-green-600", provider: "ghl" as const, available: false },
+            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", logoUrl: simpleIcon("hubspot"), logoColor: "bg-[#FF7A59]", provider: "hubspot" as const, available: false },
+            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", logoUrl: simpleIcon("ghost"), logoColor: "bg-[#18A957]", provider: "ghl" as const, available: false },
         ],
     },
     {
         label: "MESSAGING",
         items: [
-            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", logo: "💬", logoColor: "bg-indigo-600", provider: "teams" as const, available: false },
-            { name: "Slack", description: "Send notifications and alerts to Slack channels", logo: "💜", logoColor: "bg-purple-500", provider: "slack" as const, available: false },
+            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", logoUrl: simpleIcon("microsoftteams"), logoColor: "bg-[#4B53BC]", provider: "teams" as const, available: false },
+            { name: "Slack", description: "Send notifications and alerts to Slack channels", logoUrl: simpleIcon("slack"), logoColor: "bg-[#4A154B]", provider: "slack" as const, available: false },
         ],
     },
     {
         label: "SOCIAL",
         items: [
-            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", logo: "🔗", logoColor: "bg-blue-700", provider: "linkedin" as const, available: false },
+            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", logoUrl: simpleIcon("linkedin"), logoColor: "bg-[#0A66C2]", provider: "linkedin" as const, available: false },
         ],
     },
     {
         label: "PSA / RMM",
         items: [
-            { name: "ConnectWise", description: "Sync tickets, contacts, and companies with ConnectWise Manage", logo: "⚙️", logoColor: "bg-cyan-600", provider: "connectwise" as const, available: false },
+            { name: "ConnectWise", description: "Sync tickets, contacts, and companies with ConnectWise Manage", logoUrl: simpleIcon("connectwise"), logoColor: "bg-[#006FBA]", provider: "connectwise" as const, available: false },
         ],
     },
 ];
@@ -207,6 +213,86 @@ export default function SettingsPage() {
     );
 }
 
+// Small chip-input used for Associations & Programs (orange item 17.1).
+// - Press Enter, Tab, or comma to commit the current text as a chip.
+// - Click the × on a chip to remove it.
+// - Supports custom "add new" entries out of the box (every typed value is
+//   treated as a new chip — there's no fixed option list).
+function ChipInput({
+    values,
+    onChange,
+    placeholder,
+    suggestions,
+}: {
+    values: string[];
+    onChange: (next: string[]) => void;
+    placeholder?: string;
+    suggestions?: string[];
+}) {
+    const [input, setInput] = useState("");
+    const commit = (raw: string) => {
+        const v = raw.trim();
+        if (!v) return;
+        if (values.some((x) => x.toLowerCase() === v.toLowerCase())) {
+            setInput("");
+            return;
+        }
+        onChange([...values, v]);
+        setInput("");
+    };
+    const remove = (i: number) => onChange(values.filter((_, idx) => idx !== i));
+    const filteredSuggestions = (suggestions ?? [])
+        .filter((s) => input && s.toLowerCase().includes(input.toLowerCase()))
+        .filter((s) => !values.some((v) => v.toLowerCase() === s.toLowerCase()))
+        .slice(0, 5);
+    return (
+        <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap gap-1.5 rounded-md border border-secondary bg-primary px-2 py-1.5 min-h-[42px]">
+                {values.map((v, i) => (
+                    <span key={`${v}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-brand-primary_alt px-2.5 py-0.5 text-xs font-medium text-brand-secondary">
+                        {v}
+                        <button type="button" aria-label={`Remove ${v}`} onClick={() => remove(i)} className="rounded-full hover:bg-brand-300/40">
+                            <span className="px-1 text-xs leading-none">×</span>
+                        </button>
+                    </span>
+                ))}
+                <input
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
+                            if (input.trim()) {
+                                e.preventDefault();
+                                commit(input);
+                            }
+                        } else if (e.key === "Backspace" && !input && values.length > 0) {
+                            remove(values.length - 1);
+                        }
+                    }}
+                    onBlur={() => input.trim() && commit(input)}
+                    placeholder={values.length === 0 ? placeholder : ""}
+                    className="flex-1 min-w-[120px] bg-transparent border-0 text-sm text-primary placeholder:text-tertiary focus:outline-none"
+                />
+            </div>
+            {filteredSuggestions.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                    {filteredSuggestions.map((s) => (
+                        <button
+                            key={s}
+                            type="button"
+                            onClick={() => commit(s)}
+                            className="rounded-full border border-secondary bg-secondary_subtle px-2 py-0.5 text-xs text-secondary hover:bg-secondary_hover"
+                        >
+                            + {s}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function SettingsPageContent() {
     const searchParams = useSearchParams();
     const validTabs = ["profile", "company", "team", "plan", "integrations", "audit", "usage"];
@@ -221,8 +307,41 @@ function SettingsPageContent() {
             setSelectedTab(tabFromUrl);
         }
     }, [tabFromUrl]);
+
+    // Deep-link target for team notifications (orange item 2.5). When a user
+    // clicks a "team." notification we land here with `?user=<id>`; the row
+    // gets scrolled into view and briefly highlighted.
+    const highlightedUserId = searchParams.get("user");
+    useEffect(() => {
+        if (!highlightedUserId || selectedTab !== "team") return;
+        // Defer one frame so the table has rendered.
+        const t = window.setTimeout(() => {
+            const row = document.querySelector<HTMLElement>(`[data-team-user-id="${highlightedUserId}"]`);
+            if (row) {
+                row.scrollIntoView({ behavior: "smooth", block: "center" });
+                row.classList.add("ring-2", "ring-brand-solid", "rounded-lg");
+                window.setTimeout(() => row.classList.remove("ring-2", "ring-brand-solid", "rounded-lg"), 2500);
+            }
+        }, 150);
+        return () => window.clearTimeout(t);
+    }, [highlightedUserId, selectedTab]);
+
+    // Keep chip state in sync with the loaded company record (17.1).
     const [uploadedAvatar, setUploadedAvatar] = useState<string | null>(null);
     const [uploadedLogo, setUploadedLogo] = useState<string | null>(null);
+    // Chip-input state for Associations & Programs (orange item 17.1).
+    // Initialized from the loaded company record below via effect.
+    const [associationChips, setAssociationChips] = useState<string[]>([]);
+    const [programChips, setProgramChips] = useState<string[]>([]);
+
+    // Service-area center + radius (orange item 3.4). Persists as
+    // company.serviceAreaRadius once saved. When "No limit" is checked, the
+    // radius is disabled and the service area is treated as global.
+    const [serviceAreaCenter, setServiceAreaCenter] = useState("");
+    const [serviceAreaRadiusValue, setServiceAreaRadiusValue] = useState<string>("");
+    const [serviceAreaUnit, setServiceAreaUnit] = useState<"miles" | "km">("miles");
+    const [serviceAreaNoLimit, setServiceAreaNoLimit] = useState(false);
+
     const [isSaving, setIsSaving] = useState(false);
 
     const { upload: uploadFile, isUploading: isFileUploading } = useFileUpload({
@@ -233,6 +352,7 @@ function SettingsPageContent() {
     const [auditSort, setAuditSort] = useState<SortDescriptor>({ column: "date", direction: "descending" });
 
     const [openUserMenu, setOpenUserMenu] = useState<string | null>(null);
+    const [userMenuAnchor, setUserMenuAnchor] = useState<{ top: number; left: number } | null>(null);
     const [editingRole, setEditingRole] = useState<{ userId: string; role: string } | null>(null);
 
     const [auditSearch, setAuditSearch] = useState("");
@@ -255,8 +375,22 @@ function SettingsPageContent() {
     const [locZip, setLocZip] = useState("");
     const [locIsHQ, setLocIsHQ] = useState(false);
 
-    const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
+    const { user, companyId, clerkUser, isLoading: isUserLoading } = useCurrentUser();
     const { company, isLoading: isCompanyLoading } = useCompany();
+
+    // Hydrate chip inputs from the company record (orange item 17.1) and
+    // service-area radius config (orange item 3.4).
+    useEffect(() => {
+        setAssociationChips(company?.associations ?? []);
+        setProgramChips(company?.programs ?? []);
+        const sar = company?.serviceAreaRadius;
+        if (sar) {
+            setServiceAreaCenter(sar.centerAddress ?? "");
+            setServiceAreaRadiusValue(sar.radius != null ? String(sar.radius) : "");
+            setServiceAreaUnit(sar.unit ?? "miles");
+            setServiceAreaNoLimit(sar.noLimit ?? false);
+        }
+    }, [company?._id]);
     const { tokensRemaining, tokenAllocation, tokenPercentage, resetDisplayText } = useTokens();
     const { isFeatureGated, planId } = usePlanGate();
     const { showUpgradeModal } = useUpgradeModal();
@@ -266,6 +400,7 @@ function SettingsPageContent() {
     const updateCompany = useMutation(api.companies.update);
     const createInvitation = useMutation(api.invitations.create);
     const cancelInvitation = useMutation(api.invitations.cancel);
+    const resendInvitation = useMutation(api.invitations.resendInvitation);
     const createAuditLog = useMutation(api.audit.create);
     const openPortal = useAction(api.stripe.createPortalSession);
     const invitations = useQuery(api.invitations.list, companyId ? { companyId } : "skip");
@@ -291,6 +426,17 @@ function SettingsPageContent() {
         const url = await uploadFile(file);
         if (url) {
             await updateUser({ id: user._id, imageUrl: url });
+            // Also sync the image to Clerk so the user's SSO/Clerk-backed
+            // avatar matches the one stored in Convex (orange item 3.1).
+            // Failures here shouldn't block the UI — Convex is the source
+            // of truth for the in-app avatar via reactive query.
+            try {
+                if (clerkUser) {
+                    await clerkUser.setProfileImage({ file });
+                }
+            } catch (err) {
+                console.warn("[handleAvatarUpload] Clerk sync failed:", err);
+            }
             toast.success("Profile image saved");
         }
     };
@@ -456,12 +602,19 @@ function SettingsPageContent() {
                 geographicCoverage: (data.geographicCoverage as string)?.trim()
                     ? (data.geographicCoverage as string).split(",").map((s) => s.trim()).filter(Boolean)
                     : undefined,
-                associations: (data.associations as string)?.trim()
-                    ? (data.associations as string).split(",").map((s) => s.trim()).filter(Boolean)
-                    : undefined,
-                programs: (data.programs as string)?.trim()
-                    ? (data.programs as string).split(",").map((s) => s.trim()).filter(Boolean)
-                    : undefined,
+                // Associations & Programs come from the chip inputs (17.1).
+                associations: associationChips.length > 0 ? associationChips : undefined,
+                programs: programChips.length > 0 ? programChips : undefined,
+                // Service area radius config (orange item 3.4).
+                serviceAreaRadius:
+                    serviceAreaNoLimit || serviceAreaCenter.trim() || serviceAreaRadiusValue.trim()
+                        ? {
+                              centerAddress: serviceAreaCenter.trim() || undefined,
+                              radius: serviceAreaRadiusValue.trim() ? Number(serviceAreaRadiusValue) : undefined,
+                              unit: serviceAreaUnit,
+                              noLimit: serviceAreaNoLimit,
+                          }
+                        : undefined,
             });
             if (companyId && user) {
                 await createAuditLog({ companyId, userId: user._id, action: "company.updated", entityType: "company", entityId: company._id, details: "Company settings updated" });
@@ -513,6 +666,15 @@ function SettingsPageContent() {
         }
     };
 
+    const handleResendInvitation = async (id: string) => {
+        try {
+            await resendInvitation({ id: id as Parameters<typeof resendInvitation>[0]["id"] });
+            toast.success("Invite queued for re-send");
+        } catch {
+            toast.error("Failed to re-send invitation");
+        }
+    };
+
     const getUserName = (userId: string): string => {
         const u = auditUserMap?.find((m) => m._id === userId);
         return u ? `${u.firstName} ${u.lastName}` : "Unknown User";
@@ -532,6 +694,7 @@ function SettingsPageContent() {
         function handleClickOutside(e: MouseEvent) {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 setOpenUserMenu(null);
+                setUserMenuAnchor(null);
                 setEditingRole(null);
             }
         }
@@ -557,6 +720,7 @@ function SettingsPageContent() {
         }
         setEditingRole(null);
         setOpenUserMenu(null);
+        setUserMenuAnchor(null);
     };
 
     const handleToggleStatus = async (userId: string, currentStatus: string) => {
@@ -575,6 +739,7 @@ function SettingsPageContent() {
             toast.error("Failed to update user status");
         }
         setOpenUserMenu(null);
+        setUserMenuAnchor(null);
     };
 
     const filteredAuditLogs = useMemo(() => {
@@ -905,31 +1070,95 @@ function SettingsPageContent() {
 
                                 <hr className="h-px w-full border-none bg-border-secondary" />
 
-                                {/* SERVICE AREA */}
+                                {/* SERVICE AREA (orange item 3.4)
+                                    Supports both a free-form region list and a
+                                    center-point + radius definition. "No limit"
+                                    disables the radius input and treats the
+                                    service area as global. */}
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">SERVICE AREA</h3>
-                                    <p className="text-sm text-tertiary -mt-3">Define the regions or areas your company serves (comma-separated).</p>
+                                    <p className="text-sm text-tertiary -mt-3">Define the regions you serve and (optionally) a radius around a central location.</p>
                                     <TextField name="serviceArea" defaultValue={company?.serviceArea?.join(", ") ?? ""}>
                                         <Label>Service Regions</Label>
                                         <InputBase size="md" placeholder="e.g. Northeast US, Midwest US, Canada" />
                                     </TextField>
+
+                                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
+                                        <div className="flex flex-col gap-1.5">
+                                            <Label>Center Location</Label>
+                                            <InputBase
+                                                size="md"
+                                                placeholder="e.g. Houston, TX"
+                                                value={serviceAreaCenter}
+                                                onChange={(value: string) => setServiceAreaCenter(value)}
+                                                isDisabled={serviceAreaNoLimit}
+                                            />
+                                        </div>
+                                        <div className="flex flex-col gap-1.5">
+                                            <Label>Radius</Label>
+                                            <div className="flex gap-2">
+                                                <InputBase
+                                                    size="md"
+                                                    type="number"
+                                                    placeholder="50"
+                                                    value={serviceAreaRadiusValue}
+                                                    onChange={(value: string) => setServiceAreaRadiusValue(value)}
+                                                    isDisabled={serviceAreaNoLimit}
+                                                    className="flex-1"
+                                                />
+                                                <select
+                                                    value={serviceAreaUnit}
+                                                    onChange={(e) => setServiceAreaUnit(e.target.value as "miles" | "km")}
+                                                    disabled={serviceAreaNoLimit}
+                                                    className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary outline-none focus:ring-2 focus:ring-brand-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <option value="miles">miles</option>
+                                                    <option value="km">km</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <label className="flex items-center gap-2 text-sm text-secondary cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={serviceAreaNoLimit}
+                                            onChange={(e) => setServiceAreaNoLimit(e.target.checked)}
+                                            className="rounded border-secondary text-brand-secondary focus:ring-brand-secondary"
+                                        />
+                                        <span>No limit (global / unrestricted service area)</span>
+                                    </label>
                                 </div>
 
                                 <hr className="h-px w-full border-none bg-border-secondary" />
 
-                                {/* ASSOCIATIONS & PROGRAMS */}
+                                {/* ASSOCIATIONS & PROGRAMS (orange item 17.1)
+                                    Chip-based multi-select with add-new support. Each
+                                    entry is committed on Enter / comma / Tab, and can
+                                    be removed via the × button on the chip. Suggestions
+                                    surface common industry associations / programs as
+                                    users type. */}
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">ASSOCIATIONS & PROGRAMS</h3>
-                                    <p className="text-sm text-tertiary -mt-3">Industry associations and vendor programs your company participates in (comma-separated).</p>
+                                    <p className="text-sm text-tertiary -mt-3">Industry associations and vendor programs your company participates in. Press Enter to add.</p>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
-                                        <TextField name="associations" defaultValue={company?.associations?.join(", ") ?? ""}>
+                                        <div className="flex flex-col gap-1.5">
                                             <Label>Associations</Label>
-                                            <InputBase size="md" placeholder="e.g. CompTIA, ISACA, (ISC)²" />
-                                        </TextField>
-                                        <TextField name="programs" defaultValue={company?.programs?.join(", ") ?? ""}>
+                                            <ChipInput
+                                                values={associationChips}
+                                                onChange={setAssociationChips}
+                                                placeholder="e.g. CompTIA, ISACA, (ISC)²"
+                                                suggestions={["CompTIA", "ISACA", "(ISC)²", "MSP Alliance", "CyberRisk Alliance", "CompTIA ISAO", "ASCII Group", "Channel Partners Alliance"]}
+                                            />
+                                        </div>
+                                        <div className="flex flex-col gap-1.5">
                                             <Label>Programs</Label>
-                                            <InputBase size="md" placeholder="e.g. Microsoft Partner, AWS Partner" />
-                                        </TextField>
+                                            <ChipInput
+                                                values={programChips}
+                                                onChange={setProgramChips}
+                                                placeholder="e.g. Microsoft Partner, AWS Partner"
+                                                suggestions={["Microsoft Partner", "AWS Partner", "Google Cloud Partner", "Cisco Partner", "Fortinet Partner", "Sophos Partner", "SentinelOne Partner", "CrowdStrike Partner"]}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1066,7 +1295,8 @@ function SettingsPageContent() {
                                             {(item) => (
                                                 <Table.Row id={item._id}>
                                                     <Table.Cell>
-                                                        <div className="flex items-center gap-3">
+                                                        {/* data-team-user-id anchors the notification deep-link scroll/highlight (2.5). */}
+                                                        <div className="flex items-center gap-3 transition-shadow" data-team-user-id={item._id}>
                                                             <Avatar size="sm" alt={`${item.firstName} ${item.lastName}`} src={item.imageUrl || undefined} initials={`${item.firstName.charAt(0)}${item.lastName.charAt(0)}`} />
                                                             <div className="flex flex-col">
                                                                 <span className="font-medium text-primary">{item.firstName} {item.lastName}</span>
@@ -1085,7 +1315,18 @@ function SettingsPageContent() {
                                                                 aria-label="Row actions"
                                                                 onClick={(e: React.MouseEvent) => {
                                                                     e.stopPropagation();
-                                                                    setOpenUserMenu(openUserMenu === item._id ? null : item._id);
+                                                                    if (openUserMenu === item._id) {
+                                                                        setOpenUserMenu(null);
+                                                                        setUserMenuAnchor(null);
+                                                                        return;
+                                                                    }
+                                                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                                    // Anchor the popover just below-right of the button.
+                                                                    setUserMenuAnchor({
+                                                                        top: rect.bottom + 4,
+                                                                        left: rect.right - 208, // 208 = 52 * 4 (w-52)
+                                                                    });
+                                                                    setOpenUserMenu(item._id);
                                                                 }}
                                                             />
                                                         </div>
@@ -1102,18 +1343,32 @@ function SettingsPageContent() {
                                 {invitations && invitations.filter((inv) => inv.status === "pending").length > 0 && (
                                     <div className="flex flex-col gap-3 mt-4">
                                         <h3 className="text-sm font-semibold text-tertiary uppercase">Pending Invitations</h3>
-                                        {invitations.filter((inv) => inv.status === "pending").map((inv) => (
-                                            <div key={inv._id} className="flex items-center justify-between p-4 border border-secondary rounded-lg bg-secondary_subtle">
-                                                <div className="flex flex-col gap-0.5">
-                                                    <span className="text-sm font-medium text-primary">{inv.email}</span>
-                                                    <span className="text-xs text-tertiary">Role: {formatRole(inv.role)} &middot; Invited {new Date(inv.createdAt).toLocaleDateString()}</span>
+                                        {invitations.filter((inv) => inv.status === "pending").map((inv) => {
+                                            const deliveryFailed = inv.emailDeliveryStatus === "failed";
+                                            const deliveryPending = !inv.emailDeliveryStatus || inv.emailDeliveryStatus === "pending";
+                                            return (
+                                                <div key={inv._id} className="flex items-center justify-between p-4 border border-secondary rounded-lg bg-secondary_subtle">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-sm font-medium text-primary">{inv.email}</span>
+                                                        <span className="text-xs text-tertiary">Role: {formatRole(inv.role)} &middot; Invited {new Date(inv.createdAt).toLocaleDateString()}</span>
+                                                        {deliveryFailed && inv.emailError && (
+                                                            <span className="text-xs text-error-primary mt-1">Email failed: {inv.emailError}</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {deliveryFailed ? (
+                                                            <Badge size="sm" color="error">Email Failed</Badge>
+                                                        ) : deliveryPending ? (
+                                                            <Badge size="sm" color="warning">Sending…</Badge>
+                                                        ) : (
+                                                            <Badge size="sm" color="success">Sent</Badge>
+                                                        )}
+                                                        <Button size="sm" color="secondary" onClick={() => handleResendInvitation(inv._id)}>Resend</Button>
+                                                        <Button size="sm" color="secondary" onClick={() => handleCancelInvitation(inv._id)}>Cancel</Button>
+                                                    </div>
                                                 </div>
-                                                <div className="flex items-center gap-2">
-                                                    <Badge size="sm" color="warning">Pending</Badge>
-                                                    <Button size="sm" color="secondary" onClick={() => handleCancelInvitation(inv._id)}>Cancel</Button>
-                                                </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -1240,8 +1495,9 @@ function SettingsPageContent() {
                                                     >
                                                         <div className="flex items-start justify-between">
                                                             <div className="flex items-center gap-3">
-                                                                <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-lg ${item.logoColor}`}>
-                                                                    {item.logo}
+                                                                <div className={`flex h-10 w-10 items-center justify-center rounded-lg p-2 ${item.logoColor}`}>
+                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                    <img src={item.logoUrl} alt={`${item.name} logo`} className="h-full w-full object-contain" />
                                                                 </div>
                                                                 <div className="flex flex-col gap-0.5">
                                                                     <span className="font-semibold text-primary">{item.name}</span>
@@ -1262,9 +1518,42 @@ function SettingsPageContent() {
                                                             ) : isIntegrationsGated ? (
                                                                 <Button size="sm" color="secondary" className="w-full" isDisabled>Upgrade Required</Button>
                                                             ) : isConnected ? (
-                                                                <Button size="sm" color="secondary" className="w-full">Disconnect</Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    color="secondary"
+                                                                    className="w-full"
+                                                                    onClick={() => {
+                                                                        // Stripe disconnect goes through the billing portal;
+                                                                        // other providers will gain disconnect flows as they land.
+                                                                        if (item.provider === "stripe") {
+                                                                            window.location.href = "/billing";
+                                                                        } else {
+                                                                            toast.info("Disconnect flow is coming soon.");
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    {item.provider === "stripe" ? "Manage" : "Disconnect"}
+                                                                </Button>
                                                             ) : (
-                                                                <Button size="sm" color="primary" className="w-full" iconLeading={Link01}>Connect</Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    color="primary"
+                                                                    className="w-full"
+                                                                    iconLeading={Link01}
+                                                                    onClick={() => {
+                                                                        // Stripe is wired through the billing flow; other
+                                                                        // providers should not reach here because they are
+                                                                        // marked `available: false` (Coming Soon) — this is a
+                                                                        // defensive fallback so the click is never a no-op.
+                                                                        if (item.provider === "stripe") {
+                                                                            window.location.href = "/billing";
+                                                                        } else {
+                                                                            toast.info(`${item.name} integration is coming soon.`);
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    Connect
+                                                                </Button>
                                                             )}
                                                         </div>
                                                     </div>
@@ -1408,16 +1697,24 @@ function SettingsPageContent() {
                 </div>
             </div>
 
-            {/* Floating dropdown for team member actions */}
+            {/* Floating dropdown for team member actions. Anchored to the
+                clicked three-dots button via userMenuAnchor so the menu
+                appears where the user clicked (orange items 2.3 / 2.4). */}
             {openUserMenu && (() => {
                 const member = teamMembers?.find((m) => m._id === openUserMenu);
                 if (!member) return null;
+                const anchor = userMenuAnchor ?? { top: 120, left: 120 };
+                // Clamp to viewport so the menu never renders off-screen.
+                const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
+                const viewportW = typeof window !== "undefined" ? window.innerWidth : 1280;
+                const clampedTop = Math.min(anchor.top, viewportH - 120);
+                const clampedLeft = Math.max(8, Math.min(anchor.left, viewportW - 216));
                 return (
-                    <div className="fixed inset-0 z-[60]" onClick={() => { setOpenUserMenu(null); setEditingRole(null); }}>
+                    <div className="fixed inset-0 z-[60]" onClick={() => { setOpenUserMenu(null); setUserMenuAnchor(null); setEditingRole(null); }}>
                         <div
                             ref={menuRef}
-                            className="fixed right-16 w-52 rounded-lg border border-secondary bg-primary shadow-xl"
-                            style={{ top: "50%", transform: "translateY(-50%)" }}
+                            className="fixed w-52 rounded-lg border border-secondary bg-primary shadow-xl"
+                            style={{ top: clampedTop, left: clampedLeft }}
                             onClick={(e) => e.stopPropagation()}
                         >
                             {editingRole?.userId === member._id ? (

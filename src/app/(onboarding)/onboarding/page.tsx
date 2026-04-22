@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useUser, useSession } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { setOnboardingComplete } from "@/app/actions/clerk";
+import { useFileUpload } from "@/hooks/use-file-upload";
 import {
     ArrowLeft,
     ArrowRight,
@@ -19,6 +20,7 @@ import {
     UploadCloud02,
     Users01,
     UsersPlus,
+    XClose,
     Zap,
 } from "@untitledui/icons";
 
@@ -104,6 +106,12 @@ interface FormData {
     totalSales: string;
     teamEmails: string;
     selectedPlan: PlanTier;
+    planSelectedManually: boolean;
+    logoUrl: string;
+    cardNumber: string;
+    cardExpiry: string;
+    cardCvc: string;
+    cardZip: string;
 }
 
 const STORAGE_KEY_STEP = "cyberhook_onboarding_step";
@@ -121,6 +129,12 @@ const defaultFormData: FormData = {
     totalSales: "",
     teamEmails: "",
     selectedPlan: "growth",
+    planSelectedManually: false,
+    logoUrl: "",
+    cardNumber: "",
+    cardExpiry: "",
+    cardCvc: "",
+    cardZip: "",
 };
 
 function loadSavedStep(): number {
@@ -153,6 +167,8 @@ export default function OnboardingPage() {
     const [error, setError] = useState<string | null>(null);
     const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
     const [formData, setFormData] = useState<FormData>(loadSavedForm);
+    const { upload: uploadLogo, isUploading: isLogoUploading } = useFileUpload();
+    const [logoError, setLogoError] = useState<string | null>(null);
 
     const setStep = useCallback((s: number) => {
         setStepRaw(s);
@@ -169,6 +185,39 @@ export default function OnboardingPage() {
             sessionStorage.removeItem(STORAGE_KEY_FORM);
         } catch {}
     }, []);
+
+    // Step 4 validation: require plan manually selected + all CC fields valid
+    const step4Validation = useMemo(() => {
+        const digits = formData.cardNumber.replace(/\D/g, "");
+        const cardNumberValid = digits.length >= 13 && digits.length <= 19;
+
+        const expParts = formData.cardExpiry.replace(/\s/g, "").split("/");
+        let expiryValid = false;
+        if (expParts.length === 2) {
+            const mm = parseInt(expParts[0], 10);
+            const yy = parseInt(expParts[1], 10);
+            if (mm >= 1 && mm <= 12 && !Number.isNaN(yy)) {
+                const now = new Date();
+                const currentYY = now.getFullYear() % 100;
+                const currentMM = now.getMonth() + 1;
+                if (yy > currentYY || (yy === currentYY && mm >= currentMM)) {
+                    expiryValid = true;
+                }
+            }
+        }
+
+        const cvcValid = /^\d{3,4}$/.test(formData.cardCvc);
+        const zipValid = /^[A-Za-z0-9\- ]{3,10}$/.test(formData.cardZip.trim());
+
+        return {
+            planSelected: formData.planSelectedManually,
+            cardNumberValid,
+            expiryValid,
+            cvcValid,
+            zipValid,
+            allValid: formData.planSelectedManually && cardNumberValid && expiryValid && cvcValid && zipValid,
+        };
+    }, [formData.planSelectedManually, formData.cardNumber, formData.cardExpiry, formData.cardCvc, formData.cardZip]);
 
     const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
         setFormData((prev) => ({ ...prev, [key]: value }));
@@ -378,11 +427,57 @@ export default function OnboardingPage() {
 
                             <div className="flex flex-col gap-2">
                                 <Label>Company Logo</Label>
-                                <FileUpload.DropZone
-                                    accept="image/*"
-                                    hint="SVG, PNG, or JPG (max. 2MB)"
-                                    className="w-full"
-                                />
+                                {formData.logoUrl ? (
+                                    <div className="flex items-center gap-4">
+                                        <div className="relative group shrink-0">
+                                            <img
+                                                src={formData.logoUrl}
+                                                alt="Company logo"
+                                                className="h-16 w-16 rounded-lg border border-secondary object-contain bg-white"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData((prev) => ({ ...prev, logoUrl: "" }))}
+                                                className="absolute -top-2 -right-2 flex items-center justify-center size-5 rounded-full bg-error-primary text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-sm cursor-pointer"
+                                                title="Remove logo"
+                                            >
+                                                <XClose className="size-3" />
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-tertiary">Logo uploaded. Hover to remove.</p>
+                                    </div>
+                                ) : (
+                                    <FileUpload.DropZone
+                                        accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
+                                        hint="PNG, JPG, JFIF, GIF, or SVG (min 256×256, max 2MB)"
+                                        className="w-full"
+                                        allowsMultiple={false}
+                                        maxSize={2 * 1024 * 1024}
+                                        isDisabled={isLogoUploading}
+                                        onDropFiles={async (files) => {
+                                            const file = files?.[0];
+                                            if (!file) return;
+                                            setLogoError(null);
+                                            try {
+                                                const url = await uploadLogo(file);
+                                                if (url) {
+                                                    setFormData((prev) => ({ ...prev, logoUrl: url }));
+                                                } else {
+                                                    setLogoError("Failed to upload logo. Please try again.");
+                                                }
+                                            } catch {
+                                                setLogoError("Failed to upload logo. Please try again.");
+                                            }
+                                        }}
+                                        onSizeLimitExceed={() => setLogoError("Logo must be smaller than 2MB.")}
+                                    />
+                                )}
+                                {isLogoUploading && (
+                                    <p className="text-xs text-tertiary">Uploading…</p>
+                                )}
+                                {logoError && (
+                                    <p className="text-xs text-error-primary">{logoError}</p>
+                                )}
                                 <p className="text-xs text-tertiary">Optional — you can add this later in Settings</p>
                             </div>
                         </div>
@@ -417,7 +512,7 @@ export default function OnboardingPage() {
                                     <button
                                         key={tier}
                                         type="button"
-                                        onClick={() => setFormData((prev) => ({ ...prev, selectedPlan: tier }))}
+                                        onClick={() => setFormData((prev) => ({ ...prev, selectedPlan: tier, planSelectedManually: true }))}
                                         className={`relative flex flex-col rounded-2xl bg-primary shadow-lg text-left transition-all ${
                                             isSelected
                                                 ? "ring-2 ring-brand-secondary border-brand-secondary"
@@ -473,18 +568,64 @@ export default function OnboardingPage() {
                                     <h3 className="text-md font-semibold text-primary">Payment Details</h3>
                                 </div>
                                 <div className="flex flex-col gap-4">
-                                    <TextField name="cardNumber">
+                                    <TextField name="cardNumber" isRequired>
                                         <Label>Card Number</Label>
-                                        <InputBase size="md" placeholder="4242 4242 4242 4242" icon={CreditCard02} />
+                                        <InputBase
+                                            size="md"
+                                            placeholder="4242 4242 4242 4242"
+                                            icon={CreditCard02}
+                                            value={formData.cardNumber}
+                                            onChange={(value: string) => {
+                                                const digits = String(value).replace(/\D/g, "").slice(0, 19);
+                                                const grouped = digits.replace(/(.{4})/g, "$1 ").trim();
+                                                setFormData((prev) => ({ ...prev, cardNumber: grouped }));
+                                            }}
+                                            inputMode="numeric"
+                                            autoComplete="cc-number"
+                                        />
                                     </TextField>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <TextField name="expiry">
-                                            <Label>Expiry Date</Label>
-                                            <InputBase size="md" placeholder="MM / YY" />
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <TextField name="expiry" isRequired>
+                                            <Label>Expiry</Label>
+                                            <InputBase
+                                                size="md"
+                                                placeholder="MM / YY"
+                                                value={formData.cardExpiry}
+                                                onChange={(value: string) => {
+                                                    const digits = String(value).replace(/\D/g, "").slice(0, 4);
+                                                    const formatted = digits.length > 2 ? `${digits.slice(0, 2)} / ${digits.slice(2)}` : digits;
+                                                    setFormData((prev) => ({ ...prev, cardExpiry: formatted }));
+                                                }}
+                                                inputMode="numeric"
+                                                autoComplete="cc-exp"
+                                            />
                                         </TextField>
-                                        <TextField name="cvc">
+                                        <TextField name="cvc" isRequired>
                                             <Label>CVC</Label>
-                                            <InputBase size="md" placeholder="123" />
+                                            <InputBase
+                                                size="md"
+                                                placeholder="123"
+                                                value={formData.cardCvc}
+                                                onChange={(value: string) => {
+                                                    const digits = String(value).replace(/\D/g, "").slice(0, 4);
+                                                    setFormData((prev) => ({ ...prev, cardCvc: digits }));
+                                                }}
+                                                inputMode="numeric"
+                                                autoComplete="cc-csc"
+                                            />
+                                        </TextField>
+                                        <TextField name="zip" isRequired>
+                                            <Label>ZIP</Label>
+                                            <InputBase
+                                                size="md"
+                                                placeholder="94103"
+                                                value={formData.cardZip}
+                                                onChange={(value: string) => {
+                                                    const v = String(value).replace(/[^0-9A-Za-z\- ]/g, "").slice(0, 10);
+                                                    setFormData((prev) => ({ ...prev, cardZip: v }));
+                                                }}
+                                                autoComplete="postal-code"
+                                            />
                                         </TextField>
                                     </div>
                                 </div>
@@ -494,6 +635,21 @@ export default function OnboardingPage() {
                         {error && (
                             <p className="text-sm text-error-primary">{error}</p>
                         )}
+                        {!step4Validation.allValid && (
+                            <p className="text-xs text-tertiary text-center">
+                                {!step4Validation.planSelected
+                                    ? "Select a plan to continue."
+                                    : !step4Validation.cardNumberValid
+                                        ? "Enter a valid card number."
+                                        : !step4Validation.expiryValid
+                                            ? "Enter a valid expiry date (MM / YY)."
+                                            : !step4Validation.cvcValid
+                                                ? "Enter a valid CVC."
+                                                : !step4Validation.zipValid
+                                                    ? "Enter a valid ZIP / postal code."
+                                                    : ""}
+                            </p>
+                        )}
                         <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-between">
                             <Button color="secondary" size="lg" iconLeading={ArrowLeft} onClick={() => setStep(3)}>
                                 Back
@@ -502,7 +658,7 @@ export default function OnboardingPage() {
                                 color="primary" 
                                 size="lg" 
                                 iconLeading={Zap}
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !step4Validation.allValid}
                                 onClick={async () => {
                                     if (!user) return;
                                     setIsSubmitting(true);
@@ -531,8 +687,10 @@ export default function OnboardingPage() {
                                             totalEmployees: formData.totalEmployees,
                                             totalSalesPeople: formData.totalSales,
                                             teamEmails: teamEmailsArray,
+                                            logoUrl: formData.logoUrl || undefined,
                                             selectedPlanId: formData.selectedPlan,
-                                            planSelectedManually: formData.selectedPlan !== "growth",
+                                            planSelectedManually: formData.planSelectedManually,
+                                            paymentMethodProvided: step4Validation.allValid,
                                         });
 
                                         if (result.success) {

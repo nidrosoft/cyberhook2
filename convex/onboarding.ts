@@ -38,6 +38,9 @@ export const completeOnboarding = mutation({
     // Plan selection (Step 4)
     selectedPlanId: v.optional(v.string()),
     planSelectedManually: v.optional(v.boolean()),
+    // Payment method presence (client-verified card fields).
+    // When Stripe Elements is wired server-side, replace with paymentMethodId.
+    paymentMethodProvided: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -46,6 +49,18 @@ export const completeOnboarding = mutation({
     }
     if (identity.subject !== args.clerkId) {
       throw new Error("Unauthorized: identity mismatch");
+    }
+
+    // Server-side enforcement of signup requirements (see 1.3):
+    // - a plan must have been explicitly selected on step 4
+    // - a payment method must have been provided
+    // These flags are set by the client after validation; we reject blank submits
+    // to prevent callers from bypassing the UI.
+    if (!args.planSelectedManually) {
+      throw new Error("Please select a plan before starting your trial.");
+    }
+    if (!args.paymentMethodProvided) {
+      throw new Error("Payment details are required to start your trial.");
     }
 
     const now = Date.now();

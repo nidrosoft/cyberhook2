@@ -3,7 +3,7 @@
 import type { FC, HTMLAttributes } from "react";
 import { useCallback, useEffect, useRef } from "react";
 import type { Placement } from "@react-types/overlays";
-import { BookOpen01, ChevronSelectorVertical, LogOut01, Settings01, User01 } from "@untitledui/icons";
+import { ChevronSelectorVertical, LogOut01, Settings01, User01 } from "@untitledui/icons";
 import { useClerk } from "@clerk/nextjs";
 import { useFocusManager } from "react-aria";
 import type { DialogProps as AriaDialogProps } from "react-aria-components";
@@ -62,7 +62,9 @@ export const NavAccountMenu = ({
                 <div className="flex flex-col gap-0.5 py-1.5">
                     <NavAccountCardMenuItem label="View profile" icon={User01} href="/settings?tab=profile" />
                     <NavAccountCardMenuItem label="Account settings" icon={Settings01} href="/settings" />
-                    <NavAccountCardMenuItem label="Documentation" icon={BookOpen01} href="https://docs.cyberhook.ai" />
+                    {/* Documentation link intentionally hidden until the docs
+                        site is live (orange item 18.1). Re-enable with the
+                        correct URL once Notion/GitBook/internal docs are ready. */}
                 </div>
             </div>
 

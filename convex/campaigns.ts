@@ -204,6 +204,42 @@ export const remove = mutation({
   },
 });
 
+// Duplicate a campaign: insert a new draft with the same configuration
+// (orange item 4.3). Counters are reset so the copy starts fresh.
+export const duplicate = mutation({
+  args: { id: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    const source = await ctx.db.get(args.id);
+    if (!source) throw new Error("Campaign not found");
+    assertCompanyAccess(currentUser.companyId, source.companyId);
+
+    const now = Date.now();
+    const newId = await ctx.db.insert("campaigns", {
+      companyId: source.companyId,
+      createdByUserId: currentUser._id,
+      name: `${source.name} (Copy)`,
+      description: source.description,
+      status: "draft",
+      cadencePattern: source.cadencePattern,
+      sendingWindowStart: source.sendingWindowStart,
+      sendingWindowEnd: source.sendingWindowEnd,
+      sendingDays: source.sendingDays,
+      timezone: source.timezone,
+      maxEmailsPerDay: source.maxEmailsPerDay,
+      minDelayBetweenSends: source.minDelayBetweenSends,
+      knowledgeBaseEntryId: source.knowledgeBaseEntryId,
+      totalRecipients: 0,
+      emailsSent: 0,
+      emailsOpened: 0,
+      emailsClicked: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return newId;
+  },
+});
+
 export const updateStatus = mutation({
   args: {
     id: v.id("campaigns"),

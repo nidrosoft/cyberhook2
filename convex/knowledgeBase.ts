@@ -168,6 +168,77 @@ export const create = mutation({
   },
 });
 
+/**
+ * Seed a starter set of email templates and cadence sequences (orange item
+ * 4.2). Idempotent — entries are skipped if a template with the same name
+ * already exists for the company. Templates use Handlebars-style variables
+ * ({{contact.firstName}}, {{contact.company}}, {{exposure.count}},
+ * {{sender.firstName}}, {{sender.company}}) which are interpolated at send
+ * time by the AI Email pipeline.
+ */
+export const seedStarterTemplates = mutation({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const user = await requireAuth(ctx);
+    assertCompanyAccess(user.companyId, args.companyId);
+
+    const existing = await ctx.db
+      .query("knowledgeBaseEntries")
+      .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
+      .collect();
+    const existingNames = new Set(existing.map((e) => e.name));
+
+    const templates = [
+      {
+        name: "[Cadence] Cold Outreach – Day 0",
+        body: "Hi {{contact.firstName}},\n\nI noticed {{contact.company}} appears in our latest exposure scan with {{exposure.count}} compromised credentials surfaced on dark-web channels. I wanted to flag this proactively before it becomes a headline.\n\nWould a 15-minute call this week make sense to walk you through what we found?\n\n— {{sender.firstName}}\n{{sender.company}}",
+      },
+      {
+        name: "[Cadence] Follow-up – Day 3",
+        body: "Hi {{contact.firstName}},\n\nFollowing up on my note from a few days ago about the {{exposure.count}} exposed credentials we found tied to {{contact.company}}.\n\nIf this isn't the right person for IT/security, would you mind pointing me in the right direction?\n\n— {{sender.firstName}}",
+      },
+      {
+        name: "[Cadence] Breakup – Day 7",
+        body: "Hi {{contact.firstName}},\n\nI'll close the loop here. If credential exposure isn't a priority right now I completely understand — and our exposure data is always available when you'd like to take a look.\n\n— {{sender.firstName}}\n{{sender.company}}",
+      },
+      {
+        name: "[Cadence] Post-scan – Findings Recap",
+        body: "Hi {{contact.firstName}},\n\nQuick recap of what our scan surfaced for {{contact.company}}:\n\n• {{exposure.count}} compromised credentials across multiple breach sources\n• Active dark-web mentions in the last 90 days\n• Recommended next steps: credential rotation, MFA enforcement, dark-web monitoring\n\nHappy to walk through specifics — does later this week work?\n\n— {{sender.firstName}}",
+      },
+      {
+        name: "[Cadence] Renewal Check-in",
+        body: "Hi {{contact.firstName}},\n\nIt's been a while since we last connected. Wanted to check in and see how things are going at {{contact.company}}, and whether you'd find a refreshed exposure scan useful.\n\nNo agenda — just a courtesy ping.\n\n— {{sender.firstName}}",
+      },
+      {
+        name: "[Cadence] Event Follow-up",
+        body: "Hi {{contact.firstName}},\n\nGreat meeting you at the event. As promised, I ran a quick exposure scan for {{contact.company}} — happy to share the findings on a short call.\n\nWhat does your week look like?\n\n— {{sender.firstName}}\n{{sender.company}}",
+      },
+    ];
+
+    let created = 0;
+    let skipped = 0;
+    const now = Date.now();
+    for (const t of templates) {
+      if (existingNames.has(t.name)) {
+        skipped++;
+        continue;
+      }
+      await ctx.db.insert("knowledgeBaseEntries", {
+        companyId: args.companyId,
+        createdByUserId: user._id,
+        name: t.name,
+        type: "rich_text",
+        scope: "global",
+        richTextContent: t.body,
+        createdAt: now,
+        updatedAt: now,
+      });
+      created++;
+    }
+    return { created, skipped };
+  },
+});
+
 export const update = mutation({
   args: {
     id: v.id("knowledgeBaseEntries"),

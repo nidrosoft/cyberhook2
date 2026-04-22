@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { toast } from "sonner";
 import { devError } from "@/utils/dev-error";
@@ -33,6 +33,7 @@ import { PaginationCardMinimal } from "@/components/application/pagination/pagin
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { sanitizeUrl } from "@/utils/sanitize-url";
+import { STATE_PORTALS_SORTED, resolveStatePortal } from "@/lib/state-breach-portals";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -65,6 +66,11 @@ function formatIncidentType(type: string): string {
 function typeColor(type: string) {
     return type === "breach_notification" || type === "Data Breach" ? "purple" : "blue";
 }
+
+// State portal lookup now comes from the shared seed map in
+// `src/lib/state-breach-portals.ts` (red item 12.1). All 50 states + DC
+// are present there with postal code, full state name, agency, and
+// official URL. `resolveStatePortal()` accepts either representation.
 
 function sourceColor(source: string) {
     switch (source) {
@@ -148,7 +154,23 @@ export default function RansomHubPage() {
     const [threatGroup, setThreatGroup] = useState("all");
 
     const [breachRegulation, setBreachRegulation] = useState("all");
-    const [breachSource, setBreachSource] = useState("all");
+
+    // Per-state toggle persistence (orange item 12.2). Users can toggle
+    // individual US states on/off to focus on their service area. State
+    // selections persist across reloads via localStorage so the toggle sticks.
+    const [breachStateFilter, setBreachStateFilter] = useState<string[]>(() => {
+        if (typeof window === "undefined") return [];
+        try {
+            const raw = window.localStorage.getItem("breachStateFilter");
+            return raw ? (JSON.parse(raw) as string[]) : [];
+        } catch {
+            return [];
+        }
+    });
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        window.localStorage.setItem("breachStateFilter", JSON.stringify(breachStateFilter));
+    }, [breachStateFilter]);
 
     const [showFilterPanel, setShowFilterPanel] = useState(false);
 
@@ -183,14 +205,18 @@ export default function RansomHubPage() {
                 const q = breachSearchQuery.toLowerCase();
                 if (!inc.companyName.toLowerCase().includes(q)) return false;
             }
-            if (breachSource !== "all" && inc.source !== breachSource) return false;
             if (breachRegulation !== "all") {
                 const allowedSources = regulationSourceMap[breachRegulation];
                 if (allowedSources && !allowedSources.includes(inc.source)) return false;
             }
+            // Per-state filter (orange item 12.2). If the user selected at
+            // least one state, only keep rows whose region matches.
+            if (breachStateFilter.length > 0) {
+                if (!inc.region || !breachStateFilter.includes(inc.region)) return false;
+            }
             return true;
         });
-    }, [breachIncidents, breachSearchQuery, breachSource, breachRegulation]);
+    }, [breachIncidents, breachSearchQuery, breachRegulation, breachStateFilter]);
 
     async function handleAddToLeads(companyName: string, domain?: string) {
         if (!companyId || !user) return;
@@ -270,6 +296,11 @@ export default function RansomHubPage() {
                     </div>
                 </div>
 
+                {/* Data Sync Status — admin-visible integration health strip
+                    (red items 11.2 + 12.4). Renders one chip per known upstream
+                    feed with its last run timestamp, new-rows count, and error. */}
+                <SyncStatusStrip />
+
                 {/* Global Filter Panel */}
                 {showFilterPanel && (
                     <div className="rounded-xl border border-secondary bg-primary p-5 shadow-xs animate-in slide-in-from-top-2 duration-200">
@@ -331,21 +362,6 @@ export default function RansomHubPage() {
                                     className="w-full"
                                 />
                             </div>
-                            <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-secondary">Data Source</label>
-                                <FilterDropdown
-                                    aria-label="Source"
-                                    value={breachSource}
-                                    onChange={(v) => setBreachSource(v)}
-                                    options={[
-                                        { label: "All Sources", value: "all" },
-                                        { label: "HHS OCR", value: "hhs_ocr" },
-                                        { label: "CA AG", value: "california_ag" },
-                                        { label: "Privacy Rights", value: "privacy_rights" },
-                                    ]}
-                                    className="w-full"
-                                />
-                            </div>
                         </div>
                         <div className="flex items-center justify-between mt-4 pt-4 border-t border-secondary">
                             <span className="text-sm text-tertiary">
@@ -358,7 +374,6 @@ export default function RansomHubPage() {
                                     setTimePeriod("all");
                                     setRegion("all");
                                     setThreatGroup("all");
-                                    setBreachSource("all");
                                     setBreachRegulation("all");
                                     setSearchQuery("");
                                     setBreachSearchQuery("");
@@ -418,7 +433,6 @@ export default function RansomHubPage() {
                                     <Table.Head id="industry" label="Industry" allowsSorting className="min-w-[130px] hidden lg:table-cell" />
                                     <Table.Head id="date" label="Posted Date" allowsSorting className="min-w-[130px]" />
                                     <Table.Head id="type" label="Type" allowsSorting className="min-w-[120px] hidden lg:table-cell" />
-                                    <Table.Head id="source" label="Source" className="min-w-[130px] hidden xl:table-cell" />
                                     <Table.Head id="affected" label="Individuals" className="min-w-[120px] hidden lg:table-cell" />
                                     <Table.Head id="vector" label="Breach Vector" className="min-w-[150px] hidden xl:table-cell" />
                                     <Table.Head id="actions" className="w-[80px]" />
@@ -451,11 +465,6 @@ export default function RansomHubPage() {
                                             <Table.Cell className="hidden lg:table-cell">
                                                 <Badge color={typeColor(item.incidentType) as any} size="sm">
                                                     {formatIncidentType(item.incidentType)}
-                                                </Badge>
-                                            </Table.Cell>
-                                            <Table.Cell className="hidden xl:table-cell">
-                                                <Badge color={sourceColor(item.source) as any} size="sm">
-                                                    {formatSourceLabel(item.source)}
                                                 </Badge>
                                             </Table.Cell>
                                             <Table.Cell className="hidden lg:table-cell">
@@ -521,59 +530,64 @@ export default function RansomHubPage() {
 
                     {/* Breach Notifications Tab */}
                     <TabPanel id="breaches" className="pt-6 flex flex-col gap-6">
-                        {/* Monitored Sources */}
-                        <div className="p-5 border border-secondary rounded-xl bg-primary">
-                            <h3 className="text-md font-semibold text-primary mb-4">Monitored Sources</h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div className="flex items-center justify-between p-3 border border-secondary rounded-lg">
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-sm font-medium text-primary">HHS OCR Breach Portal</span>
-                                        <span className="text-xs text-tertiary">HIPAA — Healthcare breaches</span>
-                                    </div>
-                                    <Badge color="success" size="sm">Active</Badge>
-                                </div>
-                                <div className="flex items-center justify-between p-3 border border-secondary rounded-lg">
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-sm font-medium text-primary">Privacy Rights Clearinghouse</span>
-                                        <span className="text-xs text-tertiary">GLBA — Financial breaches</span>
-                                    </div>
-                                    <Badge color="success" size="sm">Active</Badge>
-                                </div>
-                                <div className="flex items-center justify-between p-3 border border-secondary rounded-lg">
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-sm font-medium text-primary">California AG Breach List</span>
-                                        <span className="text-xs text-tertiary">CCPA — California consumer breaches</span>
-                                    </div>
-                                    <Badge color="success" size="sm">Active</Badge>
-                                </div>
-                            </div>
-                            <p className="text-xs text-tertiary mt-3">Data is automatically synced daily from all active sources.</p>
-                        </div>
-
                         {/* Breach Filters */}
-                        <div className="flex flex-wrap items-end gap-3">
-                            <FilterDropdown
-                                aria-label="Regulation"
-                                value={breachRegulation}
-                                onChange={(v) => setBreachRegulation(v)}
-                                options={[
-                                    { label: "All", value: "all" },
-                                    { label: "HIPAA", value: "hipaa" },
-                                    { label: "CCPA", value: "ccpa" },
-                                    { label: "GLBA", value: "glba" },
-                                ]}
-                            />
-                            <FilterDropdown
-                                aria-label="Source"
-                                value={breachSource}
-                                onChange={(v) => setBreachSource(v)}
-                                options={[
-                                    { label: "All", value: "all" },
-                                    { label: "HHS OCR", value: "hhs_ocr" },
-                                    { label: "CA AG", value: "california_ag" },
-                                    { label: "Privacy Rights", value: "privacy_rights" },
-                                ]}
-                            />
+                        <div className="flex flex-col gap-3">
+                            <div className="flex flex-wrap items-end gap-3">
+                                <FilterDropdown
+                                    aria-label="Regulation"
+                                    value={breachRegulation}
+                                    onChange={(v) => setBreachRegulation(v)}
+                                    options={[
+                                        { label: "All", value: "all" },
+                                        { label: "HIPAA", value: "hipaa" },
+                                        { label: "CCPA", value: "ccpa" },
+                                        { label: "GLBA", value: "glba" },
+                                    ]}
+                                />
+                                {breachStateFilter.length > 0 && (
+                                    <Button size="sm" color="link-gray" onClick={() => setBreachStateFilter([])}>
+                                        Clear states ({breachStateFilter.length})
+                                    </Button>
+                                )}
+                            </div>
+                            {/* Per-state quick toggles (orange item 12.2). Clicks toggle
+                                membership in breachStateFilter and persist to localStorage. */}
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-semibold text-tertiary uppercase tracking-wide mr-1">Filter by state:</span>
+                                {/* All 50 states + DC, alphabetized (red item 12.1). */}
+                                {STATE_PORTALS_SORTED.map((portal) => {
+                                        const active =
+                                            breachStateFilter.includes(portal.code) ||
+                                            breachStateFilter.includes(portal.name);
+                                        return (
+                                            <button
+                                                key={portal.code}
+                                                type="button"
+                                                title={`Toggle ${portal.name}`}
+                                                onClick={() => {
+                                                    setBreachStateFilter((prev) => {
+                                                        const has =
+                                                            prev.includes(portal.code) ||
+                                                            prev.includes(portal.name);
+                                                        if (has)
+                                                            return prev.filter(
+                                                                (s) => s !== portal.code && s !== portal.name,
+                                                            );
+                                                        // Store both so the filter matches both data shapes.
+                                                        return [...prev, portal.code, portal.name];
+                                                    });
+                                                }}
+                                                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                                                    active
+                                                        ? "border-brand-solid bg-brand-primary_alt text-brand-secondary"
+                                                        : "border-secondary bg-primary text-secondary hover:bg-secondary_subtle"
+                                                }`}
+                                            >
+                                                {portal.code}
+                                            </button>
+                                        );
+                                    })}
+                            </div>
                         </div>
 
                         {/* Breach Notifications Table */}
@@ -642,6 +656,25 @@ export default function RansomHubPage() {
                                             </Table.Cell>
                                             <Table.Cell className="px-4">
                                                 <div className="flex items-center gap-1">
+                                                    {/* Link to official state portal (orange 12.3 / red 12.1).
+                                                        Resolves via the shared 50-state seed map. */}
+                                                    {(() => {
+                                                        const portal = resolveStatePortal(item.region);
+                                                        if (!portal) return null;
+                                                        return (
+                                                            <a
+                                                                href={portal.url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-secondary transition duration-100 ease-linear"
+                                                                aria-label={`View ${portal.name} portal`}
+                                                                title={`View official ${portal.name} breach portal (${portal.agency})`}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <LinkExternal01 className="w-4 h-4" />
+                                                            </a>
+                                                        );
+                                                    })()}
                                                     <button
                                                         className="inline-flex items-center justify-center rounded-md p-1.5 text-quaternary hover:text-brand-600 transition duration-100 ease-linear"
                                                         aria-label="Add to Leads"
@@ -683,6 +716,86 @@ export default function RansomHubPage() {
                         </TableCard.Root>
                     </TabPanel>
                 </Tabs>
+            </div>
+        </div>
+    );
+}
+
+// ─── Data Sync Status ─────────────────────────────────────────────────────────
+// Admin-visible integration health strip (red items 11.2 + 12.4). Reads the
+// last row from `syncLogs` per known source and renders a compact chip.
+// Source label mapping lives locally so we don't have to touch the main
+// page's label helper (single-responsibility for this side widget).
+
+const SYNC_SOURCE_LABELS: Record<string, string> = {
+    ransomware_live: "ransomware.live",
+    hhs_ocr: "HHS OCR",
+    california_ag: "California AG",
+    privacy_rights: "Privacy Rights",
+};
+
+function SyncStatusStrip() {
+    const latest = useQuery(api.syncLogs.latestBySource);
+    // Don't render until we have a response — avoids a flash of empty UI.
+    if (latest === undefined) return null;
+    if (latest.length === 0) {
+        return (
+            <div className="rounded-lg border border-secondary bg-secondary_subtle px-4 py-2.5 text-xs text-tertiary">
+                Data sync status: no runs recorded yet. Daily crons will begin logging at their next scheduled run.
+            </div>
+        );
+    }
+
+    const fmtRelative = (ts: number) => {
+        const diff = Date.now() - ts;
+        const h = Math.floor(diff / 3_600_000);
+        if (h < 1) {
+            const m = Math.floor(diff / 60_000);
+            return `${m}m ago`;
+        }
+        if (h < 24) return `${h}h ago`;
+        const d = Math.floor(h / 24);
+        return `${d}d ago`;
+    };
+
+    return (
+        <div className="rounded-lg border border-secondary bg-primary px-4 py-2.5">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs font-semibold text-tertiary uppercase tracking-wide">
+                    Data Sync Status
+                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                    {latest.map(({ source, log }) => {
+                        if (!log) return null;
+                        const label = SYNC_SOURCE_LABELS[source] ?? source;
+                        const stale = Date.now() - log.startedAt > 36 * 3_600_000; // >36h
+                        const color: "success" | "warning" | "error" | "gray" =
+                            !log.success
+                                ? "error"
+                                : log.errorMessage
+                                  ? "warning"
+                                  : stale
+                                    ? "warning"
+                                    : log.stored > 0
+                                      ? "success"
+                                      : "gray";
+                        const title = [
+                            `Source: ${label}`,
+                            `Last run: ${new Date(log.startedAt).toLocaleString()}`,
+                            `New rows: ${log.stored}`,
+                            log.errorMessage ? `Note: ${log.errorMessage}` : "",
+                        ]
+                            .filter(Boolean)
+                            .join("\n");
+                        return (
+                            <span key={source} title={title}>
+                                <Badge size="sm" color={color}>
+                                    {label} · +{log.stored} · {fmtRelative(log.startedAt)}
+                                </Badge>
+                            </span>
+                        );
+                    })}
+                </div>
             </div>
         </div>
     );

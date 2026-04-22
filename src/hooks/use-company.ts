@@ -40,6 +40,15 @@ export interface Company {
     brandPrimaryColor?: string;
     brandSecondaryColor?: string;
     serviceArea?: string[];
+    // Service-area center + radius (orange item 3.4).
+    serviceAreaRadius?: {
+        centerAddress?: string;
+        centerLat?: number;
+        centerLng?: number;
+        radius?: number;
+        unit?: "miles" | "km";
+        noLimit?: boolean;
+    };
     // Associations & programs
     associations?: string[];
     programs?: string[];

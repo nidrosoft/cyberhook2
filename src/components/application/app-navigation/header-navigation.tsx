@@ -35,14 +35,23 @@ function getNotificationColors(type: string) {
     return "text-fg-quaternary bg-secondary";
 }
 
-function getNotificationRoute(notification: { type: string; relatedEntityType?: string; actionUrl?: string }): string | null {
+function getNotificationRoute(notification: { type: string; relatedEntityType?: string; relatedEntityId?: string; actionUrl?: string }): string | null {
     if (notification.actionUrl) return notification.actionUrl;
     const type = notification.type;
     if (type.startsWith("watchlist.")) return "/watchlist";
     if (type.startsWith("lead.")) return "/live-leads";
     if (type.startsWith("campaign.")) return "/ai-agents";
     if (type.startsWith("task.")) return "/todos";
-    if (type.startsWith("team.")) return "/settings?tab=team";
+    // Team notifications deep-link directly to the related team member row
+    // (orange item 2.5). When the notification carries a user entity id we
+    // append it as `?user=<id>` so the settings page can scroll to and
+    // highlight the affected row.
+    if (type.startsWith("team.")) {
+        const userParam = notification.relatedEntityType === "user" && notification.relatedEntityId
+            ? `&user=${encodeURIComponent(notification.relatedEntityId)}`
+            : "";
+        return `/settings?tab=team${userParam}`;
+    }
     if (type.startsWith("billing.")) return "/billing";
     if (type.startsWith("system.")) return "/dashboard";
     return null;
@@ -129,7 +138,6 @@ export const HeaderNavigationBase = ({
                 <aside className="flex h-full max-w-full flex-col justify-between overflow-auto border-r border-secondary bg-primary pt-4 lg:pt-6">
                     <div className="flex flex-col gap-5 px-4 lg:px-5">
                         <CyberHookLogo className="h-8" />
-                        <Input shortcut size="sm" aria-label="Search" placeholder="Search" icon={SearchLg} />
                     </div>
 
                     <NavList items={items} />

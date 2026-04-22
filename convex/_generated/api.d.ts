@@ -32,6 +32,8 @@ import type * as rfpHub from "../rfpHub.js";
 import type * as searches from "../searches.js";
 import type * as storage from "../storage.js";
 import type * as stripe from "../stripe.js";
+import type * as superAdmin from "../superAdmin.js";
+import type * as syncLogs from "../syncLogs.js";
 import type * as tasks from "../tasks.js";
 import type * as users from "../users.js";
 import type * as watchlist from "../watchlist.js";
@@ -67,6 +69,8 @@ declare const fullApi: ApiFromModules<{
   searches: typeof searches;
   storage: typeof storage;
   stripe: typeof stripe;
+  superAdmin: typeof superAdmin;
+  syncLogs: typeof syncLogs;
   tasks: typeof tasks;
   users: typeof users;
   watchlist: typeof watchlist;

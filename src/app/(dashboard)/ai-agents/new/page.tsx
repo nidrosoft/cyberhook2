@@ -163,10 +163,24 @@ interface LeadItem {
     contactEmail?: string;
 }
 
+type ContactItem = {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    email?: string;
+    companyName?: string;
+    title?: string;
+};
+
 function Step2({
     leads,
+    contacts,
     selectedLeadIds,
     setSelectedLeadIds,
+    selectedContactIds,
+    setSelectedContactIds,
+    audienceTab,
+    setAudienceTab,
     audienceRegion,
     setAudienceRegion,
     audienceSize,
@@ -176,8 +190,13 @@ function Step2({
     isLoading,
 }: {
     leads: LeadItem[];
+    contacts: ContactItem[];
     selectedLeadIds: Set<string>;
     setSelectedLeadIds: (v: Set<string>) => void;
+    selectedContactIds: Set<string>;
+    setSelectedContactIds: (v: Set<string>) => void;
+    audienceTab: "leads" | "contacts";
+    setAudienceTab: (v: "leads" | "contacts") => void;
     audienceRegion: string;
     setAudienceRegion: (v: string) => void;
     audienceSize: string;
@@ -222,14 +241,125 @@ function Step2({
         }
     };
 
+    // Filter contacts for the Contacts tab — only those with an email are
+    // valid recipients. Searchable by name/company/title (orange item 4.1).
+    const filteredContacts = useMemo(() => {
+        return contacts.filter((c) => c.email && c.email.trim().length > 0);
+    }, [contacts]);
+
+    const toggleContact = (id: string) => {
+        const next = new Set(selectedContactIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedContactIds(next);
+    };
+
+    const toggleAllContacts = () => {
+        if (selectedContactIds.size === filteredContacts.length) {
+            setSelectedContactIds(new Set());
+        } else {
+            setSelectedContactIds(new Set(filteredContacts.map((c) => c._id)));
+        }
+    };
+
     return (
         <div className="flex flex-col gap-6 w-[80%] mx-auto">
             <div className="rounded-xl border border-secondary bg-primary p-6 flex flex-col gap-6">
                 <div>
                     <h2 className="text-lg font-semibold text-primary">Select Audience</h2>
-                    <p className="text-sm text-tertiary mt-1">Choose leads from your database to include in this campaign.</p>
+                    <p className="text-sm text-tertiary mt-1">Choose leads or contacts from your database to include in this campaign.</p>
                 </div>
 
+                {/* Audience-source tabs (orange item 4.1). Campaigns can now
+                    target leads, contacts from the repository, or both. */}
+                <div className="flex items-center gap-1 border-b border-secondary -mx-6 px-6">
+                    <button
+                        type="button"
+                        onClick={() => setAudienceTab("leads")}
+                        className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                            audienceTab === "leads"
+                                ? "border-brand-solid text-brand-secondary"
+                                : "border-transparent text-tertiary hover:text-secondary"
+                        }`}
+                    >
+                        Leads ({selectedLeadIds.size})
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setAudienceTab("contacts")}
+                        className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                            audienceTab === "contacts"
+                                ? "border-brand-solid text-brand-secondary"
+                                : "border-transparent text-tertiary hover:text-secondary"
+                        }`}
+                    >
+                        Contacts ({selectedContactIds.size})
+                    </button>
+                </div>
+
+                {audienceTab === "contacts" ? (
+                    <>
+                        {isLoading ? (
+                            <div className="flex items-center justify-center py-12 text-tertiary gap-2">
+                                <Loading02 className="w-5 h-5 animate-spin" />
+                                <span className="text-sm">Loading contacts...</span>
+                            </div>
+                        ) : filteredContacts.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 text-center">
+                                <p className="text-sm text-tertiary">No contacts with email addresses yet.</p>
+                                <p className="text-xs text-quaternary mt-1">Add contacts in the Contacts page or import via CSV to get started.</p>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex items-center gap-2 pb-2 border-b border-secondary">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedContactIds.size === filteredContacts.length && filteredContacts.length > 0}
+                                        onChange={toggleAllContacts}
+                                        className="w-4 h-4 rounded border-secondary accent-brand-600"
+                                    />
+                                    <span className="text-xs text-tertiary">Select all ({filteredContacts.length})</span>
+                                </div>
+                                <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto">
+                                    {filteredContacts.map((contact) => (
+                                        <label
+                                            key={contact._id}
+                                            className="flex items-center gap-3 rounded-lg border border-secondary px-4 py-3 hover:bg-secondary_subtle cursor-pointer transition-colors"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedContactIds.has(contact._id)}
+                                                onChange={() => toggleContact(contact._id)}
+                                                className="w-4 h-4 rounded border-secondary accent-brand-600"
+                                            />
+                                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                <span className="text-sm font-medium text-primary truncate">{contact.firstName} {contact.lastName}</span>
+                                                <span className="text-sm text-tertiary">·</span>
+                                                <span className="text-xs text-brand-600 truncate">{contact.email}</span>
+                                                {contact.companyName && (
+                                                    <>
+                                                        <span className="text-sm text-tertiary">·</span>
+                                                        <span className="text-xs text-quaternary truncate">{contact.companyName}</span>
+                                                    </>
+                                                )}
+                                                {contact.title && (
+                                                    <>
+                                                        <span className="text-sm text-tertiary">·</span>
+                                                        <span className="text-xs text-quaternary truncate">{contact.title}</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </label>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                        <div className="flex items-center gap-2 text-sm">
+                            <Badge color="brand" size="sm">{selectedContactIds.size} contacts selected</Badge>
+                        </div>
+                    </>
+                ) : (
+                <>
                 <div className="flex items-center gap-3 flex-wrap">
                     <FilterDropdown
                         aria-label="Region"
@@ -330,6 +460,8 @@ function Step2({
                 <div className="flex items-center gap-2 text-sm">
                     <Badge color="brand" size="sm">{selectedLeadIds.size} leads selected</Badge>
                 </div>
+                </>
+                )}
             </div>
         </div>
     );
@@ -374,8 +506,11 @@ function Step3({
     requireApproval: boolean;
     setRequireApproval: (v: boolean) => void;
 }) {
+    // Step 3 layout (orange item 4.4): removed the internal max-height
+    // scroll — the page now scrolls naturally and the sticky wizard
+    // footer remains reachable.
     return (
-        <div className="flex flex-col gap-6 w-[80%] mx-auto max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+        <div className="flex flex-col gap-6 w-[80%] mx-auto pb-6">
             <div className="rounded-xl border border-secondary bg-primary p-6 flex flex-col gap-6">
                 <div>
                     <h2 className="text-lg font-semibold text-primary">Cadence Pattern</h2>
@@ -740,7 +875,9 @@ export default function NewCampaignPage() {
         if (!leads) return [];
         const contactsByLead = new Map<string, string>();
         for (const c of contacts ?? []) {
-            if (c.email && !contactsByLead.has(c.leadId)) {
+            // Skip standalone contacts without a leadId — they are surfaced
+            // separately in the Contacts repository (orange item 4.1).
+            if (c.email && c.leadId && !contactsByLead.has(c.leadId)) {
                 contactsByLead.set(c.leadId, c.email);
             }
         }
@@ -759,6 +896,10 @@ export default function NewCampaignPage() {
     const [audienceSize, setAudienceSize] = useState("all");
     const [audienceExposure, setAudienceExposure] = useState("all");
     const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+    // Contacts-as-audience state (orange item 4.1). When selected, these
+    // contact IDs are translated into campaign recipients alongside leads.
+    const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+    const [audienceTab, setAudienceTab] = useState<"leads" | "contacts">("leads");
     const [selectedCadence, setSelectedCadence] = useState("standard");
     const [activeDays, setActiveDays] = useState(["Mon", "Tue", "Wed", "Thu", "Fri"]);
     const [startTime, setStartTime] = useState("09:00");
@@ -773,6 +914,12 @@ export default function NewCampaignPage() {
     const selectedLeads = useMemo(() => {
         return leadsWithEmails.filter((l) => selectedLeadIds.has(l._id));
     }, [leadsWithEmails, selectedLeadIds]);
+
+    // Selected contacts from the repository (orange item 4.1). These become
+    // additional campaign recipients alongside any leads chosen above.
+    const selectedContacts = useMemo(() => {
+        return (contacts ?? []).filter((c) => selectedContactIds.has(c._id));
+    }, [contacts, selectedContactIds]);
 
     const handleGeneratePreview = async () => {
         if (selectedLeads.length === 0 || !company) return;
@@ -810,8 +957,8 @@ export default function NewCampaignPage() {
 
     const handleLaunch = async () => {
         if (!companyId || !user || !company) return;
-        if (selectedLeadIds.size === 0) {
-            toast.error("Please select at least one lead for your campaign.");
+        if (selectedLeadIds.size === 0 && selectedContactIds.size === 0) {
+            toast.error("Please select at least one lead or contact for your campaign.");
             return;
         }
         setIsLaunching(true);
@@ -833,19 +980,36 @@ export default function NewCampaignPage() {
                 minDelayBetweenSends: minDelay,
             });
 
-            if (aiPersonalization && selectedLeads.length > 0) {
-                toast.info(`Generating personalized emails for ${selectedLeads.length} leads...`);
+            // Build the merged recipient list: any selected leads plus any
+            // standalone contacts selected from the Contacts repository
+            // (orange item 4.1). Contacts without email are filtered out at
+            // the selection step, but we guard here as well.
+            const leadRecipients = selectedLeads.map((l) => ({
+                leadId: l._id,
+                name: l.name,
+                domain: l.domain,
+                industry: l.industry,
+                exposureCount: l.exposureCount ?? 0,
+                email: l.contactEmail,
+            }));
+            const contactRecipients = selectedContacts
+                .filter((c) => c.email)
+                .map((c) => ({
+                    // Contact-only recipients have no linked lead — leave
+                    // leadId undefined; generateCampaignEmails now accepts it.
+                    name: `${c.firstName} ${c.lastName}`.trim() || (c.email ?? ""),
+                    domain: (c.email?.split("@")[1] || "").toLowerCase(),
+                    exposureCount: 0,
+                    email: c.email,
+                }));
+            const totalRecipients = leadRecipients.length + contactRecipients.length;
+
+            if (aiPersonalization && totalRecipients > 0) {
+                toast.info(`Generating personalized emails for ${totalRecipients} recipients...`);
                 await generateEmails({
                     campaignId,
                     companyId,
-                    recipients: selectedLeads.map((l) => ({
-                        leadId: l._id,
-                        name: l.name,
-                        domain: l.domain,
-                        industry: l.industry,
-                        exposureCount: l.exposureCount ?? 0,
-                        email: l.contactEmail,
-                    })),
+                    recipients: [...leadRecipients, ...contactRecipients],
                     campaignName: campaignName || "Untitled Campaign",
                     campaignDescription: description || undefined,
                     senderName: fullName || "Sales Team",
@@ -892,8 +1056,13 @@ export default function NewCampaignPage() {
                 {currentStep === 2 && (
                     <Step2
                         leads={leadsWithEmails as LeadItem[]}
+                        contacts={(contacts ?? []) as ContactItem[]}
                         selectedLeadIds={selectedLeadIds}
                         setSelectedLeadIds={setSelectedLeadIds}
+                        selectedContactIds={selectedContactIds}
+                        setSelectedContactIds={setSelectedContactIds}
+                        audienceTab={audienceTab}
+                        setAudienceTab={setAudienceTab}
                         audienceRegion={audienceRegion}
                         setAudienceRegion={setAudienceRegion}
                         audienceSize={audienceSize}
@@ -942,7 +1111,9 @@ export default function NewCampaignPage() {
                     />
                 )}
 
-                <div className="flex items-center justify-between border-t border-secondary pt-6 w-[80%] mx-auto">
+                {/* Sticky wizard footer (orange item 4.4): keeps Next / Launch
+                    always reachable no matter how tall the current step is. */}
+                <div className="sticky bottom-0 z-10 -mx-4 lg:-mx-8 bg-primary/95 backdrop-blur-sm border-t border-secondary px-4 lg:px-8 py-4 flex items-center justify-between w-[calc(100%+2rem)] lg:w-[calc(100%+4rem)]">
                     <Button
                         color="secondary"
                         size="md"

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { toast } from "sonner";
 import { devError } from "@/utils/dev-error";
@@ -101,6 +102,29 @@ export default function LiveSearchPage() {
     const [searchError, setSearchError] = useState<string | null>(null);
     const [currentSearchResults, setCurrentSearchResults] = useState<RedrokSearchResult[]>([]);
     const [selectedResult, setSelectedResult] = useState<RedrokSearchResult | null>(null);
+
+    // Yellow item 10.4 — Watchlist "Rescan" navigates here with `?domain=…`
+    // and (optional) `&autoSubmit=1`. Pre-fill the input and kick off the
+    // search once per navigation so the user lands directly on results.
+    const searchParams = useSearchParams();
+    const autoSubmitHandled = useRef(false);
+    useEffect(() => {
+        if (autoSubmitHandled.current) return;
+        const qDomain = searchParams.get("domain");
+        if (!qDomain) return;
+        setDomain(qDomain);
+        if (searchParams.get("autoSubmit") === "1" && companyId && user) {
+            autoSubmitHandled.current = true;
+            // Next tick so React has applied the setDomain state.
+            setTimeout(() => {
+                handleSearch();
+            }, 0);
+        } else {
+            autoSubmitHandled.current = true;
+        }
+        // We intentionally run once per mount when auth & company are ready.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [companyId, user?._id]);
 
 
     const tokensTotal = tokenAllocation ?? 0;
@@ -267,11 +291,24 @@ export default function LiveSearchPage() {
                             <InputBase
                                 type="text"
                                 size="md"
-                                placeholder="Enter domain to search (e.g., acmecorp.com)"
+                                placeholder="Enter domain (e.g. acmecorp.com or app.acmecorp.com)"
                                 className="w-full shadow-sm"
                                 icon={Globe01}
                                 value={domain}
                                 onChange={(value: string) => setDomain(value)}
+                                onBlur={() => {
+                                    // Live normalize on blur so the user sees the cleaned
+                                    // domain before they click Search (orange item 8.1).
+                                    if (!domain.trim()) return;
+                                    const cleaned = domain
+                                        .trim()
+                                        .toLowerCase()
+                                        .replace(/^https?:\/\//, "")
+                                        .replace(/^www\./, "")
+                                        .replace(/\/.*$/, "")
+                                        .replace(/[?#].*$/, "");
+                                    if (cleaned !== domain) setDomain(cleaned);
+                                }}
                             />
                             <Button
                                 size="lg"

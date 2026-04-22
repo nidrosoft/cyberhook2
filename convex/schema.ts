@@ -83,6 +83,18 @@ export default defineSchema({
     brandPrimaryColor: v.optional(v.string()),
     brandSecondaryColor: v.optional(v.string()),
     serviceArea: v.optional(v.array(v.string())),
+    // Geographic service-area definition with center + radius (orange item 3.4).
+    // Used by Events "near me" filtering and prospect geography matching.
+    serviceAreaRadius: v.optional(
+      v.object({
+        centerAddress: v.optional(v.string()),
+        centerLat: v.optional(v.number()),
+        centerLng: v.optional(v.number()),
+        radius: v.optional(v.number()),
+        unit: v.optional(v.union(v.literal("miles"), v.literal("km"))),
+        noLimit: v.optional(v.boolean()),
+      })
+    ),
     // Associations & programs
     associations: v.optional(v.array(v.string())),
     programs: v.optional(v.array(v.string())),
@@ -149,6 +161,16 @@ export default defineSchema({
     invitedByUserId: v.id("users"),
     expiresAt: v.number(),
     createdAt: v.number(),
+    // Email delivery tracking (see orange item 2.1)
+    emailDeliveryStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("sent"),
+        v.literal("failed"),
+      ),
+    ),
+    emailLastAttemptAt: v.optional(v.number()),
+    emailError: v.optional(v.string()),
   })
     .index("by_companyId", ["companyId"])
     .index("by_email", ["email"])
@@ -216,7 +238,11 @@ export default defineSchema({
 
   contacts: defineTable({
     companyId: v.id("companies"),
-    leadId: v.id("leads"),
+    // leadId is now optional so contacts can live in the company-wide
+    // repository (orange item 4.1) even when not linked to a Live-Leads
+    // company record. Linking happens automatically when a contact's
+    // associated company domain matches a lead.
+    leadId: v.optional(v.id("leads")),
     createdByUserId: v.id("users"),
     firstName: v.string(),
     lastName: v.string(),
@@ -224,6 +250,10 @@ export default defineSchema({
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
     linkedinUrl: v.optional(v.string()),
+    // Free-form company name (used when no lead is linked).
+    companyName: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    lastContactedAt: v.optional(v.number()),
     // Contact reveal tracking
     emailRevealed: v.optional(v.boolean()),
     emailRevealedAt: v.optional(v.number()),
@@ -235,7 +265,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_companyId", ["companyId"])
-    .index("by_leadId", ["leadId"]),
+    .index("by_leadId", ["leadId"])
+    .index("by_email", ["email"]),
 
   // ============================================
   // SEARCHES & RESULTS
@@ -638,6 +669,7 @@ export default defineSchema({
       v.literal("call"),
       v.literal("trade_show"),
       v.literal("networking"),
+      v.literal("user_group"),
       v.literal("workshop"),
       v.literal("lunch_and_learn"),
       v.literal("other")
@@ -649,9 +681,12 @@ export default defineSchema({
     meetingUrl: v.optional(v.string()),
     // Organizer
     organizer: v.optional(v.string()),
-    // Tickets
+    host: v.optional(v.string()),
+    // Tickets (yellow 15.10 — free/paid flag + optional currency)
     ticketUrl: v.optional(v.string()),
     ticketCost: v.optional(v.number()),
+    isTicketFree: v.optional(v.boolean()),
+    ticketCurrency: v.optional(v.string()), // ISO 4217 (USD, EUR, …)
     // Reminder
     reminderDate: v.optional(v.number()),
     // Archive
@@ -750,4 +785,22 @@ export default defineSchema({
     .index("by_companyId", ["companyId"])
     .index("by_userId", ["userId"])
     .index("by_action", ["action"]),
+
+  // ============================================
+  // SYNC LOGS (red items 11.2 + 12.4)
+  // ============================================
+  // One row per cron / internal-action data-fetch run. Exposes
+  // integration health to admins: new rows, errors, duration.
+  syncLogs: defineTable({
+    source: v.string(), // "ransomware_live" | "hhs_ocr" | "california_ag" | "privacy_rights"
+    startedAt: v.number(),
+    finishedAt: v.number(),
+    durationMs: v.number(),
+    success: v.boolean(),
+    stored: v.number(),       // rows newly inserted
+    skipped: v.optional(v.number()), // rows skipped as duplicates
+    errorMessage: v.optional(v.string()),
+  })
+    .index("by_source", ["source"])
+    .index("by_startedAt", ["startedAt"]),
 });

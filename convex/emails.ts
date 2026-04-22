@@ -5,8 +5,10 @@ import { Resend } from "@convex-dev/resend";
 
 const resend = new Resend(components.resend, { testMode: false });
 
-const FROM_NOREPLY = "CyberHook <noreply@cyberhook.ai>";
-const FROM_TEAM = "CyberHook Team <team@cyberhook.ai>";
+// FROM addresses. The cyberhook.ai domain MUST be verified in Resend
+// (https://resend.com/domains) or sends will 403. Override via env if needed.
+const FROM_NOREPLY = process.env.EMAIL_FROM_NOREPLY ?? "CyberHook <noreply@cyberhook.ai>";
+const FROM_TEAM = process.env.EMAIL_FROM_TEAM ?? "CyberHook Team <team@cyberhook.ai>";
 
 // ─── Email Templates ─────────────────────────────────────────────────────────
 
@@ -170,6 +172,7 @@ function passwordResetEmailTemplate(args: {
 
 export const sendInviteEmailInternal = internalAction({
   args: {
+    invitationId: v.optional(v.id("invitations")),
     inviterName: v.string(),
     companyName: v.string(),
     inviteeEmail: v.string(),
@@ -185,12 +188,31 @@ export const sendInviteEmailInternal = internalAction({
       signUpUrl,
     });
 
-    await resend.sendEmail(ctx, {
-      from: FROM_TEAM,
-      to: args.inviteeEmail,
-      subject,
-      html,
-    });
+    try {
+      await resend.sendEmail(ctx, {
+        from: FROM_TEAM,
+        to: args.inviteeEmail,
+        subject,
+        html,
+      });
+      if (args.invitationId) {
+        await ctx.runMutation(internal.invitations.updateEmailDeliveryStatus, {
+          invitationId: args.invitationId,
+          status: "sent",
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error sending invite email";
+      console.error("[sendInviteEmailInternal] failed:", message);
+      if (args.invitationId) {
+        await ctx.runMutation(internal.invitations.updateEmailDeliveryStatus, {
+          invitationId: args.invitationId,
+          status: "failed",
+          error: message,
+        });
+      }
+      throw err;
+    }
   },
 });
 

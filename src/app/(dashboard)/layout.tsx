@@ -21,6 +21,7 @@ import {
     Shield01,
     Star01,
     Target05,
+    Users01,
 } from "@untitledui/icons";
 import type { NavItemType } from "@/components/application/app-navigation/config";
 
@@ -48,6 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 { label: "Live-Leads", href: "/live-leads", icon: Target05 },
                 { label: "Watchlist", href: "/watchlist", icon: Star01 },
                 { label: "AI Agents", href: "/ai-agents", icon: Mail01 },
+                { label: "Contacts", href: "/contacts", icon: Users01 },
                 { label: "Knowledge Base", href: "/knowledge-base", icon: Database01 },
                 { label: "RFP Hub", href: "/rfp-hub", icon: File04 },
                 { label: "Events", href: "/events", icon: Calendar },

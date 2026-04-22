@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { requireAuth, assertCompanyAccess } from "./lib/auth";
 import { getPlanLimits } from "./lib/plans";
 
@@ -176,6 +177,16 @@ export const add = mutation({
       hasNewExposures: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+    });
+
+    // Trigger an immediate scan so the row never sits as "Pending" longer
+    // than necessary and never falsely shows "Clean" before being checked
+    // (orange items 10.1 and 10.2). The action runs out-of-band; the
+    // mutation returns immediately so the UI is responsive.
+    await ctx.scheduler.runAfter(0, internal.redrokApi.rescanDomainInternal, {
+      companyId: args.companyId,
+      watchlistItemId: watchlistId,
+      domain: args.domain,
     });
 
     return watchlistId;

@@ -149,6 +149,7 @@ export default function AiAgentsPage() {
 
     const updateStatus = useMutation(api.campaigns.updateStatus);
     const removeCampaign = useMutation(api.campaigns.remove);
+    const duplicateCampaign = useMutation(api.campaigns.duplicate);
     const sendEmails = useAction(api.aiEmail.sendCampaignEmails);
 
     const [activeTab, setActiveTab] = useState("all");
@@ -232,7 +233,13 @@ export default function AiAgentsPage() {
                 toast.success("Campaign archived");
                 break;
             case "duplicate":
-                toast.info("Campaign duplicated — edit the new draft to customize it.");
+                try {
+                    await duplicateCampaign({ id: campaignId });
+                    toast.success("Campaign duplicated — find the copy in Drafts");
+                } catch (err) {
+                    devError("Failed to duplicate campaign:", err);
+                    toast.error("Failed to duplicate campaign");
+                }
                 break;
             case "delete":
                 await removeCampaign({ id: campaignId });

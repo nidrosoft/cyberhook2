@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation } from "convex/react";
 import { toast } from "sonner";
 import { devError } from "@/utils/dev-error";
 import {
@@ -37,7 +38,7 @@ import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
-type AlertLevel = "Critical" | "Warning" | "Normal" | "Clean" | "Paused";
+type AlertLevel = "Critical" | "Warning" | "Normal" | "Clean" | "Paused" | "Pending";
 
 function formatRelativeTime(timestamp: number): string {
     const now = Date.now();
@@ -51,8 +52,11 @@ function formatRelativeTime(timestamp: number): string {
     return `${days} days ago`;
 }
 
-function getAlertLevelFromItem(item: { hasNewExposures?: boolean; exposureCount?: number; isPaused?: boolean }): AlertLevel {
+function getAlertLevelFromItem(item: { hasNewExposures?: boolean; exposureCount?: number; isPaused?: boolean; lastCheckedAt?: number }): AlertLevel {
     if (item.isPaused) return "Paused";
+    // Per orange item 10.2: never show "Clean" until a scan has actually run.
+    // A domain that was just added has no lastCheckedAt — show Pending instead.
+    if (!item.lastCheckedAt) return "Pending";
     if (item.hasNewExposures) return "Critical";
     if ((item.exposureCount ?? 0) === 0) return "Clean";
     if ((item.exposureCount ?? 0) > 5) return "Warning";
@@ -66,6 +70,7 @@ function getAlertBadge(level: AlertLevel) {
         case "Normal": return { dot: "🟢", color: "success" as const };
         case "Clean": return { dot: "🟢", color: "success" as const };
         case "Paused": return { dot: "⏸", color: "gray" as const };
+        case "Pending": return { dot: "⏳", color: "gray" as const };
     }
 }
 
@@ -104,13 +109,14 @@ export default function WatchlistPage() {
         companyId ? { companyId } : "skip"
     );
 
+    const router = useRouter();
+
     // Mutations
     const addToWatchlist = useMutation(api.watchlist.add);
     const removeFromWatchlist = useMutation(api.watchlist.remove);
     const pauseWatchlist = useMutation(api.watchlist.pause);
     const resumeWatchlist = useMutation(api.watchlist.resume);
     const updateUser = useMutation(api.users.update);
-    const rescanDomain = useAction(api.redrokApi.rescanDomain);
 
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
         column: "domain",
@@ -119,7 +125,6 @@ export default function WatchlistPage() {
     const [newDomain, setNewDomain] = useState("");
     const [companyName, setCompanyName] = useState("");
     const [isAdding, setIsAdding] = useState(false);
-    const [rescanning, setRescanning] = useState<string | null>(null);
 
     const [filterStatus, setFilterStatus] = useState("all");
     const [filterAlertLevel, setFilterAlertLevel] = useState("all");
@@ -199,7 +204,8 @@ export default function WatchlistPage() {
                 userId: user._id,
                 domain: newDomain.trim().toLowerCase(),
                 companyName: companyName.trim() || newDomain.split(".")[0].charAt(0).toUpperCase() + newDomain.split(".")[0].slice(1),
-                notifyByEmail: true,
+                // notifyByEmail is defaulted server-side (watchlist.add mutation).
+                // Per orange item 8.7, the per-domain email toggle UI was removed.
             });
             setNewDomain("");
             setCompanyName("");
@@ -239,24 +245,6 @@ export default function WatchlistPage() {
         } catch (error) {
             devError("Failed to resume:", error);
             toast.error("Failed to resume monitoring");
-        }
-    }
-
-    async function handleRescan(id: Id<"watchlistItems">, domain: string) {
-        if (!companyId) return;
-        setRescanning(id);
-        try {
-            const result = await rescanDomain({ companyId, watchlistItemId: id, domain });
-            if (result.success) {
-                toast.success(`Scan complete: ${result.exposureCount} exposure${result.exposureCount !== 1 ? "s" : ""} found`);
-            } else {
-                toast.error(result.error || "Scan failed");
-            }
-        } catch (error) {
-            devError("Rescan failed:", error);
-            toast.error("Failed to rescan domain");
-        } finally {
-            setRescanning(null);
         }
     }
 
@@ -409,6 +397,7 @@ export default function WatchlistPage() {
                             { label: "Warning", value: "Warning" },
                             { label: "Normal", value: "Normal" },
                             { label: "Clean", value: "Clean" },
+                            { label: "Pending", value: "Pending" },
                         ]}
                     />
                 </div>
@@ -489,14 +478,21 @@ export default function WatchlistPage() {
                                         <Table.Cell>
                                             <div className="flex items-center gap-1">
                                                 <Button color="link-gray" size="sm" iconLeading={Eye}>View</Button>
+                                                {/* Yellow 10.4 — Rescan navigates to Live Search with
+                                                    domain pre-filled + auto-submit. Inline rescan is
+                                                    still available via the in-page hidden action below
+                                                    so power users can bulk-rescan without leaving. */}
                                                 <Button
                                                     color="link-gray"
                                                     size="sm"
-                                                    iconLeading={rescanning === item._id ? Loading02 : RefreshCw01}
-                                                    onClick={() => handleRescan(item._id, item.domain)}
-                                                    isDisabled={rescanning === item._id}
+                                                    iconLeading={RefreshCw01}
+                                                    onClick={() =>
+                                                        router.push(
+                                                            `/live-search?domain=${encodeURIComponent(item.domain)}&autoSubmit=1`,
+                                                        )
+                                                    }
                                                 >
-                                                    {rescanning === item._id ? "Scanning..." : "Rescan"}
+                                                    Rescan
                                                 </Button>
                                                 {isActive ? (
                                                     <Button 

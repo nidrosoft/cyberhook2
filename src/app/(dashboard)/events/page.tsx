@@ -41,6 +41,7 @@ const TYPE_LABELS: Record<string, string> = {
     call: "Call",
     trade_show: "Trade Show",
     networking: "Networking",
+    user_group: "User Group",
     workshop: "Workshop",
     lunch_and_learn: "Lunch & Learn",
     other: "Other",
@@ -62,6 +63,7 @@ const typeFilterOptions = [
     { label: "Webinar", value: "webinar" },
     { label: "Workshop", value: "workshop" },
     { label: "Networking", value: "networking" },
+    { label: "User Group", value: "user_group" },
     { label: "Lunch & Learn", value: "lunch_and_learn" },
     { label: "Meeting", value: "meeting" },
     { label: "Appointment", value: "appointment" },
@@ -89,6 +91,7 @@ const eventTypeOptions = [
     { label: "Webinar", value: "webinar" },
     { label: "Workshop", value: "workshop" },
     { label: "Networking", value: "networking" },
+    { label: "User Group", value: "user_group" },
     { label: "Lunch & Learn", value: "lunch_and_learn" },
     { label: "Meeting", value: "meeting" },
     { label: "Appointment", value: "appointment" },
@@ -112,6 +115,39 @@ function buildGoogleCalendarUrl(event: { title: string; startDate: number; endDa
         ...(event.description ? { details: event.description } : {}),
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+// Build and trigger a .ics file download (orange item 15.6) so users on
+// Apple Calendar / Outlook desktop / any RFC-5545 client can import the event.
+function downloadIcsFile(event: { title: string; startDate: number; endDate?: number; location?: string; description?: string; isVirtual?: boolean }) {
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const start = fmt(new Date(event.startDate));
+    const end = fmt(new Date(event.endDate || event.startDate + 60 * 60 * 1000));
+    const uid = `${start}-${Math.random().toString(36).slice(2, 10)}@cyberhook.ai`;
+    const escape = (s: string) => s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+    const lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//CyberHook//Events//EN",
+        "CALSCALE:GREGORIAN",
+        "BEGIN:VEVENT",
+        `UID:${uid}`,
+        `DTSTAMP:${fmt(new Date())}`,
+        `DTSTART:${start}`,
+        `DTEND:${end}`,
+        `SUMMARY:${escape(event.title)}`,
+        event.location && !event.isVirtual ? `LOCATION:${escape(event.location)}` : "",
+        event.description ? `DESCRIPTION:${escape(event.description)}` : "",
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ].filter(Boolean).join("\r\n");
+    const blob = new Blob([lines], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${event.title.replace(/[^a-z0-9]+/gi, "_")}.ics`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 function buildOutlookCalendarUrl(event: { title: string; startDate: number; endDate?: number; location?: string; description?: string; isVirtual?: boolean }) {
@@ -289,8 +325,20 @@ export default function EventsPage() {
     const [evtIsVirtual, setEvtIsVirtual] = useState(false);
     const [evtDescription, setEvtDescription] = useState("");
     const [evtOrganizer, setEvtOrganizer] = useState("");
+    const [evtHost, setEvtHost] = useState("");
+    // Yellow 15.2 — virtual / appointment events can carry a meeting link
+    // distinct from a physical `location`.
+    const [evtMeetingUrl, setEvtMeetingUrl] = useState("");
     const [evtTicketUrl, setEvtTicketUrl] = useState("");
+    // Yellow 15.10 — tickets are explicitly Free or Paid; Paid reveals
+    // cost + currency inputs.
+    const [evtTicketType, setEvtTicketType] = useState<"free" | "paid">("free");
     const [evtTicketCost, setEvtTicketCost] = useState("");
+    const [evtTicketCurrency, setEvtTicketCurrency] = useState("USD");
+    // Yellow 15.11 — reminder is a preset dropdown (1/2 weeks, 1 month,
+    // Custom). When "custom" is picked we reveal a numeric input bound
+    // to `evtReminderDays`; presets map to 7 / 14 / 30 days.
+    const [evtReminderPreset, setEvtReminderPreset] = useState<"none" | "1w" | "2w" | "1m" | "custom">("none");
     const [evtReminderDays, setEvtReminderDays] = useState("");
 
     const [aptTitle, setAptTitle] = useState("");
@@ -320,11 +368,23 @@ export default function EventsPage() {
 
     const suggestedEvents = events.filter((e) => e.isSuggested && !e.isArchived);
 
+    // "Past" threshold: the event's end date (fallback to start date) is
+    // before now. Used to auto-hide completed events from the Upcoming view
+    // (orange item 15.5 – archive past events).
+    const nowMs = Date.now();
+    const isPast = (e: (typeof events)[number]) =>
+        (e.endDate ?? e.startDate) < nowMs;
+
     const filteredEvents = events
         .filter((e) => {
             if (e.isSuggested) return false;
-            if (!showArchived && e.isArchived) return false;
-            if (showArchived && !e.isArchived) return false;
+            // Auto-archive behaviour: past events fall into the Archived view
+            // regardless of their persisted isArchived flag. This means the
+            // Upcoming tab only ever shows future / current events, and users
+            // can still reach historical events via the "Show Archived" toggle.
+            const archivedLike = e.isArchived || isPast(e);
+            if (!showArchived && archivedLike) return false;
+            if (showArchived && !archivedLike) return false;
             if (evtSearch && !e.title.toLowerCase().includes(evtSearch.toLowerCase())) return false;
             if (typeFilter !== "all" && e.type !== typeFilter) return false;
             if (locFilter === "virtual" && !e.isVirtual) return false;
@@ -344,12 +404,14 @@ export default function EventsPage() {
         (e) => !e.isArchived && (e.type === "meeting" || e.type === "appointment")
     );
 
-    type EventType = "meeting" | "appointment" | "conference" | "webinar" | "call" | "trade_show" | "networking" | "workshop" | "lunch_and_learn" | "other";
+    type EventType = "meeting" | "appointment" | "conference" | "webinar" | "call" | "trade_show" | "networking" | "user_group" | "workshop" | "lunch_and_learn" | "other";
 
     function resetEvtForm() {
         setEvtTitle(""); setEvtType("conference"); setEvtStartDate(""); setEvtStartTime("");
         setEvtEndDate(""); setEvtLocation(""); setEvtIsVirtual(false); setEvtDescription("");
-        setEvtOrganizer(""); setEvtTicketUrl(""); setEvtTicketCost(""); setEvtReminderDays("");
+        setEvtOrganizer(""); setEvtHost(""); setEvtMeetingUrl("");
+        setEvtTicketUrl(""); setEvtTicketType("free"); setEvtTicketCost(""); setEvtTicketCurrency("USD");
+        setEvtReminderPreset("none"); setEvtReminderDays("");
         setEditingEventId(null);
     }
 
@@ -368,12 +430,35 @@ export default function EventsPage() {
         setEvtIsVirtual(ev.isVirtual ?? false);
         setEvtDescription(ev.description || "");
         setEvtOrganizer(ev.organizer || "");
+        setEvtHost((ev as { host?: string }).host ?? "");
+        setEvtMeetingUrl(ev.meetingUrl || "");
         setEvtTicketUrl(ev.ticketUrl || "");
+        // Decide ticket type: explicit `isTicketFree` flag wins; otherwise
+        // infer from cost (zero / unset → free, any value → paid).
+        const ticketFree = (ev as { isTicketFree?: boolean }).isTicketFree;
+        if (ticketFree === true) {
+            setEvtTicketType("free");
+        } else if (ticketFree === false || (ev.ticketCost ?? 0) > 0) {
+            setEvtTicketType("paid");
+        } else {
+            setEvtTicketType("free");
+        }
         setEvtTicketCost(ev.ticketCost != null ? String(ev.ticketCost) : "");
+        setEvtTicketCurrency((ev as { ticketCurrency?: string }).ticketCurrency ?? "USD");
+        // Map the persisted reminderDate back onto the preset dropdown so
+        // edits feel continuous — 7/14/30 days snap to a preset, anything
+        // else falls through to the "custom" numeric input.
         if (ev.reminderDate && ev.startDate) {
             const daysBefore = Math.round((ev.startDate - ev.reminderDate) / (24 * 60 * 60 * 1000));
-            setEvtReminderDays(daysBefore > 0 ? String(daysBefore) : "");
-        } else { setEvtReminderDays(""); }
+            if (daysBefore === 7) { setEvtReminderPreset("1w"); setEvtReminderDays("7"); }
+            else if (daysBefore === 14) { setEvtReminderPreset("2w"); setEvtReminderDays("14"); }
+            else if (daysBefore === 30) { setEvtReminderPreset("1m"); setEvtReminderDays("30"); }
+            else if (daysBefore > 0) { setEvtReminderPreset("custom"); setEvtReminderDays(String(daysBefore)); }
+            else { setEvtReminderPreset("none"); setEvtReminderDays(""); }
+        } else {
+            setEvtReminderPreset("none");
+            setEvtReminderDays("");
+        }
     }
 
     const handleCreateEvent = async (close: () => void) => {
@@ -389,43 +474,49 @@ export default function EventsPage() {
             endMs = new Date(ey, em - 1, ed, 23, 59).getTime();
         }
 
-        let reminderMs: number | undefined;
-        if (evtReminderDays && parseInt(evtReminderDays) > 0) {
-            reminderMs = startMs - parseInt(evtReminderDays) * 24 * 60 * 60 * 1000;
-        }
+        // Resolve the reminder preset (yellow 15.11). Presets override
+        // the raw days input; "custom" and "none" defer to it.
+        const presetDayMap: Record<typeof evtReminderPreset, number | null> = {
+            none: null,
+            "1w": 7,
+            "2w": 14,
+            "1m": 30,
+            custom: evtReminderDays && parseInt(evtReminderDays) > 0 ? parseInt(evtReminderDays) : null,
+        };
+        const reminderDays = presetDayMap[evtReminderPreset];
+        const reminderMs =
+            reminderDays && reminderDays > 0
+                ? startMs - reminderDays * 24 * 60 * 60 * 1000
+                : undefined;
+
+        // Build ticket payload based on the Free/Paid toggle (yellow 15.10).
+        const isFree = evtTicketType === "free";
+        const costValue = !isFree && evtTicketCost ? parseFloat(evtTicketCost) : undefined;
+        const currencyValue = !isFree ? evtTicketCurrency || "USD" : undefined;
+
+        const commonFields = {
+            title: evtTitle,
+            type: evtType as EventType,
+            startDate: startMs,
+            endDate: endMs,
+            location: evtLocation || undefined,
+            isVirtual: evtIsVirtual,
+            meetingUrl: evtMeetingUrl.trim() || undefined,
+            description: evtDescription || undefined,
+            organizer: evtOrganizer.trim() || undefined,
+            host: evtHost.trim() || undefined,
+            ticketUrl: evtTicketUrl.trim() || undefined,
+            ticketCost: costValue,
+            isTicketFree: isFree,
+            ticketCurrency: currencyValue,
+            reminderDate: reminderMs,
+        };
 
         if (editingEventId) {
-            await updateEvent({
-                id: editingEventId as any,
-                title: evtTitle,
-                type: evtType as EventType,
-                startDate: startMs,
-                endDate: endMs,
-                location: evtLocation || undefined,
-                isVirtual: evtIsVirtual,
-                description: evtDescription || undefined,
-                organizer: evtOrganizer.trim() || undefined,
-                ticketUrl: evtTicketUrl.trim() || undefined,
-                ticketCost: evtTicketCost ? parseFloat(evtTicketCost) : undefined,
-                reminderDate: reminderMs,
-            });
+            await updateEvent({ id: editingEventId as any, ...commonFields });
             toast.success("Event updated");
         } else {
-            await createEvent({
-                companyId,
-                createdByUserId: userId,
-                title: evtTitle,
-                type: evtType as EventType,
-                startDate: startMs,
-                endDate: endMs,
-                location: evtLocation || undefined,
-                isVirtual: evtIsVirtual,
-                description: evtDescription || undefined,
-                organizer: evtOrganizer.trim() || undefined,
-                ticketUrl: evtTicketUrl.trim() || undefined,
-                ticketCost: evtTicketCost ? parseFloat(evtTicketCost) : undefined,
-                reminderDate: reminderMs,
-            });
+            await createEvent({ companyId, createdByUserId: userId, ...commonFields });
             toast.success("Event created");
         }
 
@@ -617,6 +708,13 @@ export default function EventsPage() {
                                                         onChange={setEvtIsVirtual}
                                                     />
                                                 </div>
+                                                {/* Yellow 15.2 — Meeting link for virtual / appointment events. */}
+                                                <div>
+                                                    <label className="block text-sm font-medium text-secondary mb-1.5">Meeting Link (optional)</label>
+                                                    <input type="url" value={evtMeetingUrl} onChange={(e) => setEvtMeetingUrl(e.target.value)}
+                                                        placeholder="https://meet.google.com/..."
+                                                        className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">Description</label>
                                                     <textarea
@@ -632,43 +730,97 @@ export default function EventsPage() {
                                                 <div className="border-t border-secondary pt-4 mt-1">
                                                     <h3 className="text-sm font-semibold text-primary mb-3">Additional Details</h3>
                                                     <div className="flex flex-col gap-4">
-                                                        <div>
-                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Organizer</label>
-                                                            <input type="text" value={evtOrganizer} onChange={(e) => setEvtOrganizer(e.target.value)}
-                                                                placeholder="e.g. CompTIA, ConnectWise"
-                                                                className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
-                                                        </div>
+                                                        {/* Yellow 15.8 — Host + Organizer are now separate fields. */}
                                                         <div className="grid grid-cols-2 gap-3">
                                                             <div>
-                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Ticket URL</label>
-                                                                <input type="url" value={evtTicketUrl} onChange={(e) => setEvtTicketUrl(e.target.value)}
-                                                                    placeholder="https://..."
+                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Host</label>
+                                                                <input type="text" value={evtHost} onChange={(e) => setEvtHost(e.target.value)}
+                                                                    placeholder="e.g. Jane Smith"
                                                                     className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
                                                             </div>
                                                             <div>
-                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Ticket Cost ($)</label>
-                                                                <input type="number" value={evtTicketCost} onChange={(e) => setEvtTicketCost(e.target.value)}
-                                                                    placeholder="0"
+                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Organizer</label>
+                                                                <input type="text" value={evtOrganizer} onChange={(e) => setEvtOrganizer(e.target.value)}
+                                                                    placeholder="e.g. CompTIA, ConnectWise"
                                                                     className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
                                                             </div>
                                                         </div>
+                                                        {/* Yellow 15.10 — Registration URL + Free/Paid toggle with
+                                                            conditional cost & currency when Paid. */}
                                                         <div>
-                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Reminder (days before)</label>
+                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Registration Link</label>
+                                                            <input type="url" value={evtTicketUrl} onChange={(e) => setEvtTicketUrl(e.target.value)}
+                                                                placeholder="https://..."
+                                                                className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Ticket Type</label>
                                                             <NativeSelect
-                                                                aria-label="Reminder"
-                                                                value={evtReminderDays}
-                                                                onChange={(e) => setEvtReminderDays(e.target.value)}
+                                                                aria-label="Ticket type"
+                                                                value={evtTicketType}
+                                                                onChange={(e) => setEvtTicketType(e.target.value as "free" | "paid")}
                                                                 options={[
-                                                                    { label: "No reminder", value: "" },
-                                                                    { label: "1 day before", value: "1" },
-                                                                    { label: "3 days before", value: "3" },
-                                                                    { label: "7 days before", value: "7" },
-                                                                    { label: "14 days before", value: "14" },
-                                                                    { label: "30 days before", value: "30" },
+                                                                    { label: "Free", value: "free" },
+                                                                    { label: "Paid", value: "paid" },
                                                                 ]}
                                                                 className="w-full"
                                                                 selectClassName="text-sm"
                                                             />
+                                                        </div>
+                                                        {evtTicketType === "paid" && (
+                                                            <div className="grid grid-cols-2 gap-3">
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-secondary mb-1.5">Price</label>
+                                                                    <input type="number" min="0" step="0.01" value={evtTicketCost} onChange={(e) => setEvtTicketCost(e.target.value)}
+                                                                        placeholder="0.00"
+                                                                        className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-medium text-secondary mb-1.5">Currency</label>
+                                                                    <NativeSelect
+                                                                        aria-label="Currency"
+                                                                        value={evtTicketCurrency}
+                                                                        onChange={(e) => setEvtTicketCurrency(e.target.value)}
+                                                                        options={[
+                                                                            { label: "USD ($)", value: "USD" },
+                                                                            { label: "EUR (€)", value: "EUR" },
+                                                                            { label: "GBP (£)", value: "GBP" },
+                                                                            { label: "CAD ($)", value: "CAD" },
+                                                                            { label: "AUD ($)", value: "AUD" },
+                                                                        ]}
+                                                                        className="w-full"
+                                                                        selectClassName="text-sm"
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {/* Yellow 15.11 — Reminder preset dropdown with Custom fallback. */}
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-secondary mb-1.5">Reminder</label>
+                                                            <NativeSelect
+                                                                aria-label="Reminder preset"
+                                                                value={evtReminderPreset}
+                                                                onChange={(e) => setEvtReminderPreset(e.target.value as typeof evtReminderPreset)}
+                                                                options={[
+                                                                    { label: "No reminder", value: "none" },
+                                                                    { label: "1 week before", value: "1w" },
+                                                                    { label: "2 weeks before", value: "2w" },
+                                                                    { label: "1 month before", value: "1m" },
+                                                                    { label: "Custom…", value: "custom" },
+                                                                ]}
+                                                                className="w-full"
+                                                                selectClassName="text-sm"
+                                                            />
+                                                            {evtReminderPreset === "custom" && (
+                                                                <input
+                                                                    type="number"
+                                                                    min={1}
+                                                                    value={evtReminderDays}
+                                                                    onChange={(e) => setEvtReminderDays(e.target.value)}
+                                                                    placeholder="Days before event"
+                                                                    className="mt-2 w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                                                                />
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1272,6 +1424,14 @@ export default function EventsPage() {
                                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                             Outlook
                                         </a>
+                                        <button
+                                            type="button"
+                                            onClick={() => downloadIcsFile(viewingEvent)}
+                                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>
+                                            Download .ics
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -1331,26 +1491,95 @@ export default function EventsPage() {
                                     <Toggle isSelected={evtIsVirtual} onChange={setEvtIsVirtual} aria-label="Virtual" />
                                     <span className="text-sm text-secondary">Virtual Event</span>
                                 </div>
+                                {/* Yellow 15.2 — Meeting link, also shown in the edit panel. */}
+                                <div>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Meeting Link</label>
+                                    <input type="url" value={evtMeetingUrl} onChange={(e) => setEvtMeetingUrl(e.target.value)} placeholder="https://..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                </div>
                                 <div>
                                     <label className="block text-sm font-medium text-secondary mb-1.5">Description</label>
                                     <textarea value={evtDescription} onChange={(e) => setEvtDescription(e.target.value)} placeholder="Description..." rows={3} className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary resize-none" />
                                 </div>
                                 <hr className="border-secondary" />
-                                <div>
-                                    <label className="block text-sm font-medium text-secondary mb-1.5">Organizer</label>
-                                    <input type="text" value={evtOrganizer} onChange={(e) => setEvtOrganizer(e.target.value)} placeholder="Organizer name..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-secondary mb-1.5">Host</label>
+                                        <input type="text" value={evtHost} onChange={(e) => setEvtHost(e.target.value)} placeholder="Host name..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-secondary mb-1.5">Organizer</label>
+                                        <input type="text" value={evtOrganizer} onChange={(e) => setEvtOrganizer(e.target.value)} placeholder="Organizer name..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                    </div>
                                 </div>
+                                {/* Yellow 15.10 — same Free/Paid pattern in the edit panel. */}
                                 <div>
-                                    <label className="block text-sm font-medium text-secondary mb-1.5">Ticket URL</label>
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Registration Link</label>
                                     <input type="url" value={evtTicketUrl} onChange={(e) => setEvtTicketUrl(e.target.value)} placeholder="https://..." className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-secondary mb-1.5">Ticket Cost ($)</label>
-                                    <input type="number" value={evtTicketCost} onChange={(e) => setEvtTicketCost(e.target.value)} placeholder="0.00" min="0" step="0.01" className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                    <label className="block text-sm font-medium text-secondary mb-1.5">Ticket Type</label>
+                                    <NativeSelect
+                                        aria-label="Ticket type"
+                                        value={evtTicketType}
+                                        onChange={(e) => setEvtTicketType(e.target.value as "free" | "paid")}
+                                        options={[
+                                            { label: "Free", value: "free" },
+                                            { label: "Paid", value: "paid" },
+                                        ]}
+                                        className="w-full"
+                                        selectClassName="text-sm"
+                                    />
                                 </div>
+                                {evtTicketType === "paid" && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-secondary mb-1.5">Price</label>
+                                            <input type="number" value={evtTicketCost} onChange={(e) => setEvtTicketCost(e.target.value)} placeholder="0.00" min="0" step="0.01" className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-secondary mb-1.5">Currency</label>
+                                            <NativeSelect
+                                                aria-label="Currency"
+                                                value={evtTicketCurrency}
+                                                onChange={(e) => setEvtTicketCurrency(e.target.value)}
+                                                options={[
+                                                    { label: "USD ($)", value: "USD" },
+                                                    { label: "EUR (€)", value: "EUR" },
+                                                    { label: "GBP (£)", value: "GBP" },
+                                                    { label: "CAD ($)", value: "CAD" },
+                                                    { label: "AUD ($)", value: "AUD" },
+                                                ]}
+                                                className="w-full"
+                                                selectClassName="text-sm"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                                 <div>
                                     <label className="block text-sm font-medium text-secondary mb-1.5">Reminder</label>
-                                    <NativeSelect options={[{ label: "No reminder", value: "" }, { label: "1 day before", value: "1" }, { label: "3 days before", value: "3" }, { label: "7 days before", value: "7" }, { label: "14 days before", value: "14" }, { label: "30 days before", value: "30" }]} value={evtReminderDays} onChange={(e) => setEvtReminderDays(e.target.value)} className="w-full" selectClassName="text-sm" />
+                                    <NativeSelect
+                                        options={[
+                                            { label: "No reminder", value: "none" },
+                                            { label: "1 week before", value: "1w" },
+                                            { label: "2 weeks before", value: "2w" },
+                                            { label: "1 month before", value: "1m" },
+                                            { label: "Custom…", value: "custom" },
+                                        ]}
+                                        value={evtReminderPreset}
+                                        onChange={(e) => setEvtReminderPreset(e.target.value as typeof evtReminderPreset)}
+                                        className="w-full"
+                                        selectClassName="text-sm"
+                                    />
+                                    {evtReminderPreset === "custom" && (
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            value={evtReminderDays}
+                                            onChange={(e) => setEvtReminderDays(e.target.value)}
+                                            placeholder="Days before event"
+                                            className="mt-2 w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                                        />
+                                    )}
                                 </div>
                             </div>
                         </div>

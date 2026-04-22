@@ -521,22 +521,27 @@ export default function RfpHubPage() {
                                                                 <span className="text-sm text-secondary">Approved Reference</span>
                                                             </label>
 
-                                                            {/* Reference Client Info */}
-                                                            <div className="border-t border-secondary pt-4 mt-1">
-                                                                <h3 className="text-sm font-semibold text-primary mb-3">Reference Client Details</h3>
-                                                                <div className="flex flex-col gap-4">
-                                                                    {formInput("Company Name", ucRefCompany, setUcRefCompany, "e.g. Acme Corp")}
-                                                                    <div className="grid grid-cols-2 gap-3">
-                                                                        {formInput("Contact Name", ucRefContact, setUcRefContact, "e.g. John Smith")}
-                                                                        {formInput("Contact Email", ucRefEmail, setUcRefEmail, "e.g. john@acme.com")}
+                                                            {/* Reference Client Info — only rendered when "Approved Reference"
+                                                                is checked (orange item 14.3). When unchecked, the fields
+                                                                remain in state but stay out of the UI so the form is
+                                                                compact for the common "not a reference" case. */}
+                                                            {ucApproved && (
+                                                                <div className="border-t border-secondary pt-4 mt-1">
+                                                                    <h3 className="text-sm font-semibold text-primary mb-3">Reference Client Details</h3>
+                                                                    <div className="flex flex-col gap-4">
+                                                                        {formInput("Company Name", ucRefCompany, setUcRefCompany, "e.g. Acme Corp")}
+                                                                        <div className="grid grid-cols-2 gap-3">
+                                                                            {formInput("Contact Name", ucRefContact, setUcRefContact, "e.g. John Smith")}
+                                                                            {formInput("Contact Email", ucRefEmail, setUcRefEmail, "e.g. john@acme.com")}
+                                                                        </div>
+                                                                        <div className="grid grid-cols-2 gap-3">
+                                                                            {formInput("Contact Phone", ucRefPhone, setUcRefPhone, "e.g. (555) 123-4567")}
+                                                                            {formInput("Website", ucRefWebsite, setUcRefWebsite, "https://acme.com")}
+                                                                        </div>
+                                                                        {formTextarea("Projects Summary", ucRefSummary, setUcRefSummary, "Summary of projects delivered for this client")}
                                                                     </div>
-                                                                    <div className="grid grid-cols-2 gap-3">
-                                                                        {formInput("Contact Phone", ucRefPhone, setUcRefPhone, "e.g. (555) 123-4567")}
-                                                                        {formInput("Website", ucRefWebsite, setUcRefWebsite, "https://acme.com")}
-                                                                    </div>
-                                                                    {formTextarea("Projects Summary", ucRefSummary, setUcRefSummary, "Summary of projects delivered for this client")}
                                                                 </div>
-                                                            </div>
+                                                            )}
                                                         </div>
                                                     </SlideoutMenu.Content>
                                                     <SlideoutMenu.Footer>
@@ -618,21 +623,23 @@ export default function RfpHubPage() {
                                                                                             <input type="checkbox" checked={ucApproved} onChange={(e) => setUcApproved(e.target.checked)} className="size-4 accent-brand-600" />
                                                                                             <span className="text-sm text-secondary">Approved Reference</span>
                                                                                         </label>
-                                                                                        <div className="border-t border-secondary pt-4 mt-1">
-                                                                                            <h3 className="text-sm font-semibold text-primary mb-3">Reference Client Details</h3>
-                                                                                            <div className="flex flex-col gap-4">
-                                                                                                {formInput("Company Name", ucRefCompany, setUcRefCompany, "e.g. Acme Corp")}
-                                                                                                <div className="grid grid-cols-2 gap-3">
-                                                                                                    {formInput("Contact Name", ucRefContact, setUcRefContact, "e.g. John Smith")}
-                                                                                                    {formInput("Contact Email", ucRefEmail, setUcRefEmail, "e.g. john@acme.com")}
+                                                                                        {ucApproved && (
+                                                                                            <div className="border-t border-secondary pt-4 mt-1">
+                                                                                                <h3 className="text-sm font-semibold text-primary mb-3">Reference Client Details</h3>
+                                                                                                <div className="flex flex-col gap-4">
+                                                                                                    {formInput("Company Name", ucRefCompany, setUcRefCompany, "e.g. Acme Corp")}
+                                                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                                                        {formInput("Contact Name", ucRefContact, setUcRefContact, "e.g. John Smith")}
+                                                                                                        {formInput("Contact Email", ucRefEmail, setUcRefEmail, "e.g. john@acme.com")}
+                                                                                                    </div>
+                                                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                                                        {formInput("Contact Phone", ucRefPhone, setUcRefPhone, "e.g. (555) 123-4567")}
+                                                                                                        {formInput("Website", ucRefWebsite, setUcRefWebsite, "https://acme.com")}
+                                                                                                    </div>
+                                                                                                    {formTextarea("Projects Summary", ucRefSummary, setUcRefSummary, "Summary of projects delivered")}
                                                                                                 </div>
-                                                                                                <div className="grid grid-cols-2 gap-3">
-                                                                                                    {formInput("Contact Phone", ucRefPhone, setUcRefPhone, "e.g. (555) 123-4567")}
-                                                                                                    {formInput("Website", ucRefWebsite, setUcRefWebsite, "https://acme.com")}
-                                                                                                </div>
-                                                                                                {formTextarea("Projects Summary", ucRefSummary, setUcRefSummary, "Summary of projects delivered")}
                                                                                             </div>
-                                                                                        </div>
+                                                                                        )}
                                                                                     </div>
                                                                                 </SlideoutMenu.Content>
                                                                                 <SlideoutMenu.Footer>

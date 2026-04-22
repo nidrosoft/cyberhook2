@@ -191,6 +191,17 @@ export const update = mutation({
     brandPrimaryColor: v.optional(v.string()),
     brandSecondaryColor: v.optional(v.string()),
     serviceArea: v.optional(v.array(v.string())),
+    // Service-area center + radius (orange item 3.4).
+    serviceAreaRadius: v.optional(
+      v.object({
+        centerAddress: v.optional(v.string()),
+        centerLat: v.optional(v.number()),
+        centerLng: v.optional(v.number()),
+        radius: v.optional(v.number()),
+        unit: v.optional(v.union(v.literal("miles"), v.literal("km"))),
+        noLimit: v.optional(v.boolean()),
+      })
+    ),
     // Associations & programs
     associations: v.optional(v.array(v.string())),
     programs: v.optional(v.array(v.string())),

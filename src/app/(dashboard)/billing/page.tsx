@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useQuery } from "convex/react";
 import { useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { toast } from "sonner";
 import {
     Calendar,
@@ -91,6 +92,64 @@ function generateSparklineData(total: number, points: number = 6): { value: numb
     return Array.from({ length: points }, (_, i) => ({
         value: Math.round(step * (i + 1) * (0.7 + Math.random() * 0.6)),
     }));
+}
+
+/**
+ * Historical monthly search + token usage chart (yellow 6.3).
+ *
+ * Reads `searches.getMonthlyUsage` for the last 6 calendar months and
+ * renders a simple CSS-only bar chart — no extra dep needed since we
+ * only have 6 bars. Shows searches count; a tooltip surfaces tokens.
+ */
+function MonthlyUsageChart({ companyId }: { companyId: Id<"companies"> | undefined }) {
+    const data = useQuery(
+        api.searches.getMonthlyUsage,
+        companyId ? { companyId, months: 6 } : "skip",
+    );
+
+    const maxSearches = Math.max(1, ...(data ?? []).map((b) => b.searches));
+
+    return (
+        <div className="flex flex-col gap-4 rounded-2xl border border-secondary bg-primary p-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-md font-semibold text-primary">Usage History</h3>
+                    <p className="text-sm text-tertiary">Searches per month (last 6 months)</p>
+                </div>
+            </div>
+            {data === undefined ? (
+                <div className="h-40 animate-pulse rounded-lg bg-secondary_subtle" />
+            ) : data.every((b) => b.searches === 0) ? (
+                <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-secondary text-sm text-tertiary">
+                    No search activity recorded yet.
+                </div>
+            ) : (
+                <div className="flex h-40 items-end gap-3">
+                    {data.map((bucket) => {
+                        const heightPct = Math.round((bucket.searches / maxSearches) * 100);
+                        return (
+                            <div
+                                key={bucket.monthStart}
+                                className="flex flex-1 flex-col items-center gap-1.5"
+                                title={`${bucket.label}: ${bucket.searches} search${bucket.searches === 1 ? "" : "es"} · ${bucket.tokens} tokens`}
+                            >
+                                <div className="relative flex w-full flex-1 items-end">
+                                    <div
+                                        className="w-full rounded-md bg-brand-500 transition-[height]"
+                                        style={{ height: `${Math.max(heightPct, 3)}%` }}
+                                    />
+                                </div>
+                                <span className="text-xs font-medium text-secondary">
+                                    {bucket.searches}
+                                </span>
+                                <span className="text-xs text-tertiary">{bucket.label}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
@@ -377,6 +436,11 @@ export default function BillingPage() {
                             />
                         ))}
                     </div>
+                </div>
+
+                {/* Yellow 6.3 — Historical monthly usage chart. */}
+                <div className="px-4 lg:px-8">
+                    <MonthlyUsageChart companyId={companyId ?? undefined} />
                 </div>
 
                 {/* Billing History Table */}
