@@ -35,6 +35,7 @@ import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { usePlanGate } from "@/hooks/use-plan-gate";
 import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
+import { friendlyError } from "@/lib/friendly-errors";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -212,7 +213,7 @@ export default function WatchlistPage() {
             close();
         } catch (error) {
             devError("Failed to add domain:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to add domain");
+            toast.error(friendlyError(error, "We couldn't add that domain. Please try again."));
         } finally {
             setIsAdding(false);
         }

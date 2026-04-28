@@ -44,6 +44,7 @@ import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { TextArea } from "@/components/base/textarea/textarea";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { friendlyError } from "@/lib/friendly-errors";
 import { generateExposureReport } from "@/lib/pdf-report";
 import { ensureProtocol } from "@/utils/sanitize-url";
 import { api } from "../../../../convex/_generated/api";
@@ -333,20 +334,6 @@ export default function LiveLeadsPage() {
         }
     }
 
-    function friendlyError(raw: string): string {
-        if (/authentication failed|401|unauthorized/i.test(raw))
-            return "Unable to connect to the data provider. Please check your API credentials in Settings or try again later.";
-        if (/token.*expired/i.test(raw))
-            return "Your session with the data provider has expired. Please try again.";
-        if (/credentials not configured/i.test(raw))
-            return "API credentials have not been configured yet. Please add them in Settings > Integrations.";
-        if (/timeout|timed out/i.test(raw))
-            return "The request took too long. Please try again with a narrower search.";
-        if (/network|fetch failed|ECONNREFUSED/i.test(raw))
-            return "Network error — unable to reach the data provider. Please check your connection.";
-        return raw;
-    }
-
     async function handleDiscover() {
         if (!companyId) return;
         setIsDiscovering(true);
@@ -366,11 +353,10 @@ export default function LiveLeadsPage() {
                     setDiscoverError("No leads found for the selected criteria. Try expanding your search.");
                 }
             } else {
-                setDiscoverError(friendlyError(result.error || "Search failed. Please try again."));
+                setDiscoverError(friendlyError(result.error, "We couldn't load new leads right now. Please try again in a few minutes."));
             }
         } catch (error) {
-            const msg = error instanceof Error ? error.message : "Discovery failed";
-            setDiscoverError(friendlyError(msg));
+            setDiscoverError(friendlyError(error, "We couldn't load new leads right now. Please try again in a few minutes."));
         } finally {
             setIsDiscovering(false);
         }
@@ -393,7 +379,7 @@ export default function LiveLeadsPage() {
             });
             toast.success(`${company.name} saved to your leads!`);
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Failed to save lead");
+            toast.error(friendlyError(error, "We couldn't save that lead. Please try again."));
         }
     }
 
@@ -463,7 +449,7 @@ export default function LiveLeadsPage() {
             close();
         } catch (error) {
             devError("Failed to create lead:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to create lead");
+            toast.error(friendlyError(error, "We couldn't create that lead. Please try again."));
         } finally {
             setIsCreating(false);
         }
@@ -510,7 +496,7 @@ export default function LiveLeadsPage() {
             toast.success(`${domain} added to watchlist!`);
         } catch (error) {
             devError("Failed to add to watchlist:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to add to watchlist");
+            toast.error(friendlyError(error, "We couldn't add that to your watchlist. Please try again."));
         }
     }
 

@@ -22,6 +22,7 @@ import { Button } from "@/components/base/buttons/button";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { ensureProtocol, sanitizeUrl } from "@/utils/sanitize-url";
+import { friendlyError } from "@/lib/friendly-errors";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
@@ -100,7 +101,7 @@ export default function KnowledgeBaseDetailPage() {
             setIsEditing(false);
         } catch (error) {
             devError("Failed to save:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to save");
+            toast.error(friendlyError(error, "We couldn't save your changes. Please try again."));
         } finally {
             setIsSaving(false);
         }

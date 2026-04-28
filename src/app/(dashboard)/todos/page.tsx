@@ -31,6 +31,7 @@ import { NativeSelect } from "@/components/base/select/select-native";
 import { DatePicker } from "@/components/application/date-picker/date-picker";
 import { parseDate } from "@internationalized/date";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { friendlyError } from "@/lib/friendly-errors";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -234,7 +235,7 @@ export default function TodosPage() {
             close();
         } catch (error) {
             devError("Failed to save task:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to save task");
+            toast.error(friendlyError(error, "We couldn't save that task. Please try again."));
         } finally {
             setIsSaving(false);
         }

@@ -34,6 +34,7 @@ import { Tabs } from "@/components/application/tabs/tabs";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { friendlyError } from "@/lib/friendly-errors";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -189,15 +190,15 @@ export default function KnowledgeBasePage() {
                 setKbRichContent(result.content);
                 toast.success(`Content extracted — ${result.content.length.toLocaleString()} characters`);
             } else {
-                toast.error(result.error || "Failed to extract content from URL", {
+                toast.error(friendlyError(result.error, "We couldn't extract content from that URL"), {
                     duration: 6000,
                     description: "Check the URL and try again, or use Rich Text to paste content manually.",
                 });
             }
         } catch (error) {
-            toast.error("Extraction failed — an unexpected error occurred", {
+            toast.error("Couldn't extract that page", {
                 duration: 6000,
-                description: error instanceof Error ? error.message : "Please try again or use a different URL.",
+                description: friendlyError(error, "Please try again or use a different URL."),
             });
         } finally {
             setIsExtracting(false);
@@ -275,7 +276,7 @@ export default function KnowledgeBasePage() {
             close();
         } catch (error) {
             devError("Failed to add source:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to add source");
+            toast.error(friendlyError(error, "We couldn't add that source. Please try again."));
         } finally {
             setIsSubmitting(false);
         }

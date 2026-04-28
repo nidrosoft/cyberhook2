@@ -35,6 +35,7 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 import { useCompany } from "@/hooks/use-company";
 import { usePlanGate } from "@/hooks/use-plan-gate";
 import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
+import { friendlyError } from "@/lib/friendly-errors";
 import { generateExposureReport } from "@/lib/pdf-report";
 import { api } from "../../../../convex/_generated/api";
 import type { RedrokSearchResult } from "../../../../convex/redrokApi";
@@ -190,12 +191,12 @@ export default function LiveSearchPage() {
                 setSearchError("No compromised credentials found for this domain.");
                 setSearchState("idle");
             } else {
-                setSearchError(result.error || "Search returned no results.");
+                setSearchError(friendlyError(result.error, "We couldn't run that search right now. Please try again in a few minutes."));
                 setSearchState("idle");
             }
         } catch (error) {
             devError("Search failed:", error);
-            setSearchError(error instanceof Error ? error.message : "Search failed. Please try again.");
+            setSearchError(friendlyError(error, "We couldn't run that search right now. Please try again in a few minutes."));
             setSearchState("idle");
         }
     }
@@ -212,7 +213,7 @@ export default function LiveSearchPage() {
             toast.success(`${domain} added to watchlist!`);
         } catch (error) {
             devError("Failed to add to watchlist:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to add to watchlist");
+            toast.error(friendlyError(error, "We couldn't add that to your watchlist. Please try again."));
         }
     }
 
@@ -238,7 +239,7 @@ export default function LiveSearchPage() {
             toast.success(`Lead created for ${companyName}!`);
         } catch (error) {
             devError("Failed to create lead:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to create lead");
+            toast.error(friendlyError(error, "We couldn't create that lead. Please try again."));
         }
     }
 

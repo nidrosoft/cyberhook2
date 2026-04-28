@@ -33,6 +33,7 @@ import { PaginationCardMinimal } from "@/components/application/pagination/pagin
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { sanitizeUrl } from "@/utils/sanitize-url";
+import { friendlyError } from "@/lib/friendly-errors";
 import { STATE_PORTALS_SORTED, resolveStatePortal } from "@/lib/state-breach-portals";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -231,7 +232,7 @@ export default function RansomHubPage() {
             toast.success(`${companyName} added to leads!`);
         } catch (error) {
             devError("Failed to add to leads:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to add to leads");
+            toast.error(friendlyError(error, "We couldn't add this to your leads. Please try again."));
         }
     }
 
@@ -247,7 +248,7 @@ export default function RansomHubPage() {
             toast.success(`${domain} added to watchlist!`);
         } catch (error) {
             devError("Failed to add to watchlist:", error);
-            toast.error(error instanceof Error ? error.message : "Failed to add to watchlist");
+            toast.error(friendlyError(error, "We couldn't add this to your watchlist. Please try again."));
         }
     }
 
