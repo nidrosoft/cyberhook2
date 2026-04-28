@@ -701,11 +701,25 @@ export default function RansomHubPage() {
                             </Table>
 
                             {filteredBreaches.length === 0 && (
-                                <div className="px-5 py-8 text-center text-sm text-tertiary">
-                                    {breachIncidents?.length === 0
-                                        ? "No breach notifications recorded yet."
-                                        : "No notifications match your filters."
-                                    }
+                                <div className="px-5 py-12 text-center">
+                                    {breachIncidents?.length === 0 ? (
+                                        <>
+                                            <p className="text-sm font-medium text-secondary mb-2">
+                                                No breach notifications loaded yet.
+                                            </p>
+                                            <p className="text-sm text-tertiary max-w-md mx-auto leading-relaxed">
+                                                The HHS OCR &ldquo;Wall of Shame&rdquo;, California AG,
+                                                and Privacy Rights Clearinghouse don&apos;t expose public
+                                                JSON APIs. An admin can populate this view by uploading a
+                                                CSV export from the official portal &mdash; reach out to
+                                                support to enable the bulk-import flow for your account.
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <p className="text-sm text-tertiary">
+                                            No notifications match your filters.
+                                        </p>
+                                    )}
                                 </div>
                             )}
                             <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">

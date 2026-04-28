@@ -371,7 +371,13 @@ export default defineSchema({
     .index("by_attackDate", ["attackDate"])
     .index("by_country", ["country"])
     .index("by_incidentType", ["incidentType"])
-    .index("by_source", ["source"]),
+    .index("by_source", ["source"])
+    // Compound index for dedup lookups by (source, companyName, attackDate).
+    // Used by ransomHub.internalCreate / internalBulkCreate so we can find a
+    // duplicate via a point lookup instead of scanning every row from the
+    // same source — required for backfilling thousands of records without
+    // blowing the 16 MB read budget.
+    .index("by_source_company_date", ["source", "companyName", "attackDate"]),
 
   // ============================================
   // TASKS (To-Do List)

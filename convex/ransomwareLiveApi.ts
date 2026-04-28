@@ -6,21 +6,47 @@ const API_BASE = "https://api-pro.ransomware.live";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/**
+ * The ransomware.live API renamed several fields in 2026-Q2. Both the
+ * old and new keys are accepted here so an upstream rollback wouldn't
+ * silently break ingest again.
+ *
+ *   post_title  → victim
+ *   group_name  → group
+ *   published   → attackdate
+ */
 export interface RansomwareLiveVictim {
-  post_title: string;
-  group_name: string;
-  discovered: string;
-  description: string;
-  website: string;
-  published: string;
-  post_url: string;
-  country: string;
-  activity: string;
-  screenshot: string;
-  infostealer: any;
-  press: any;
-  id: string;
-  permalink: string;
+  // New field names (current API)
+  victim?: string;
+  group?: string;
+  attackdate?: string;
+  // Legacy field names (kept as fallback)
+  post_title?: string;
+  group_name?: string;
+  published?: string;
+  // Common fields (unchanged)
+  discovered?: string;
+  description?: string;
+  website?: string;
+  post_url?: string;
+  country?: string;
+  activity?: string;
+  screenshot?: string;
+  infostealer?: any;
+  press?: any;
+  id?: string;
+  permalink?: string;
+}
+
+// Read whichever field name the API currently emits.
+function getVictimName(v: RansomwareLiveVictim): string {
+  return (v.victim || v.post_title || "").trim();
+}
+function getGroupName(v: RansomwareLiveVictim): string {
+  return (v.group || v.group_name || "").trim();
+}
+function getAttackDateString(v: RansomwareLiveVictim): string | undefined {
+  return v.attackdate || v.published || v.discovered;
 }
 
 export interface SearchResponse {
@@ -87,23 +113,35 @@ export const searchVictims = action({
         totalExposures: victims.length,
       });
 
-      // Also store incidents in ransomIncidents table for Ransom Hub
+      // Also store incidents in ransomIncidents table for Ransom Hub.
+      // Skip rows missing both a company and a group — the dedup index
+      // requires companyName, and rows without it can't be useful.
       for (const victim of victims) {
-        const attackDate = victim.published
-          ? new Date(victim.published).getTime()
-          : Date.now();
+        const companyName = getVictimName(victim);
+        const groupName = getGroupName(victim);
+        if (!companyName || !groupName) continue;
+
+        const attackDateStr = getAttackDateString(victim);
+        const parsed = attackDateStr ? new Date(attackDateStr).getTime() : NaN;
+        const attackDate = isNaN(parsed) ? Date.now() : parsed;
 
         await ctx.runMutation(internal.ransomHub.internalCreate, {
-          companyName: victim.post_title,
+          companyName,
           domain: victim.website || undefined,
-          industry: victim.activity !== "Not Found" ? victim.activity : undefined,
+          industry:
+            victim.activity && victim.activity !== "Not Found"
+              ? victim.activity
+              : undefined,
           country: victim.country || undefined,
-          attackDate: isNaN(attackDate) ? Date.now() : attackDate,
-          ransomwareGroup: victim.group_name,
+          attackDate,
+          ransomwareGroup: groupName,
           incidentType: "ransomware" as const,
           source: "ransomware_live" as const,
           sourceUrl: victim.permalink || undefined,
-          description: victim.description !== "N/A" ? victim.description : undefined,
+          description:
+            victim.description && victim.description !== "N/A"
+              ? victim.description
+              : undefined,
         });
       }
 
@@ -198,6 +236,81 @@ export const getApiStats = action({
   },
 });
 
+// ─── Internal Action: Backfill by month ──────────────────────────────────────
+//
+// `/victims/recent` returns only the latest 100. When the daily cron has been
+// silently failing (e.g. after the 2026-Q2 field rename) the database falls
+// behind, and the recent endpoint can't catch us up. Use `/victims/?year&month`
+// to pull a whole month at once and dedup-insert.
+//
+// Run from CLI: `npx convex run --prod ransomwareLiveApi:backfillByMonth '{"year":"2026","month":"03"}'`
+
+export const backfillByMonth = internalAction({
+  args: {
+    year: v.string(),
+    month: v.string(), // "01"–"12"
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; fetched: number; stored: number; skipped: number; error?: string }> => {
+    const apiKey = process.env.RANSOMWARE_LIVE_API_KEY;
+    if (!apiKey) {
+      return { success: false, fetched: 0, stored: 0, skipped: 0, error: "API key not configured" };
+    }
+
+    const url = `${API_BASE}/victims/?year=${encodeURIComponent(args.year)}&month=${encodeURIComponent(args.month)}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { "X-API-KEY": apiKey, Accept: "application/json" },
+    });
+    if (!response.ok) {
+      return { success: false, fetched: 0, stored: 0, skipped: 0, error: `API ${response.status}` };
+    }
+
+    const data = await response.json();
+    const victims: RansomwareLiveVictim[] = data.victims || data || [];
+
+    const chunkSize = 50;
+    let stored = 0;
+    let skipped = 0;
+    for (let i = 0; i < victims.length; i += chunkSize) {
+      const chunk = victims.slice(i, i + chunkSize);
+      const incidents = chunk
+        .map((victim) => {
+          const companyName = getVictimName(victim);
+          const groupName = getGroupName(victim);
+          if (!companyName || !groupName) return null;
+          const attackDateStr = getAttackDateString(victim);
+          const parsed = attackDateStr ? new Date(attackDateStr).getTime() : NaN;
+          const attackDate = isNaN(parsed) ? Date.now() : parsed;
+          return {
+            companyName,
+            domain: victim.website || undefined,
+            industry:
+              victim.activity && victim.activity !== "Not Found" ? victim.activity : undefined,
+            country: victim.country || undefined,
+            attackDate,
+            ransomwareGroup: groupName,
+            incidentType: "ransomware" as const,
+            source: "ransomware_live" as const,
+            sourceUrl: victim.permalink || undefined,
+            description:
+              victim.description && victim.description !== "N/A" ? victim.description : undefined,
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+      skipped += chunk.length - incidents.length;
+      if (incidents.length > 0) {
+        await ctx.runMutation(internal.ransomHub.internalBulkCreate, { incidents });
+        stored += incidents.length;
+      }
+    }
+
+    return { success: true, fetched: victims.length, stored, skipped };
+  },
+});
+
 // ─── Internal Action: Daily fetch for cron ────────────────────────────────────
 
 export const fetchRecentAndStore = internalAction({
@@ -205,13 +318,14 @@ export const fetchRecentAndStore = internalAction({
   handler: async (ctx): Promise<{ success: boolean; stored: number; error?: string }> => {
     // Record every run to syncLogs (red item 11.2 — "Log every sync run").
     const startedAt = Date.now();
-    const logResult = async (result: { success: boolean; stored: number; error?: string }) => {
+    const logResult = async (result: { success: boolean; stored: number; skipped?: number; error?: string }) => {
       await ctx.runMutation(internal.syncLogs.record, {
         source: "ransomware_live",
         startedAt,
         finishedAt: Date.now(),
         success: result.success,
         stored: result.stored,
+        skipped: result.skipped,
         errorMessage: result.error,
       });
       return result;
@@ -245,38 +359,52 @@ export const fetchRecentAndStore = internalAction({
       // Batch insert — Convex has a limit per mutation so chunk into groups of 50
       const chunkSize = 50;
       let stored = 0;
+      let skipped = 0;
       for (let i = 0; i < victims.length; i += chunkSize) {
         const chunk = victims.slice(i, i + chunkSize);
-        // Defensive filter: ransomware.live occasionally returns rows
-        // with missing post_title or group_name. Those rows don't meet
-        // our required-field schema and would fail the whole chunk, so
-        // drop them here and continue with the rest.
+        // Defensive filter: ransomware.live occasionally returns rows with
+        // missing victim or group. Those rows don't meet our required-field
+        // schema and would fail the whole chunk, so drop them here and
+        // continue with the rest. Field-name fallbacks (`getVictimName` /
+        // `getGroupName`) handle the 2026-Q2 API rename.
         const incidents = chunk
-          .filter((v) => v.post_title && v.group_name)
           .map((victim) => {
-            const attackDate = victim.published
-              ? new Date(victim.published).getTime()
-              : Date.now();
+            const companyName = getVictimName(victim);
+            const groupName = getGroupName(victim);
+            if (!companyName || !groupName) return null;
+
+            const attackDateStr = getAttackDateString(victim);
+            const parsed = attackDateStr ? new Date(attackDateStr).getTime() : NaN;
+            const attackDate = isNaN(parsed) ? Date.now() : parsed;
+
             return {
-              companyName: victim.post_title,
+              companyName,
               domain: victim.website || undefined,
-              industry: victim.activity !== "Not Found" ? victim.activity : undefined,
+              industry:
+                victim.activity && victim.activity !== "Not Found"
+                  ? victim.activity
+                  : undefined,
               country: victim.country || undefined,
-              attackDate: isNaN(attackDate) ? Date.now() : attackDate,
-              ransomwareGroup: victim.group_name,
+              attackDate,
+              ransomwareGroup: groupName,
               incidentType: "ransomware" as const,
               source: "ransomware_live" as const,
               sourceUrl: victim.permalink || undefined,
-              description: victim.description !== "N/A" ? victim.description : undefined,
+              description:
+                victim.description && victim.description !== "N/A"
+                  ? victim.description
+                  : undefined,
             };
-          });
+          })
+          .filter((row): row is NonNullable<typeof row> => row !== null);
+        skipped += chunk.length - incidents.length;
         if (incidents.length > 0) {
           await ctx.runMutation(internal.ransomHub.internalBulkCreate, { incidents });
           stored += incidents.length;
         }
       }
 
-      return logResult({ success: true, stored });
+      return logResult({ success: true, stored, skipped });
     } catch (error) {
       return logResult({
         success: false,
