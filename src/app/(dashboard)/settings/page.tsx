@@ -50,59 +50,53 @@ const tabs = [
     { id: "usage", label: "Usage" },
 ];
 
-// Per orange item 7.2: use real brand SVG logos from SimpleIcons
-// (https://simpleicons.org) instead of emoji placeholders. Each logo is a
-// publicly-hosted CDN SVG so there's no extra dependency to bundle.
-// The slug format is https://cdn.simpleicons.org/{slug}/{hexColor}.
+// Brand logos sourced from Simple Icons (https://simpleicons.org). Each tile
+// renders a publicly-hosted CDN SVG so there's no extra dependency to bundle.
+// `slug` is the Simple Icons identifier; `monogram` is a 1–3 character
+// fallback rendered if Simple Icons doesn't ship that brand (e.g. ConnectWise).
 const simpleIcon = (slug: string, color = "FFFFFF") => `https://cdn.simpleicons.org/${slug}/${color}`;
 
-const integrationCategories = [
-    {
-        label: "PAYMENTS",
-        items: [
-            { name: "Stripe", description: "Process payments and manage subscriptions", logoUrl: simpleIcon("stripe"), logoColor: "bg-[#635BFF]", provider: "stripe" as const, available: true },
-        ],
-    },
-    {
-        label: "EMAIL",
-        items: [
-            { name: "Outlook", description: "Sync emails and contacts from Microsoft Outlook", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_email" as const, available: false },
-            { name: "Gmail", description: "Sync emails and contacts from Google Workspace", logoUrl: simpleIcon("gmail"), logoColor: "bg-[#EA4335]", provider: "gmail" as const, available: false },
-        ],
-    },
-    {
-        label: "CALENDAR",
-        items: [
-            { name: "Outlook Calendar", description: "Sync meetings and events from Outlook Calendar", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_calendar" as const, available: false },
-            { name: "Google Calendar", description: "Sync meetings and events from Google Calendar", logoUrl: simpleIcon("googlecalendar"), logoColor: "bg-[#4285F4]", provider: "google_calendar" as const, available: false },
-        ],
-    },
-    {
-        label: "CRM",
-        items: [
-            { name: "HubSpot", description: "Two-way sync contacts, deals, and activities", logoUrl: simpleIcon("hubspot"), logoColor: "bg-[#FF7A59]", provider: "hubspot" as const, available: false },
-            { name: "GoHighLevel", description: "Sync leads and pipeline data with GHL", logoUrl: simpleIcon("ghost"), logoColor: "bg-[#18A957]", provider: "ghl" as const, available: false },
-        ],
-    },
-    {
-        label: "MESSAGING",
-        items: [
-            { name: "Microsoft Teams", description: "Send notifications and alerts to Teams channels", logoUrl: simpleIcon("microsoftteams"), logoColor: "bg-[#4B53BC]", provider: "teams" as const, available: false },
-            { name: "Slack", description: "Send notifications and alerts to Slack channels", logoUrl: simpleIcon("slack"), logoColor: "bg-[#4A154B]", provider: "slack" as const, available: false },
-        ],
-    },
-    {
-        label: "SOCIAL",
-        items: [
-            { name: "LinkedIn", description: "Enrich leads and automate outreach via LinkedIn", logoUrl: simpleIcon("linkedin"), logoColor: "bg-[#0A66C2]", provider: "linkedin" as const, available: false },
-        ],
-    },
-    {
-        label: "PSA / RMM",
-        items: [
-            { name: "ConnectWise", description: "Sync tickets, contacts, and companies with ConnectWise Manage", logoUrl: simpleIcon("connectwise"), logoColor: "bg-[#006FBA]", provider: "connectwise" as const, available: false },
-        ],
-    },
+type IntegrationCategory = "Payments" | "Email" | "Calendar" | "CRM" | "Messaging" | "Social" | "PSA / RMM";
+
+type Integration = {
+    name: string;
+    category: IntegrationCategory;
+    description: string;
+    logoUrl?: string;
+    monogram?: string;
+    logoColor: string;
+    provider:
+        | "stripe"
+        | "outlook_email"
+        | "gmail"
+        | "outlook_calendar"
+        | "google_calendar"
+        | "hubspot"
+        | "ghl"
+        | "teams"
+        | "slack"
+        | "linkedin"
+        | "connectwise";
+    available: boolean;
+};
+
+// Flat list rendered in a single 3-column grid. Category is shown as a small
+// label inside each card so we keep the grouping context without breaking
+// the row-of-three layout the way per-category sub-grids did.
+const integrations: Integration[] = [
+    { name: "Stripe", category: "Payments", description: "Process payments and manage subscriptions", logoUrl: simpleIcon("stripe"), logoColor: "bg-[#635BFF]", provider: "stripe", available: true },
+    { name: "Outlook", category: "Email", description: "Sync emails and contacts from Microsoft Outlook", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_email", available: false },
+    { name: "Gmail", category: "Email", description: "Sync emails and contacts from Google Workspace", logoUrl: simpleIcon("gmail"), logoColor: "bg-[#EA4335]", provider: "gmail", available: false },
+    { name: "Outlook Calendar", category: "Calendar", description: "Sync meetings and events from Outlook Calendar", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_calendar", available: false },
+    { name: "Google Calendar", category: "Calendar", description: "Sync meetings and events from Google Calendar", logoUrl: simpleIcon("googlecalendar"), logoColor: "bg-[#4285F4]", provider: "google_calendar", available: false },
+    { name: "HubSpot", category: "CRM", description: "Two-way sync contacts, deals, and activities", logoUrl: simpleIcon("hubspot"), logoColor: "bg-[#FF7A59]", provider: "hubspot", available: false },
+    // GoHighLevel: not in Simple Icons, render a "GHL" monogram on brand green.
+    { name: "GoHighLevel", category: "CRM", description: "Sync leads and pipeline data with GHL", monogram: "GHL", logoColor: "bg-[#18A957]", provider: "ghl", available: false },
+    { name: "Microsoft Teams", category: "Messaging", description: "Send notifications and alerts to Teams channels", logoUrl: simpleIcon("microsoftteams"), logoColor: "bg-[#4B53BC]", provider: "teams", available: false },
+    { name: "Slack", category: "Messaging", description: "Send notifications and alerts to Slack channels", logoUrl: simpleIcon("slack"), logoColor: "bg-[#4A154B]", provider: "slack", available: false },
+    { name: "LinkedIn", category: "Social", description: "Enrich leads and automate outreach via LinkedIn", logoUrl: simpleIcon("linkedin"), logoColor: "bg-[#0A66C2]", provider: "linkedin", available: false },
+    // ConnectWise: not in Simple Icons, render a "CW" monogram on brand blue.
+    { name: "ConnectWise", category: "PSA / RMM", description: "Sync tickets, contacts, and companies with ConnectWise Manage", monogram: "CW", logoColor: "bg-[#006FBA]", provider: "connectwise", available: false },
 ];
 
 function formatRole(role: string): string {
@@ -1481,37 +1475,41 @@ function SettingsPageContent() {
                                     )}
                                 </div>
 
-                                {integrationCategories.map((category) => (
-                                    <div key={category.label} className="flex flex-col gap-4">
-                                        <h3 className="text-xs font-semibold text-tertiary tracking-wider uppercase">{category.label}</h3>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            {category.items.map((item) => {
-                                                const isConnected = item.provider === "stripe" && !!company?.stripeCustomerId;
-                                                const comingSoon = !item.available;
-                                                return (
-                                                    <div
-                                                        key={item.name}
-                                                        className={`flex flex-col gap-4 p-5 border rounded-xl transition-colors ${comingSoon ? "border-secondary bg-secondary_subtle opacity-75" : "border-secondary bg-primary hover:border-brand-secondary"}`}
-                                                    >
-                                                        <div className="flex items-start justify-between">
-                                                            <div className="flex items-center gap-3">
-                                                                <div className={`flex h-10 w-10 items-center justify-center rounded-lg p-2 ${item.logoColor}`}>
-                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                                    <img src={item.logoUrl} alt={`${item.name} logo`} className="h-full w-full object-contain" />
-                                                                </div>
-                                                                <div className="flex flex-col gap-0.5">
-                                                                    <span className="font-semibold text-primary">{item.name}</span>
-                                                                    {comingSoon ? (
-                                                                        <Badge color="warning" size="sm">Coming Soon</Badge>
-                                                                    ) : isConnected ? (
-                                                                        <Badge color="success" size="sm">Connected</Badge>
-                                                                    ) : (
-                                                                        <Badge color="gray" size="sm">Not Connected</Badge>
-                                                                    )}
-                                                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {integrations.map((item) => {
+                                        const isConnected = item.provider === "stripe" && !!company?.stripeCustomerId;
+                                        const comingSoon = !item.available;
+                                        return (
+                                            <div
+                                                key={item.name}
+                                                className={`flex flex-col gap-4 p-5 border rounded-xl transition-colors ${comingSoon ? "border-secondary bg-secondary_subtle opacity-75" : "border-secondary bg-primary hover:border-brand-secondary"}`}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg p-2 ${item.logoColor}`}>
+                                                            {item.logoUrl ? (
+                                                                /* eslint-disable-next-line @next/next/no-img-element */
+                                                                <img src={item.logoUrl} alt={`${item.name} logo`} className="h-full w-full object-contain" />
+                                                            ) : (
+                                                                <span className="text-white text-xs font-bold tracking-tight">{item.monogram}</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-col gap-0.5 min-w-0">
+                                                            <span className="font-semibold text-primary truncate">{item.name}</span>
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                                <span className="text-[10px] font-semibold text-tertiary tracking-wider uppercase">{item.category}</span>
+                                                                {comingSoon ? (
+                                                                    <Badge color="warning" size="sm">Coming Soon</Badge>
+                                                                ) : isConnected ? (
+                                                                    <Badge color="success" size="sm">Connected</Badge>
+                                                                ) : (
+                                                                    <Badge color="gray" size="sm">Not Connected</Badge>
+                                                                )}
                                                             </div>
                                                         </div>
-                                                        <p className="text-sm text-tertiary">{item.description}</p>
+                                                    </div>
+                                                </div>
+                                                <p className="text-sm text-tertiary">{item.description}</p>
                                                         <div className="mt-auto pt-2">
                                                             {comingSoon ? (
                                                                 <Button size="sm" color="secondary" className="w-full" isDisabled>Coming Soon</Button>
@@ -1556,12 +1554,10 @@ function SettingsPageContent() {
                                                                 </Button>
                                                             )}
                                                         </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                ))}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         )}
 
