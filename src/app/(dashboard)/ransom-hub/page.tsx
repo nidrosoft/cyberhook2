@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { toast } from "sonner";
 import { devError } from "@/utils/dev-error";
 import {
@@ -156,6 +156,68 @@ export default function RansomHubPage() {
 
     const [breachRegulation, setBreachRegulation] = useState("all");
 
+    // Pagination state — 15 rows per page for both tables.
+    const PAGE_SIZE = 15;
+    const [ransomwarePage, setRansomwarePage] = useState(1);
+    const [breachesPage, setBreachesPage] = useState(1);
+
+    // Portal viewer — server-side fetches the breach data from each portal
+    // and renders the rows inside our existing breach table. Iframe was
+    // attempted earlier but the portals send X-Frame-Options: DENY, so the
+    // only viable embed path is server-side fetch + parse.
+    type PortalSource = "hhs_ocr" | "california_ag" | "privacy_rights";
+    type PortalRow = {
+        companyName: string;
+        industry?: string;
+        individualsAffected?: number;
+        filedDateMs?: number;
+        attackDateMs?: number;
+        region?: string;
+        breachVector?: string;
+        sourceUrl?: string;
+    };
+    type PortalView = {
+        source: PortalSource;
+        label: string;
+        url: string;
+        loading: boolean;
+        rows?: PortalRow[];
+        error?: string;
+    };
+    const [portalView, setPortalView] = useState<PortalView | null>(null);
+    const fetchPortalLive = useAction(api.portalsLive.fetchPortalLive);
+
+    const portalOptions: Array<{ source: PortalSource; label: string; url: string }> = [
+        { source: "hhs_ocr", label: "HHS OCR — HIPAA Breach Portal", url: "https://ocrportal.hhs.gov/ocr/breach/breach_report.aspx" },
+        { source: "california_ag", label: "California Attorney General", url: "https://oag.ca.gov/privacy/databreach/list" },
+        { source: "privacy_rights", label: "Privacy Rights Clearinghouse", url: "https://www.privacyrights.org/data-breaches" },
+    ];
+
+    async function loadPortal(source: PortalSource) {
+        const opt = portalOptions.find((o) => o.source === source);
+        if (!opt) return;
+        setPortalView({ source, label: opt.label, url: opt.url, loading: true });
+        try {
+            const result = await fetchPortalLive({ source });
+            setPortalView({
+                source,
+                label: opt.label,
+                url: opt.url,
+                loading: false,
+                rows: result.rows,
+                error: result.error,
+            });
+        } catch (err) {
+            setPortalView({
+                source,
+                label: opt.label,
+                url: opt.url,
+                loading: false,
+                error: err instanceof Error ? err.message : "Failed to load portal data.",
+            });
+        }
+    }
+
     // Per-state toggle persistence (orange item 12.2). Users can toggle
     // individual US states on/off to focus on their service area. State
     // selections persist across reloads via localStorage so the toggle sticks.
@@ -218,6 +280,70 @@ export default function RansomHubPage() {
             return true;
         });
     }, [breachIncidents, breachSearchQuery, breachRegulation, breachStateFilter]);
+
+    // Reset page when filters change so the user always sees results from page 1.
+    useEffect(() => { setRansomwarePage(1); }, [searchQuery, threatGroup, region, timePeriod]);
+    useEffect(() => { setBreachesPage(1); }, [breachSearchQuery, breachRegulation, breachStateFilter]);
+
+    // Paginated slices.
+    const ransomwareTotalPages = Math.max(1, Math.ceil(filteredRansomware.length / PAGE_SIZE));
+    const paginatedRansomware = useMemo(
+        () => filteredRansomware.slice((ransomwarePage - 1) * PAGE_SIZE, ransomwarePage * PAGE_SIZE),
+        [filteredRansomware, ransomwarePage],
+    );
+    const breachesTotalPages = Math.max(1, Math.ceil(filteredBreaches.length / PAGE_SIZE));
+    const paginatedBreaches = useMemo(
+        () => filteredBreaches.slice((breachesPage - 1) * PAGE_SIZE, breachesPage * PAGE_SIZE),
+        [filteredBreaches, breachesPage],
+    );
+
+    // Unified breach table data source — when portal view has rows, render
+    // those; otherwise render paginated local incidents. Both shapes are
+    // normalized to `BreachTableItem` so the React Aria Table accepts them
+    // uniformly.
+    type BreachTableItem = {
+        id: string;
+        _id: string;
+        companyName: string;
+        industry?: string;
+        individualsAffected?: number;
+        attackDate: number;
+        filedDate?: number;
+        source: string;
+        breachVector?: string;
+        region?: string;
+        domain?: string;
+    };
+    const breachTableItems = useMemo<BreachTableItem[]>(() => {
+        if (portalView?.rows && portalView.rows.length > 0) {
+            return portalView.rows.map((r, idx) => ({
+                id: `portal-${idx}`,
+                _id: `portal-${idx}`,
+                companyName: r.companyName,
+                industry: r.industry,
+                individualsAffected: r.individualsAffected,
+                attackDate: r.attackDateMs ?? r.filedDateMs ?? Date.now(),
+                filedDate: r.filedDateMs,
+                source: portalView.source,
+                breachVector: r.breachVector,
+                region: r.region,
+                domain: undefined,
+            }));
+        }
+        return paginatedBreaches.map((i) => ({
+            id: i._id as unknown as string,
+            _id: i._id as unknown as string,
+            companyName: i.companyName,
+            industry: i.industry,
+            individualsAffected: i.individualsAffected,
+            attackDate: i.attackDate,
+            filedDate: i.filedDate,
+            source: i.source,
+            breachVector: i.breachVector,
+            region: i.region,
+            domain: i.domain,
+        }));
+    }, [portalView, paginatedBreaches]);
 
     async function handleAddToLeads(companyName: string, domain?: string) {
         if (!companyId || !user) return;
@@ -404,7 +530,7 @@ export default function RansomHubPage() {
                         </div>
 
                         {/* Incidents Table */}
-                        <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
+                        <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary">
                             <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-secondary p-4 sm:px-6 sm:py-5">
                                 <div className="flex w-full items-center gap-3 flex-wrap">
                                     <InputBase
@@ -420,46 +546,55 @@ export default function RansomHubPage() {
                                 </div>
                             </div>
 
+                            <div className="w-full overflow-hidden">
                             <Table
                                 aria-label="Ransomware Incidents List"
                                 selectionMode="multiple"
                                 sortDescriptor={sortDescriptor}
                                 onSortChange={setSortDescriptor}
-                                className="bg-primary w-full"
+                                className="bg-primary w-full table-fixed"
                             >
                                 <Table.Header className="bg-secondary_subtle">
-                                    <Table.Head id="group" label="Threat Group" allowsSorting isRowHeader className="min-w-[150px]" />
-                                    <Table.Head id="company" label="Victim" allowsSorting className="min-w-[180px]" />
-                                    <Table.Head id="country" label="Country" className="min-w-[120px] hidden md:table-cell" />
-                                    <Table.Head id="industry" label="Industry" allowsSorting className="min-w-[130px] hidden lg:table-cell" />
-                                    <Table.Head id="date" label="Posted Date" allowsSorting className="min-w-[130px]" />
-                                    <Table.Head id="type" label="Type" allowsSorting className="min-w-[120px] hidden lg:table-cell" />
-                                    <Table.Head id="affected" label="Individuals" className="min-w-[120px] hidden lg:table-cell" />
-                                    <Table.Head id="vector" label="Breach Vector" className="min-w-[150px] hidden xl:table-cell" />
-                                    <Table.Head id="actions" className="w-[80px]" />
+                                    <Table.Head id="group" label="Threat Group" allowsSorting isRowHeader className="w-[14%]" />
+                                    <Table.Head id="company" label="Victim" allowsSorting className="w-[20%]" />
+                                    <Table.Head id="country" label="Country" className="w-[7%] hidden md:table-cell" />
+                                    <Table.Head id="industry" label="Industry" allowsSorting className="w-[16%] hidden lg:table-cell" />
+                                    <Table.Head id="date" label="Posted Date" allowsSorting className="w-[13%]" />
+                                    <Table.Head id="type" label="Type" allowsSorting className="w-[10%] hidden lg:table-cell" />
+                                    <Table.Head id="affected" label="Individuals" className="w-[8%] hidden lg:table-cell" />
+                                    <Table.Head id="vector" label="Breach Vector" className="w-[12%] hidden xl:table-cell" />
+                                    <Table.Head id="actions" className="w-[100px]" />
                                 </Table.Header>
 
-                                <Table.Body items={filteredRansomware.map((i) => ({ ...i, id: i._id }))}>
+                                <Table.Body items={paginatedRansomware.map((i) => ({ ...i, id: i._id }))}>
                                     {(item) => (
                                         <Table.Row id={item.id}>
                                             <Table.Cell>
-                                                <div className="flex items-center gap-2">
-                                                    <Shield01 className="w-4 h-4 text-error-500" />
-                                                    <span className="font-medium text-primary whitespace-nowrap">{item.ransomwareGroup || "Unknown"}</span>
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <Shield01 className="w-4 h-4 text-error-500 shrink-0" />
+                                                    <span className="font-medium text-primary truncate" title={item.ransomwareGroup || "Unknown"}>{item.ransomwareGroup || "Unknown"}</span>
                                                 </div>
                                             </Table.Cell>
                                             <Table.Cell>
-                                                <span className="font-medium text-secondary whitespace-nowrap">{item.companyName}</span>
+                                                <span className="block font-medium text-secondary truncate" title={item.companyName}>{item.companyName}</span>
                                             </Table.Cell>
                                             <Table.Cell className="hidden md:table-cell">
                                                 <span className="text-sm text-secondary whitespace-nowrap">{item.country || item.region || "—"}</span>
                                             </Table.Cell>
                                             <Table.Cell className="hidden lg:table-cell">
-                                                <Badge color="gray" size="sm">{item.industry || "Unknown"}</Badge>
+                                                <div className="flex min-w-0" title={item.industry || "Unknown"}>
+                                                    <Badge
+                                                        color="gray"
+                                                        size="sm"
+                                                        className="max-w-full truncate"
+                                                    >
+                                                        {item.industry || "Unknown"}
+                                                    </Badge>
+                                                </div>
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <div className="flex items-center gap-1.5 text-secondary whitespace-nowrap">
-                                                    <Calendar className="w-4 h-4 text-tertiary" />
+                                                    <Calendar className="w-4 h-4 text-tertiary shrink-0" />
                                                     <span>{formatDate(item.attackDate)}</span>
                                                 </div>
                                             </Table.Cell>
@@ -512,6 +647,7 @@ export default function RansomHubPage() {
                                     )}
                                 </Table.Body>
                             </Table>
+                            </div>
 
                             {filteredRansomware.length === 0 && (
                                 <div className="px-5 py-8 text-center text-sm text-tertiary">
@@ -521,11 +657,14 @@ export default function RansomHubPage() {
                                     }
                                 </div>
                             )}
-                            <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">
-                                <span className="text-sm text-tertiary">
-                                    Showing <span className="font-medium text-secondary">{filteredRansomware.length}</span> of <span className="font-medium text-secondary">{ransomwareIncidents?.length ?? 0}</span> incidents
-                                </span>
-                            </div>
+                            {filteredRansomware.length > 0 && (
+                                <PaginationCardMinimal
+                                    page={ransomwarePage}
+                                    total={ransomwareTotalPages}
+                                    align="right"
+                                    onPageChange={setRansomwarePage}
+                                />
+                            )}
                         </TableCard.Root>
                     </TabPanel>
 
@@ -591,8 +730,93 @@ export default function RansomHubPage() {
                             </div>
                         </div>
 
+                        {/* Breach Portals Dropdown — uses FilterDropdown for
+                            consistency with the rest of the app. Selecting a
+                            portal triggers a server-side fetch and renders
+                            the parsed rows in the breach table below. */}
+                        <div className="flex flex-col gap-3">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-secondary">Quick Access to Official Portals</span>
+                                <span className="text-xs text-tertiary">Load portal data into the table below</span>
+                            </div>
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <FilterDropdown
+                                    aria-label="Select breach portal to load"
+                                    value={portalView?.source ?? ""}
+                                    onChange={(v) => {
+                                        if (!v) {
+                                            setPortalView(null);
+                                            return;
+                                        }
+                                        loadPortal(v as PortalSource);
+                                    }}
+                                    options={[
+                                        { label: "Select a portal to view…", value: "" },
+                                        ...portalOptions.map((p) => ({ label: p.label, value: p.source })),
+                                    ]}
+                                    className="min-w-[280px]"
+                                />
+                                {portalView && (
+                                    <Button
+                                        size="sm"
+                                        color="link-gray"
+                                        iconLeading={XClose}
+                                        onClick={() => setPortalView(null)}
+                                    >
+                                        Clear portal view
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Portal status banner — shown when the user has loaded
+                            data from an external portal. Surfaces loading,
+                            error, and source attribution above the table. */}
+                        {portalView && (
+                            <div className={`flex flex-col gap-2 rounded-lg border px-4 py-3 ${
+                                portalView.loading
+                                    ? "border-brand-200 bg-brand-50"
+                                    : portalView.rows && portalView.rows.length > 0
+                                        ? "border-success-200 bg-success-50"
+                                        : "border-warning-200 bg-warning-50"
+                            }`}>
+                                <div className="flex items-center justify-between gap-3 flex-wrap">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        {portalView.loading ? (
+                                            <Loading02 className="w-4 h-4 animate-spin text-brand-600 shrink-0" />
+                                        ) : portalView.rows && portalView.rows.length > 0 ? (
+                                            <CheckCircle className="w-4 h-4 text-success-600 shrink-0" />
+                                        ) : (
+                                            <AlertCircle className="w-4 h-4 text-warning-600 shrink-0" />
+                                        )}
+                                        <span className="text-sm font-medium text-primary truncate">
+                                            {portalView.loading
+                                                ? `Loading ${portalView.label}…`
+                                                : portalView.rows && portalView.rows.length > 0
+                                                    ? `Showing live data from ${portalView.label} (${portalView.rows.length} rows)`
+                                                    : `Couldn't embed ${portalView.label}`}
+                                        </span>
+                                    </div>
+                                    <a
+                                        href={portalView.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 rounded-md border border-secondary bg-primary px-2.5 py-1 text-xs font-medium text-secondary hover:bg-secondary_subtle whitespace-nowrap"
+                                    >
+                                        <LinkExternal01 className="w-3.5 h-3.5" />
+                                        Open in new tab
+                                    </a>
+                                </div>
+                                {!portalView.loading && portalView.error && (!portalView.rows || portalView.rows.length === 0) && (
+                                    <p className="text-xs text-warning-700">
+                                        {portalView.error} Use &ldquo;Open in new tab&rdquo; to view directly.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         {/* Breach Notifications Table */}
-                        <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
+                        <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary">
                             <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-secondary p-4 sm:px-6 sm:py-5">
                                 <div className="flex w-full items-center gap-3 flex-wrap">
                                     <InputBase
@@ -608,33 +832,38 @@ export default function RansomHubPage() {
                                 </div>
                             </div>
 
+                            <div className="w-full overflow-hidden">
                             <Table
                                 aria-label="Breach Notifications List"
                                 sortDescriptor={breachSortDescriptor}
                                 onSortChange={setBreachSortDescriptor}
-                                className="bg-primary w-full"
+                                className="bg-primary w-full table-fixed"
                             >
                                 <Table.Header className="bg-secondary_subtle">
-                                    <Table.Head id="organization" label="Organization" allowsSorting isRowHeader className="min-w-[200px]" />
-                                    <Table.Head id="industry" label="Industry" allowsSorting className="min-w-[130px] hidden lg:table-cell" />
-                                    <Table.Head id="affected" label="Individuals Affected" allowsSorting className="min-w-[170px]" />
-                                    <Table.Head id="filedDate" label="Filed Date" allowsSorting className="min-w-[160px]" />
-                                    <Table.Head id="source" label="Source" className="min-w-[140px] hidden md:table-cell" />
-                                    <Table.Head id="vector" label="Breach Vector" className="min-w-[140px] hidden lg:table-cell" />
-                                    <Table.Head id="actions" className="w-[80px]" />
+                                    <Table.Head id="organization" label="Organization" allowsSorting isRowHeader className="w-[34%]" />
+                                    <Table.Head id="industry" label="Industry" allowsSorting className="w-[14%] hidden lg:table-cell" />
+                                    <Table.Head id="affected" label="Individuals Affected" allowsSorting className="w-[14%]" />
+                                    <Table.Head id="filedDate" label="Filed Date" allowsSorting className="w-[14%]" />
+                                    <Table.Head id="source" label="Source" className="w-[12%] hidden md:table-cell" />
+                                    <Table.Head id="vector" label="Breach Vector" className="w-[12%] hidden lg:table-cell" />
+                                    <Table.Head id="actions" className="w-[100px]" />
                                 </Table.Header>
 
-                                <Table.Body items={filteredBreaches.map((i) => ({ ...i, id: i._id }))}>
+                                <Table.Body items={breachTableItems}>
                                     {(item) => (
                                         <Table.Row id={item.id}>
                                             <Table.Cell>
-                                                <div className="flex items-center gap-2">
-                                                    <Building02 className="w-4 h-4 text-tertiary" />
-                                                    <span className="font-medium text-primary">{item.companyName}</span>
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <Building02 className="w-4 h-4 text-tertiary shrink-0" />
+                                                    <span className="font-medium text-primary truncate" title={item.companyName}>{item.companyName}</span>
                                                 </div>
                                             </Table.Cell>
                                             <Table.Cell className="hidden lg:table-cell">
-                                                <Badge color="gray" size="sm">{item.industry || "Unknown"}</Badge>
+                                                <div className="flex min-w-0" title={item.industry || "Unknown"}>
+                                                    <Badge color="gray" size="sm" className="max-w-full truncate">
+                                                        {item.industry || "Unknown"}
+                                                    </Badge>
+                                                </div>
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <span className="text-sm font-medium text-primary">
@@ -700,6 +929,7 @@ export default function RansomHubPage() {
                                     )}
                                 </Table.Body>
                             </Table>
+                            </div>
 
                             {filteredBreaches.length === 0 && (
                                 <div className="px-5 py-12 text-center">
@@ -723,15 +953,19 @@ export default function RansomHubPage() {
                                     )}
                                 </div>
                             )}
-                            <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">
-                                <span className="text-sm text-tertiary">
-                                    Showing <span className="font-medium text-secondary">{filteredBreaches.length}</span> of <span className="font-medium text-secondary">{breachIncidents?.length ?? 0}</span> notifications
-                                </span>
-                            </div>
+                            {filteredBreaches.length > 0 && (
+                                <PaginationCardMinimal
+                                    page={breachesPage}
+                                    total={breachesTotalPages}
+                                    align="right"
+                                    onPageChange={setBreachesPage}
+                                />
+                            )}
                         </TableCard.Root>
                     </TabPanel>
                 </Tabs>
             </div>
+
         </div>
     );
 }

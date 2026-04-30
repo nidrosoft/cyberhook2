@@ -16,7 +16,8 @@ export default defineSchema({
     role: v.union(
       v.literal("sales_rep"),
       v.literal("sales_admin"),
-      v.literal("billing")
+      v.literal("billing"),
+      v.literal("super_admin")
     ),
     status: v.union(
       v.literal("pending"),

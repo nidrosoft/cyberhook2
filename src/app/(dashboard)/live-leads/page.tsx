@@ -70,9 +70,38 @@ function getSeverityFromCount(count: number, severity?: string): ExposureSeverit
     return "low";
 }
 
-const industryOptions = ["All", "Healthcare", "Finance", "Technology", "Construction", "Manufacturing", "Education", "Retail", "Government"];
-// Employee-count ranges — aligned with app.cyberhook.ai per yellow item 9.5.
-const sizeOptions = ["All", "1-10", "11-50", "51-200", "201-1000", "1001-5000", "5000+"];
+// Industry list — client-defined, matches the LinkedIn-style industries
+// the upstream Redrok API returns. Used by the Discover-tab Industry filter.
+const industryOptions = [
+    "All",
+    "Accounting",
+    "Airlines/Aviation",
+    "Apparel & Fashion",
+    "Architecture & Planning",
+    "Biotechnology",
+    "Computer Software",
+    "Design",
+    "E-Learning",
+    "Education Management",
+    "Electrical/Electronic Manufacturing",
+    "Financial Services",
+    "Government Administration",
+    "Higher Education",
+    "Hospital & Health Care",
+    "Internet",
+    "Law Practice",
+    "Museums And Institutions",
+    "Music",
+    "Online Media",
+    "Primary/Secondary Education",
+    "Publishing",
+    "Research",
+    "Retail",
+    "Translation And Localization",
+    "Writing And Editing",
+];
+// Employee-count ranges — client-defined.
+const sizeOptions = ["All", "1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"];
 const daysOptions = [
     { label: "Last 24 hours", value: "1" },
     { label: "Last 3 days", value: "3" },
@@ -145,7 +174,11 @@ export default function LiveLeadsPage() {
     const [discoverDays, setDiscoverDays] = useState("7");
     const [discoverCountry, setDiscoverCountry] = useState("");
     const [discoverRegion, setDiscoverRegion] = useState("");
-    const [discoverCity, setDiscoverCity] = useState("");
+    // Industry + Size filters live on the discover tab too (client request).
+    // We also apply these client-side to the returned list so they always
+    // refine results even if the upstream API ignores them.
+    const [discoverIndustry, setDiscoverIndustry] = useState("All");
+    const [discoverSize, setDiscoverSize] = useState("All");
     const [isDiscovering, setIsDiscovering] = useState(false);
     const [discoveredLeads, setDiscoveredLeads] = useState<RedrokCompany[]>([]);
     const [discoverError, setDiscoverError] = useState<string | null>(null);
@@ -345,7 +378,6 @@ export default function LiveLeadsPage() {
                 days: parseInt(discoverDays),
                 country: discoverCountry,
                 region: discoverRegion,
-                city: discoverCity,
             });
             if (result.success) {
                 setDiscoveredLeads(result.companies);
@@ -414,15 +446,35 @@ export default function LiveLeadsPage() {
         return filteredLeads.slice(start, start + pageSize);
     }, [filteredLeads, myLeadsPage, pageSize]);
 
-    const discoverTotalPages = Math.max(1, Math.ceil(discoveredLeads.length / pageSize));
+    // Client-side post-filter for the discover list. Region, industry and
+    // size are applied here in addition to the upstream Redrok filters so
+    // they always work — addresses the client's "filters are not working"
+    // feedback, since the upstream API was returning broader results than
+    // requested. City was removed per client request.
+    const filteredDiscoveredLeads = useMemo(() => {
+        return discoveredLeads.filter((c) => {
+            if (discoverRegion && (c.region ?? "").toLowerCase() !== discoverRegion.toLowerCase()) {
+                return false;
+            }
+            if (discoverIndustry !== "All" && (c.industry ?? "") !== discoverIndustry) {
+                return false;
+            }
+            if (discoverSize !== "All" && (c.size ?? "") !== discoverSize) {
+                return false;
+            }
+            return true;
+        });
+    }, [discoveredLeads, discoverRegion, discoverIndustry, discoverSize]);
+
+    const discoverTotalPages = Math.max(1, Math.ceil(filteredDiscoveredLeads.length / pageSize));
     const paginatedDiscoverLeads = useMemo(() => {
         const start = (discoverPage - 1) * pageSize;
-        return discoveredLeads.slice(start, start + pageSize);
-    }, [discoveredLeads, discoverPage, pageSize]);
+        return filteredDiscoveredLeads.slice(start, start + pageSize);
+    }, [filteredDiscoveredLeads, discoverPage, pageSize]);
 
     // Reset page on filter or page-size change.
     useEffect(() => { setMyLeadsPage(1); }, [searchQuery, industry, sizeFilter, pageSize]);
-    useEffect(() => { setDiscoverPage(1); }, [discoveredLeads.length, pageSize]);
+    useEffect(() => { setDiscoverPage(1); }, [filteredDiscoveredLeads.length, pageSize, discoverRegion, discoverIndustry, discoverSize]);
 
     async function handleAddLead(close: () => void) {
         if (!leadCompany.trim() || !companyId || !user) return;
@@ -838,8 +890,8 @@ export default function LiveLeadsPage() {
                                 <Compass className="w-5 h-5 text-brand-600" />
                                 <h3 className="text-md font-semibold text-primary">Discover Companies with Recent Exposures</h3>
                             </div>
-                            <div className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] items-end gap-4 xl:gap-5">
-                                <div className="flex flex-col gap-1">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 items-end gap-x-5 gap-y-4 xl:gap-x-6">
+                                <div className="flex flex-col gap-1 min-w-0">
                                     <label className="text-xs font-medium text-tertiary">Time Range</label>
                                     <NativeSelect
                                         aria-label="Time range"
@@ -849,7 +901,7 @@ export default function LiveLeadsPage() {
                                         selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex flex-col gap-1">
+                                <div className="flex flex-col gap-1 min-w-0">
                                     <label className="text-xs font-medium text-tertiary">Country</label>
                                     <NativeSelect
                                         aria-label="Country"
@@ -877,7 +929,7 @@ export default function LiveLeadsPage() {
                                         selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex flex-col gap-1">
+                                <div className="flex flex-col gap-1 min-w-0">
                                     <label className="text-xs font-medium text-tertiary">Region</label>
                                     <NativeSelect
                                         aria-label="Region"
@@ -890,33 +942,43 @@ export default function LiveLeadsPage() {
                                         selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs font-medium text-tertiary">City</label>
-                                    <InputBase
-                                        size="sm"
-                                        type="text"
-                                        placeholder="Any city"
-                                        value={discoverCity}
-                                        onChange={(value: string) => setDiscoverCity(value)}
+                                <div className="flex flex-col gap-1 min-w-0">
+                                    <label className="text-xs font-medium text-tertiary">Industry</label>
+                                    <NativeSelect
+                                        aria-label="Industry"
+                                        value={discoverIndustry}
+                                        onChange={(e) => setDiscoverIndustry(e.target.value)}
+                                        options={industryOptions.map((i) => ({ label: i === "All" ? "All Industries" : i, value: i }))}
+                                        selectClassName="text-sm"
                                     />
                                 </div>
-                                <div className="flex items-center gap-4">
-                                    <Button
-                                        color="primary"
-                                        size="md"
-                                        iconLeading={SearchLg}
-                                        onClick={handleDiscover}
-                                        isDisabled={isDiscovering}
-                                        className="shrink-0 whitespace-nowrap"
-                                    >
-                                        {isDiscovering ? "Searching..." : "Discover Leads"}
-                                    </Button>
-                                    {discoveredLeads.length > 0 && (
-                                        <span className="text-sm text-tertiary whitespace-nowrap shrink-0">
-                                            Found <span className="font-semibold text-secondary">{discoveredLeads.length}</span> companies
-                                        </span>
-                                    )}
+                                <div className="flex flex-col gap-1 min-w-0">
+                                    <label className="text-xs font-medium text-tertiary">Size</label>
+                                    <NativeSelect
+                                        aria-label="Company size"
+                                        value={discoverSize}
+                                        onChange={(e) => setDiscoverSize(e.target.value)}
+                                        options={sizeOptions.map((s) => ({ label: s === "All" ? "All Sizes" : `${s} employees`, value: s }))}
+                                        selectClassName="text-sm"
+                                    />
                                 </div>
+                            </div>
+                            <div className="flex items-center gap-4 flex-wrap">
+                                <Button
+                                    color="primary"
+                                    size="md"
+                                    iconLeading={SearchLg}
+                                    onClick={handleDiscover}
+                                    isDisabled={isDiscovering}
+                                    className="shrink-0 whitespace-nowrap"
+                                >
+                                    {isDiscovering ? "Searching..." : "Discover Leads"}
+                                </Button>
+                                {discoveredLeads.length > 0 && (
+                                    <span className="text-sm text-tertiary whitespace-nowrap shrink-0">
+                                        Showing <span className="font-semibold text-secondary">{filteredDiscoveredLeads.length}</span> of <span className="font-semibold text-secondary">{discoveredLeads.length}</span> companies
+                                    </span>
+                                )}
                             </div>
 
                             {discoverError && (

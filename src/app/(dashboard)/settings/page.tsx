@@ -328,6 +328,12 @@ function SettingsPageContent() {
     const [associationChips, setAssociationChips] = useState<string[]>([]);
     const [programChips, setProgramChips] = useState<string[]>([]);
 
+    // Brand colors — hex text input is the primary control (client request).
+    // The native <input type="color"> swatch is a visual companion that
+    // stays in sync via the setters below.
+    const [brandPrimaryColor, setBrandPrimaryColor] = useState("#6941C6");
+    const [brandSecondaryColor, setBrandSecondaryColor] = useState("#3538CD");
+
     // Service-area center + radius (orange item 3.4). Persists as
     // company.serviceAreaRadius once saved. When "No limit" is checked, the
     // radius is disabled and the service area is treated as global.
@@ -377,6 +383,8 @@ function SettingsPageContent() {
     useEffect(() => {
         setAssociationChips(company?.associations ?? []);
         setProgramChips(company?.programs ?? []);
+        if (company?.brandPrimaryColor) setBrandPrimaryColor(company.brandPrimaryColor);
+        if (company?.brandSecondaryColor) setBrandSecondaryColor(company.brandSecondaryColor);
         const sar = company?.serviceAreaRadius;
         if (sar) {
             setServiceAreaCenter(sar.centerAddress ?? "");
@@ -391,6 +399,8 @@ function SettingsPageContent() {
     const isIntegrationsGated = isFeatureGated("integrations");
 
     const updateUser = useMutation(api.users.update);
+    const approveUser = useMutation(api.users.approveUser);
+    const rejectUser = useMutation(api.users.rejectUser);
     const updateCompany = useMutation(api.companies.update);
     const createInvitation = useMutation(api.invitations.create);
     const cancelInvitation = useMutation(api.invitations.cancel);
@@ -736,6 +746,42 @@ function SettingsPageContent() {
         setUserMenuAnchor(null);
     };
 
+    // Approve / reject pending users from the team row menu (client request).
+    // Backend is users.approveUser / users.rejectUser — both already enforce
+    // sales_admin role and same-company access, send the corresponding
+    // email, and patch user.status.
+    const handleApproveUser = async (userId: string) => {
+        try {
+            await approveUser({ id: userId as Parameters<typeof approveUser>[0]["id"] });
+            if (companyId && user) {
+                await createAuditLog({ companyId, userId: user._id, action: "user.approved", entityType: "user", entityId: userId, details: "User approved" });
+            }
+            toast.success("User approved");
+        } catch (err) {
+            toast.error(err instanceof Error && /forbidden|admin/i.test(err.message)
+                ? "Only admins can approve users."
+                : "Failed to approve user");
+        }
+        setOpenUserMenu(null);
+        setUserMenuAnchor(null);
+    };
+
+    const handleRejectUser = async (userId: string) => {
+        try {
+            await rejectUser({ id: userId as Parameters<typeof rejectUser>[0]["id"] });
+            if (companyId && user) {
+                await createAuditLog({ companyId, userId: user._id, action: "user.rejected", entityType: "user", entityId: userId, details: "User rejected" });
+            }
+            toast.success("User rejected");
+        } catch (err) {
+            toast.error(err instanceof Error && /forbidden|admin/i.test(err.message)
+                ? "Only admins can reject users."
+                : "Failed to reject user");
+        }
+        setOpenUserMenu(null);
+        setUserMenuAnchor(null);
+    };
+
     const filteredAuditLogs = useMemo(() => {
         if (!auditLogs) return [];
         let filtered = [...auditLogs];
@@ -1035,28 +1081,50 @@ function SettingsPageContent() {
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">BRAND COLORS</h3>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
+                                        {/* Hex text input is the primary control
+                                            per client request; the color swatch
+                                            is a small secondary preview that
+                                            stays in sync with the hex value. */}
                                         <div className="flex flex-col gap-1.5">
                                             <label className="text-sm font-medium text-secondary">Primary Color</label>
                                             <div className="flex items-center gap-3">
                                                 <input
-                                                    type="color"
+                                                    type="text"
                                                     name="brandPrimaryColor"
-                                                    defaultValue={company?.brandPrimaryColor || "#6941C6"}
-                                                    className="h-10 w-12 cursor-pointer rounded-lg border border-secondary bg-primary p-1"
+                                                    value={brandPrimaryColor}
+                                                    onChange={(e) => setBrandPrimaryColor(e.target.value)}
+                                                    placeholder="#6941C6"
+                                                    spellCheck={false}
+                                                    className="h-10 flex-1 rounded-lg border border-secondary bg-primary px-3 text-sm font-mono text-primary uppercase outline-none focus:ring-2 focus:ring-brand-secondary"
                                                 />
-                                                <InputBase size="md" name="brandPrimaryColorHex" defaultValue={company?.brandPrimaryColor || "#6941C6"} className="flex-1" />
+                                                <input
+                                                    type="color"
+                                                    aria-label="Primary color swatch"
+                                                    value={/^#[0-9a-fA-F]{6}$/.test(brandPrimaryColor) ? brandPrimaryColor : "#6941C6"}
+                                                    onChange={(e) => setBrandPrimaryColor(e.target.value.toUpperCase())}
+                                                    className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-secondary bg-primary p-1"
+                                                />
                                             </div>
                                         </div>
                                         <div className="flex flex-col gap-1.5">
                                             <label className="text-sm font-medium text-secondary">Secondary Color</label>
                                             <div className="flex items-center gap-3">
                                                 <input
-                                                    type="color"
+                                                    type="text"
                                                     name="brandSecondaryColor"
-                                                    defaultValue={company?.brandSecondaryColor || "#3538CD"}
-                                                    className="h-10 w-12 cursor-pointer rounded-lg border border-secondary bg-primary p-1"
+                                                    value={brandSecondaryColor}
+                                                    onChange={(e) => setBrandSecondaryColor(e.target.value)}
+                                                    placeholder="#3538CD"
+                                                    spellCheck={false}
+                                                    className="h-10 flex-1 rounded-lg border border-secondary bg-primary px-3 text-sm font-mono text-primary uppercase outline-none focus:ring-2 focus:ring-brand-secondary"
                                                 />
-                                                <InputBase size="md" name="brandSecondaryColorHex" defaultValue={company?.brandSecondaryColor || "#3538CD"} className="flex-1" />
+                                                <input
+                                                    type="color"
+                                                    aria-label="Secondary color swatch"
+                                                    value={/^#[0-9a-fA-F]{6}$/.test(brandSecondaryColor) ? brandSecondaryColor : "#3538CD"}
+                                                    onChange={(e) => setBrandSecondaryColor(e.target.value.toUpperCase())}
+                                                    className="h-10 w-12 shrink-0 cursor-pointer rounded-lg border border-secondary bg-primary p-1"
+                                                />
                                             </div>
                                         </div>
                                     </div>
@@ -1731,14 +1799,29 @@ function SettingsPageContent() {
                                 </div>
                             ) : (
                                 <div className="flex flex-col p-1">
+                                    {/* Pending users get explicit Approve / Reject
+                                        actions so admins can review new signups
+                                        without leaving the team page (client
+                                        request). Once approved or rejected the
+                                        usual Change Role / Deactivate options
+                                        apply. */}
+                                    {member.status === "pending" && (
+                                        <>
+                                            <button type="button" className="rounded-md px-3 py-2 text-left text-sm text-success-primary hover:bg-success-secondary transition-colors" onClick={() => handleApproveUser(member._id)}>Approve User</button>
+                                            <button type="button" className="rounded-md px-3 py-2 text-left text-sm text-error-primary hover:bg-error-secondary transition-colors" onClick={() => handleRejectUser(member._id)}>Reject User</button>
+                                            <div className="my-1 border-t border-secondary" />
+                                        </>
+                                    )}
                                     <button type="button" className="rounded-md px-3 py-2 text-left text-sm text-secondary hover:bg-secondary_hover transition-colors" onClick={() => setEditingRole({ userId: member._id, role: member.role })}>Change Role</button>
-                                    <button
-                                        type="button"
-                                        className={`rounded-md px-3 py-2 text-left text-sm transition-colors ${member.status === "deactivated" ? "text-success-primary hover:bg-success-secondary" : "text-error-primary hover:bg-error-secondary"}`}
-                                        onClick={() => handleToggleStatus(member._id, member.status)}
-                                    >
-                                        {member.status === "deactivated" ? "Reactivate User" : "Deactivate User"}
-                                    </button>
+                                    {member.status !== "pending" && (
+                                        <button
+                                            type="button"
+                                            className={`rounded-md px-3 py-2 text-left text-sm transition-colors ${member.status === "deactivated" ? "text-success-primary hover:bg-success-secondary" : "text-error-primary hover:bg-error-secondary"}`}
+                                            onClick={() => handleToggleStatus(member._id, member.status)}
+                                        >
+                                            {member.status === "deactivated" ? "Reactivate User" : "Deactivate User"}
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>

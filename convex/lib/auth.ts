@@ -64,6 +64,42 @@ export function requireRole(
   }
 }
 
+/**
+ * Verifies the user is a super admin with global access.
+ */
+export function requireSuperAdmin(userRole: string) {
+  if (userRole !== "super_admin") {
+    throw new Error("Forbidden: super admin access required");
+  }
+}
+
+/**
+ * Verifies the user is either a super admin or has company-level admin access.
+ */
+export function requireAdminAccess(userRole: string) {
+  if (!["super_admin", "sales_admin"].includes(userRole)) {
+    throw new Error("Forbidden: admin access required");
+  }
+}
+
+/**
+ * Checks if a user can access a document. Super admins can access any document.
+ */
+export function assertDocumentAccess(
+  user: { role: string; companyId: string },
+  documentCompanyId: string,
+) {
+  // Super admins can access any document
+  if (user.role === "super_admin") {
+    return;
+  }
+  
+  // Regular users can only access their own company's documents
+  if (user.companyId !== documentCompanyId) {
+    throw new Error("Forbidden: access denied");
+  }
+}
+
 // ─── Input Validation Helpers ───────────────────────────────────────────────
 
 const MAX_STRING_LENGTH: Record<string, number> = {

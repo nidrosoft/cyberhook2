@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
@@ -168,7 +168,7 @@ export default function AiAgentsPage() {
 
     useEffect(() => {
         if (!openMenu) return;
-        function handleClickOutside(e: MouseEvent) {
+        function handleClickOutside(e: any) {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 setOpenMenu(null);
             }
@@ -452,12 +452,15 @@ export default function AiAgentsPage() {
                                                     <span className="text-secondary">{calcRate(item.emailsClicked, item.emailsSent)}%</span>
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    <div className="relative" ref={openMenu === item._id ? menuRef : undefined} onClick={(e) => e.stopPropagation()}>
+                                                    <div className="relative" ref={menuRef}>
                                                         <ButtonUtility
                                                             size="sm"
                                                             icon={DotsVertical}
                                                             aria-label="Actions"
-                                                            onClick={() => setOpenMenu(openMenu === item._id ? null : item._id)}
+                                                            onClick={(e: MouseEvent) => {
+                                                                e.stopPropagation();
+                                                                setOpenMenu(openMenu === item._id ? null : item._id);
+                                                            }}
                                                         />
                                                         {openMenu === item._id && (
                                                             <div className="absolute right-0 top-8 z-50 min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg">

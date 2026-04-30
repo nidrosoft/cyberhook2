@@ -219,28 +219,25 @@ export default function PricingCards({ currentPlanId, onManagePlan }: PricingCar
                 : "border-2 border-secondary bg-primary hover:border-brand-secondary transition-colors"
             )}
           >
-            <CardContent className="pt-6">
-              <div className="space-y-2 pb-3">
+            {/* Position badges absolutely so they don't push the price row down
+                on popular / current cards. This keeps $99, $299, $499 aligned
+                across the three columns. */}
+            {(plan.popular || isCurrent(plan.planId)) && (
+              <div className="absolute top-3 right-3 flex flex-wrap justify-end gap-1.5">
                 {plan.popular && (
-                  <div className="mb-2">
-                    <span className="bg-brand-600 text-white px-3 py-1 rounded-full text-xs font-medium">
-                      Most Popular
-                    </span>
-                  </div>
+                  <span className="bg-brand-600 text-white px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap">
+                    Most Popular
+                  </span>
                 )}
-                {isCurrent(plan.planId) && !plan.popular && (
-                  <div className="mb-2">
-                    <span className="bg-brand-50 text-brand-700 px-3 py-1 rounded-full text-xs font-medium border border-brand-200">
-                      Current Plan
-                    </span>
-                  </div>
-                )}
-                {isCurrent(plan.planId) && plan.popular && (
-                  <span className="ml-2 bg-brand-50 text-brand-700 px-3 py-1 rounded-full text-xs font-medium border border-brand-200">
+                {isCurrent(plan.planId) && (
+                  <span className="bg-brand-50 text-brand-700 px-2.5 py-1 rounded-full text-xs font-medium border border-brand-200 whitespace-nowrap">
                     Current Plan
                   </span>
                 )}
-
+              </div>
+            )}
+            <CardContent className="pt-12">
+              <div className="space-y-2 pb-3">
                 <div className="flex items-baseline">
                   <span className="text-4xl font-semibold text-primary">
                     $

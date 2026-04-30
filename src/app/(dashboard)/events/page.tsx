@@ -296,6 +296,7 @@ export default function EventsPage() {
     const userData = useQuery(api.users.getCurrentUserWithCompany);
     const companyId = userData?.company?._id;
     const userId = userData?.user?._id;
+    const userRole = userData?.user?.role;
 
     const allEvents = useQuery(
         api.events.list,
@@ -323,6 +324,10 @@ export default function EventsPage() {
     const [evtEndDate, setEvtEndDate] = useState("");
     const [evtLocation, setEvtLocation] = useState("");
     const [evtIsVirtual, setEvtIsVirtual] = useState(false);
+    // Admin-only flag: when on, the event is added to the "Suggested" tab
+    // for everyone in the company instead of the user's personal upcoming
+    // list (client request — easy way to add suggested events for everyone).
+    const [evtIsSuggested, setEvtIsSuggested] = useState(false);
     const [evtDescription, setEvtDescription] = useState("");
     const [evtOrganizer, setEvtOrganizer] = useState("");
     const [evtHost, setEvtHost] = useState("");
@@ -408,7 +413,7 @@ export default function EventsPage() {
 
     function resetEvtForm() {
         setEvtTitle(""); setEvtType("conference"); setEvtStartDate(""); setEvtStartTime("");
-        setEvtEndDate(""); setEvtLocation(""); setEvtIsVirtual(false); setEvtDescription("");
+        setEvtEndDate(""); setEvtLocation(""); setEvtIsVirtual(false); setEvtIsSuggested(false); setEvtDescription("");
         setEvtOrganizer(""); setEvtHost(""); setEvtMeetingUrl("");
         setEvtTicketUrl(""); setEvtTicketType("free"); setEvtTicketCost(""); setEvtTicketCurrency("USD");
         setEvtReminderPreset("none"); setEvtReminderDays("");
@@ -428,6 +433,7 @@ export default function EventsPage() {
         } else { setEvtEndDate(""); }
         setEvtLocation(ev.location || "");
         setEvtIsVirtual(ev.isVirtual ?? false);
+        setEvtIsSuggested(ev.isSuggested ?? false);
         setEvtDescription(ev.description || "");
         setEvtOrganizer(ev.organizer || "");
         setEvtHost((ev as { host?: string }).host ?? "");
@@ -501,6 +507,7 @@ export default function EventsPage() {
             endDate: endMs,
             location: evtLocation || undefined,
             isVirtual: evtIsVirtual,
+            isSuggested: evtIsSuggested,
             meetingUrl: evtMeetingUrl.trim() || undefined,
             description: evtDescription || undefined,
             organizer: evtOrganizer.trim() || undefined,
@@ -708,6 +715,19 @@ export default function EventsPage() {
                                                         onChange={setEvtIsVirtual}
                                                     />
                                                 </div>
+                                                {/* Admin-only: suggest event to the entire company.
+                                                    When enabled, the event appears in the "Suggested"
+                                                    tab for all users instead of the creator's
+                                                    personal upcoming list. */}
+                                                {userRole === "sales_admin" && (
+                                                    <div>
+                                                        <Toggle
+                                                            label="Suggest to team"
+                                                            isSelected={evtIsSuggested}
+                                                            onChange={setEvtIsSuggested}
+                                                        />
+                                                    </div>
+                                                )}
                                                 {/* Yellow 15.2 — Meeting link for virtual / appointment events. */}
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">Meeting Link (optional)</label>
@@ -1491,6 +1511,16 @@ export default function EventsPage() {
                                     <Toggle isSelected={evtIsVirtual} onChange={setEvtIsVirtual} aria-label="Virtual" />
                                     <span className="text-sm text-secondary">Virtual Event</span>
                                 </div>
+                                {/* Admin-only: suggest event to the entire company.
+                                    When enabled, the event appears in the "Suggested"
+                                    tab for all users instead of the creator's
+                                    personal upcoming list. */}
+                                {userRole === "sales_admin" && (
+                                    <div className="flex items-center gap-3">
+                                        <Toggle isSelected={evtIsSuggested} onChange={setEvtIsSuggested} aria-label="Suggest to team" />
+                                        <span className="text-sm text-secondary">Suggest to team</span>
+                                    </div>
+                                )}
                                 {/* Yellow 15.2 — Meeting link, also shown in the edit panel. */}
                                 <div>
                                     <label className="block text-sm font-medium text-secondary mb-1.5">Meeting Link</label>

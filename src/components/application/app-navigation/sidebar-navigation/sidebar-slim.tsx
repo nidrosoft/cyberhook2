@@ -12,6 +12,7 @@ import { ButtonUtility } from "@/components/base/buttons/button-utility";
 import { CyberHookLogo } from "@/components/foundations/logo/cyberhook-logo";
 import { CyberHookLogoMinimal } from "@/components/foundations/logo/cyberhook-logo";
 import { cx } from "@/utils/cx";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { MobileNavigationHeader } from "../base-components/mobile-header";
 import { NavAccountMenu } from "../base-components/nav-account-card";
 import { NavItemBase } from "../base-components/nav-item";
@@ -36,6 +37,15 @@ export const SidebarNavigationSlim = ({ activeUrl, items, footerItems = [], hide
     const activeItem = [...items, ...footerItems].find((item) => item.href === activeUrl || item.items?.some((subItem) => subItem.href === activeUrl));
     const [currentItem, setCurrentItem] = useState(activeItem || items[1]);
     const [isExpanded, setIsExpanded] = useState(true);
+
+    // Pull the signed-in user so the avatar and name in this slim sidebar
+    // match the user that's actually logged in (client-reported sync issue).
+    const { user, clerkUser } = useCurrentUser();
+    const avatarSrc = user?.imageUrl ?? clerkUser?.imageUrl ?? "";
+    const displayName = user?.firstName
+        ? `${user.firstName} ${user.lastName ?? ""}`.trim()
+        : clerkUser?.fullName ?? "User";
+    const displayEmail = user?.email ?? clerkUser?.primaryEmailAddress?.emailAddress ?? "";
 
     const isSecondarySidebarVisible = isExpanded && Boolean(currentItem.items?.length);
 
@@ -114,7 +124,7 @@ export const SidebarNavigationSlim = ({ activeUrl, items, footerItems = [], hide
                                 cx("group relative inline-flex rounded-full", (isPressed || isFocused) && "outline-2 outline-offset-2 outline-focus-ring")
                             }
                         >
-                            <Avatar status="online" src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face" size="md" alt="Liron" />
+                            <Avatar status="online" src={avatarSrc} size="md" alt={displayName} />
                         </AriaButton>
                         <AriaPopover
                             placement="right bottom"
@@ -163,9 +173,9 @@ export const SidebarNavigationSlim = ({ activeUrl, items, footerItems = [], hide
                             ))}
                         </ul>
                         <div className="sticky bottom-0 mt-auto flex justify-between border-t border-secondary bg-primary px-2 py-5">
-                            <div>
-                                <p className="text-sm font-semibold text-primary">Liron</p>
-                                <p className="text-sm text-tertiary">liron@cyberhook.ai</p>
+                            <div className="min-w-0">
+                                <p className="text-sm font-semibold text-primary truncate">{displayName}</p>
+                                <p className="text-sm text-tertiary truncate">{displayEmail}</p>
                             </div>
                             <div className="absolute top-2.5 right-0">
                                 <ButtonUtility size="sm" color="tertiary" tooltip="Log out" icon={LogOut01} />
@@ -220,9 +230,9 @@ export const SidebarNavigationSlim = ({ activeUrl, items, footerItems = [], hide
                             <AvatarLabelGroup
                                 status="online"
                                 size="md"
-                                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop&crop=face"
-                                title="Liron"
-                                subtitle="liron@cyberhook.ai"
+                                src={avatarSrc}
+                                title={displayName}
+                                subtitle={displayEmail}
                             />
 
                             <div className="absolute top-1/2 right-0 -translate-y-1/2">

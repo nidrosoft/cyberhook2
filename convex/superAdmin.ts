@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { requireAuth } from "./lib/auth";
+import { requireAuth, requireSuperAdmin } from "./lib/auth";
 
 /**
  * Super-admin endpoints for CyberHook internal ops (blue item 1.4).
@@ -9,24 +9,28 @@ import { requireAuth } from "./lib/auth";
  * Unlike `convex/users.ts` which enforces same-company access, these
  * endpoints deliberately read/write across every tenant — they power
  * the internal `/admin/pending-accounts` dashboard. Gating is done by
- * a hardcoded allow-list in the `SUPER_ADMIN_EMAILS` Convex env var
- * (comma-separated). If the var isn't set, these endpoints lock out
- * every caller (fail-closed).
+ * the super_admin role in the user schema or the platform admin email
+ * allow-list below.
  */
 
-function superAdminEmails(): string[] {
-  const raw = process.env.SUPER_ADMIN_EMAILS ?? "";
-  return raw
+const PLATFORM_ADMIN_EMAILS = ["lbenshoshan@amsysis.com", "cyriac@nidrosoft.com"];
+
+function allowedSuperAdminEmails(): string[] {
+  const envEmails = (process.env.SUPER_ADMIN_EMAILS ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+  return Array.from(new Set([...PLATFORM_ADMIN_EMAILS, ...envEmails]));
 }
 
-async function requireSuperAdmin(ctx: any) {
+function isAllowedSuperAdmin(user: { role: string; email: string }) {
+  return user.role === "super_admin" || allowedSuperAdminEmails().includes(user.email.toLowerCase());
+}
+
+async function requireSuperAdminAuth(ctx: any) {
   const user = await requireAuth(ctx);
-  const allow = superAdminEmails();
-  if (allow.length === 0 || !allow.includes(user.email.toLowerCase())) {
-    throw new Error("Forbidden: super-admin access required");
+  if (!isAllowedSuperAdmin(user)) {
+    requireSuperAdmin(user.role);
   }
   return user;
 }
@@ -65,9 +69,114 @@ export const isSuperAdmin = query({
       .query("users")
       .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
       .first();
-    if (!user) return false;
-    const allow = superAdminEmails();
-    return allow.length > 0 && allow.includes(user.email.toLowerCase());
+    if (user) return isAllowedSuperAdmin(user);
+    // No Convex record yet but the Clerk identity is in the platform admin
+    // allow-list — still treat as super admin so the UI renders. The
+    // bootstrap mutation below creates the Convex record on first console load.
+    const email = (identity.email ?? "").toLowerCase();
+    return email.length > 0 && allowedSuperAdminEmails().includes(email);
+  },
+});
+
+/**
+ * Provision a Convex user + system company record for a Clerk-authed
+ * platform admin if they don't already have one. Idempotent. Called from
+ * the admin console on mount so super admins who only exist in Clerk get
+ * their Convex side automatically created (no onboarding wizard needed).
+ *
+ * The Clerk JWT template Convex consumes only exposes `email` for users
+ * whose primary email is verified. Newly provisioned admins may not be
+ * verified yet, so the caller (a server action using Clerk Backend SDK)
+ * passes the canonical email + names that Clerk has on file. We still
+ * validate that email against the platform admin allow-list before
+ * creating the record.
+ */
+export const bootstrapSelf = mutation({
+  args: {
+    email: v.string(),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthorized: not authenticated");
+
+    const email = args.email.trim().toLowerCase();
+    if (!email) throw new Error("Email is required");
+    if (!allowedSuperAdminEmails().includes(email)) {
+      throw new Error("Forbidden: email is not a platform admin");
+    }
+
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .first();
+    if (existing) {
+      // Make sure their role + email are up to date.
+      const patch: Record<string, unknown> = {};
+      if (existing.role !== "super_admin") patch.role = "super_admin";
+      if (existing.status !== "approved") patch.status = "approved";
+      if (existing.email.toLowerCase() !== email) patch.email = email;
+      if (Object.keys(patch).length > 0) {
+        await ctx.db.patch(existing._id, { ...patch, updatedAt: Date.now() });
+      }
+      return { userId: existing._id, companyId: existing.companyId };
+    }
+
+    // Find or create the platform-internal company.
+    const allCompanies = await ctx.db.query("companies").collect();
+    let systemCompany = allCompanies.find((c) => c.name === "CyberHook Platform");
+    if (!systemCompany) {
+      const now = Date.now();
+      const newCompanyId = await ctx.db.insert("companies", {
+        name: "CyberHook Platform",
+        phone: "",
+        website: "https://cyberhook.ai",
+        primaryBusinessModel: "Platform",
+        annualRevenue: "",
+        geographicCoverage: [],
+        targetCustomerBase: [],
+        totalEmployees: "",
+        totalSalesPeople: "",
+        tokenAllocation: 0,
+        tokensUsed: 0,
+        tokenResetDate: now,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const fetched = await ctx.db.get(newCompanyId);
+      if (!fetched) throw new Error("Failed to create platform company");
+      systemCompany = fetched;
+    }
+
+    const firstName =
+      args.firstName?.trim() ||
+      (identity.givenName as string | undefined) ||
+      identity.name?.split(" ")[0] ||
+      "Platform";
+    const lastName =
+      args.lastName?.trim() ||
+      (identity.familyName as string | undefined) ||
+      identity.name?.split(" ").slice(1).join(" ") ||
+      "Admin";
+
+    const now = Date.now();
+    const newUserId = await ctx.db.insert("users", {
+      clerkId: identity.subject,
+      email,
+      firstName,
+      lastName,
+      imageUrl: args.imageUrl || (identity.pictureUrl as string | undefined),
+      companyId: systemCompany._id,
+      role: "super_admin",
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { userId: newUserId, companyId: systemCompany._id };
   },
 });
 
@@ -79,7 +188,7 @@ export const isSuperAdmin = query({
 export const listPendingAccounts = query({
   args: {},
   handler: async (ctx) => {
-    await requireSuperAdmin(ctx);
+    await requireSuperAdminAuth(ctx);
     const pending = await ctx.db
       .query("users")
       .withIndex("by_status", (q) => q.eq("status", "pending"))
@@ -123,7 +232,7 @@ export const listPendingAccounts = query({
 export const approveAccount = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
-    const admin = await requireSuperAdmin(ctx);
+    const admin = await requireSuperAdminAuth(ctx);
     const target = await ctx.db.get(args.id);
     if (!target) throw new Error("User not found");
 
@@ -152,7 +261,7 @@ export const approveAccount = mutation({
 export const rejectAccount = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
-    const admin = await requireSuperAdmin(ctx);
+    const admin = await requireSuperAdminAuth(ctx);
     const target = await ctx.db.get(args.id);
     if (!target) throw new Error("User not found");
 
@@ -179,7 +288,7 @@ export const rejectAccount = mutation({
 export const deactivateAccount = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
-    const admin = await requireSuperAdmin(ctx);
+    const admin = await requireSuperAdminAuth(ctx);
     const target = await ctx.db.get(args.id);
     if (!target) throw new Error("User not found");
     await ctx.db.patch(args.id, { status: "deactivated", updatedAt: Date.now() });
@@ -198,7 +307,7 @@ export const deactivateAccount = mutation({
 export const reactivateAccount = mutation({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
-    const admin = await requireSuperAdmin(ctx);
+    const admin = await requireSuperAdminAuth(ctx);
     const target = await ctx.db.get(args.id);
     if (!target) throw new Error("User not found");
     await ctx.db.patch(args.id, { status: "approved", updatedAt: Date.now() });
@@ -215,16 +324,51 @@ export const reactivateAccount = mutation({
   },
 });
 
+/** Delete a rejected/deactivated app account from Convex after review. */
+export const deleteAccount = mutation({
+  args: { id: v.id("users") },
+  handler: async (ctx, args) => {
+    const admin = await requireSuperAdminAuth(ctx);
+    const target = await ctx.db.get(args.id);
+    if (!target) throw new Error("User not found");
+    if (target._id === admin._id) throw new Error("Cannot delete your own admin account");
+    if (isAllowedSuperAdmin(target)) throw new Error("Cannot delete a platform admin account");
+    if (target.status !== "rejected" && target.status !== "deactivated") {
+      throw new Error("Only rejected or deactivated accounts can be deleted");
+    }
+
+    await writeAdminAudit(
+      ctx,
+      admin,
+      "user.deleted",
+      target,
+      `Deleted ${target.email}`,
+    );
+    await ctx.db.delete(args.id);
+    return { success: true };
+  },
+});
+
 /**
  * Platform-wide KPI snapshot for the super-admin header strip. Counts
  * are computed from a single full scan each (users + companies) — fine
  * for small / medium tenant counts; revisit with aggregates if the user
  * table grows past ~50k rows.
+ *
+ * Revenue rollup: MRR is computed from each company's currently active
+ * planId × the plan price defined in `lib/plans`. Trial / past_due /
+ * cancelled subscriptions don't contribute to MRR. ARR = MRR × 12.
  */
+const PLAN_PRICES: Record<string, number> = {
+  solo: 99,
+  growth: 299,
+  scale: 499,
+};
+
 export const platformMetrics = query({
   args: {},
   handler: async (ctx) => {
-    await requireSuperAdmin(ctx);
+    await requireSuperAdminAuth(ctx);
     const users = await ctx.db.query("users").collect();
     const companies = await ctx.db.query("companies").collect();
     const now = Date.now();
@@ -239,9 +383,24 @@ export const platformMetrics = query({
 
     const byCompanyStatus: Record<string, number> = {};
     let newCompaniesLast7d = 0;
+    let mrr = 0;
+    let payingCompanies = 0;
+    let trialCompanies = 0;
+    const planBreakdown: Record<string, number> = { solo: 0, growth: 0, scale: 0 };
     for (const c of companies) {
       byCompanyStatus[c.status] = (byCompanyStatus[c.status] ?? 0) + 1;
       if (c.createdAt >= sevenDaysAgo) newCompaniesLast7d += 1;
+
+      // Only count revenue from companies on an active subscription.
+      const planActive = c.planStatus === "active";
+      const onTrial = c.planStatus === "trialing" || c.status === "trial";
+      if (planActive && c.planId && c.planId in PLAN_PRICES) {
+        mrr += PLAN_PRICES[c.planId];
+        payingCompanies += 1;
+        planBreakdown[c.planId] = (planBreakdown[c.planId] ?? 0) + 1;
+      } else if (onTrial) {
+        trialCompanies += 1;
+      }
     }
 
     return {
@@ -251,6 +410,13 @@ export const platformMetrics = query({
       companyStatus: byCompanyStatus,
       newUsersLast7d,
       newCompaniesLast7d,
+      revenue: {
+        mrr,
+        arr: mrr * 12,
+        payingCompanies,
+        trialCompanies,
+        planBreakdown,
+      },
     };
   },
 });
@@ -274,7 +440,7 @@ export const listAllAccounts = query({
     search: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSuperAdminAuth(ctx);
 
     const users = args.status
       ? await ctx.db
@@ -336,12 +502,14 @@ export const listAllAccounts = query({
 
 /**
  * Cross-tenant company directory — one row per company with user count
- * and roll-up status. Used for the "Companies" tab.
+ * and roll-up status. Used for the unified "Tenants" tab. Search matches
+ * company fields (name / industry / country / plan) AND any user inside
+ * the company (name / email) so admins can find a tenant by either side.
  */
 export const listAllCompanies = query({
   args: { search: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSuperAdminAuth(ctx);
 
     const companies = await ctx.db.query("companies").collect();
     companies.sort((a, b) => b.createdAt - a.createdAt);
@@ -361,6 +529,7 @@ export const listAllCompanies = query({
           country: c.country,
           status: c.status,
           planId: c.planId,
+          planStatus: c.planStatus,
           trialEndsAt: c.trialEndsAt,
           totalEmployees: c.totalEmployees,
           annualRevenue: c.annualRevenue,
@@ -369,19 +538,29 @@ export const listAllCompanies = query({
           userCount: users.length,
           approvedUsers: approved,
           pendingUsers: pending,
+          // Stash user identifiers for the search filter below; not sent
+          // back to the client (we drop the field in the final return).
+          _userHaystack: users
+            .map((u) => `${u.firstName} ${u.lastName} ${u.email}`)
+            .join(" ")
+            .toLowerCase(),
         };
       }),
     );
 
     const needle = args.search?.trim().toLowerCase();
-    if (!needle) return hydrated;
-    return hydrated.filter((c) =>
-      [c.name, c.industry, c.country, c.planId]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
-    );
+    const filtered = needle
+      ? hydrated.filter((c) => {
+          const companyHay = [c.name, c.industry, c.country, c.planId]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return companyHay.includes(needle) || c._userHaystack.includes(needle);
+        })
+      : hydrated;
+
+    // Strip the internal-only haystack before returning.
+    return filtered.map(({ _userHaystack, ...rest }) => rest);
   },
 });
 
@@ -389,7 +568,7 @@ export const listAllCompanies = query({
 export const getCompanyDetail = query({
   args: { companyId: v.id("companies") },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSuperAdminAuth(ctx);
     const company = await ctx.db.get(args.companyId);
     if (!company) return null;
     const users = await ctx.db
@@ -434,9 +613,9 @@ export const getCompanyDetail = query({
 export const recentAdminActivity = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx);
+    await requireSuperAdminAuth(ctx);
     const limit = Math.min(Math.max(args.limit ?? 10, 1), 50);
-    const actions = ["user.approved", "user.rejected", "user.deactivated"];
+    const actions = ["user.approved", "user.rejected", "user.deactivated", "user.deleted"];
     const rows = (
       await Promise.all(
         actions.map((a) =>

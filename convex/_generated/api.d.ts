@@ -25,6 +25,7 @@ import type * as lib_auth from "../lib/auth.js";
 import type * as lib_plans from "../lib/plans.js";
 import type * as notifications from "../notifications.js";
 import type * as onboarding from "../onboarding.js";
+import type * as portalsLive from "../portalsLive.js";
 import type * as ransomHub from "../ransomHub.js";
 import type * as ransomwareLiveApi from "../ransomwareLiveApi.js";
 import type * as redrokApi from "../redrokApi.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   "lib/plans": typeof lib_plans;
   notifications: typeof notifications;
   onboarding: typeof onboarding;
+  portalsLive: typeof portalsLive;
   ransomHub: typeof ransomHub;
   ransomwareLiveApi: typeof ransomwareLiveApi;
   redrokApi: typeof redrokApi;
