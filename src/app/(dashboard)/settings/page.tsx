@@ -5,10 +5,13 @@ import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { useCurrentUser, useCompany, useTokens, useFileUpload, usePlanGate } from "@/hooks";
 import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
 import { PlanGateBadge } from "@/components/application/upgrade-modal/upgrade-modal";
 import { getPlan } from "@/lib/plans";
+import { friendlyError } from "@/lib/friendly-errors";
+import { validateCompanyLogo } from "@/lib/logo-validation";
 import {
     CreditCard02,
     Copy06,
@@ -344,7 +347,7 @@ function SettingsPageContent() {
 
     const [isSaving, setIsSaving] = useState(false);
 
-    const { upload: uploadFile, isUploading: isFileUploading } = useFileUpload({
+    const { upload: uploadFile, uploadWithMetadata, isUploading: isFileUploading } = useFileUpload({
         onError: (msg) => toast.error(`Upload failed: ${msg}`),
     });
 
@@ -447,18 +450,27 @@ function SettingsPageContent() {
 
     const handleLogoUpload = async (file: File) => {
         if (!company) return;
-        setUploadedLogo(URL.createObjectURL(file));
-        const url = await uploadFile(file);
-        if (url) {
-            await updateCompany({ id: company._id, logoUrl: url });
-            toast.success("Company logo saved");
+        try {
+            const validationError = await validateCompanyLogo(file);
+            if (validationError) {
+                toast.error(validationError);
+                return;
+            }
+            setUploadedLogo(URL.createObjectURL(file));
+            const uploadResult = await uploadWithMetadata(file);
+            if (uploadResult) {
+                await updateCompany({ id: company._id, logoUrl: uploadResult.url, logoStorageId: uploadResult.storageId as Id<"_storage"> });
+                toast.success("Company logo saved");
+            }
+        } catch {
+            toast.error("We couldn't read that logo. Please try a different image.");
         }
     };
 
     const handleLogoDelete = async () => {
         if (!company) return;
         try {
-            await updateCompany({ id: company._id, logoUrl: "" });
+            await updateCompany({ id: company._id, logoUrl: "", logoStorageId: undefined });
             setUploadedLogo(null);
             toast.success("Company logo removed");
         } catch {
@@ -632,7 +644,14 @@ function SettingsPageContent() {
     };
 
     const handleInviteUser = async () => {
-        if (!companyId || !user || !inviteEmail.trim()) return;
+        if (!inviteEmail.trim()) {
+            toast.error("Please enter an email address.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsInviting(true);
         try {
             await createInvitation({
@@ -956,7 +975,7 @@ function SettingsPageContent() {
                                         <div className="flex flex-col gap-1.5">
                                             <Label>Location ID</Label>
                                             <div className="flex items-center gap-2">
-                                                <InputBase size="md" value={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`} isDisabled className="flex-1" />
+                                                <InputBase size="md" value={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`} isDisabled isReadOnly className="flex-1" />
                                                 <Button
                                                     color="secondary"
                                                     size="md"
@@ -1009,9 +1028,9 @@ function SettingsPageContent() {
                                             ) : null}
                                             <FileUpload.DropZone
                                                 className="flex-1"
-                                                accept="image/*"
+                                                accept="image/gif,image/png,image/jpeg,image/jpg,image/jfif,.jfif"
                                                 allowsMultiple={false}
-                                                hint="SVG, PNG or JPG (max. 2MB)"
+                                                hint="GIF, PNG, JPG, JPEG, or JFIF (min 256×256, max 2MB)"
                                                 maxSize={2 * 1024 * 1024}
                                                 onDropFiles={(files) => handleLogoUpload(files[0])}
                                             />
@@ -1456,7 +1475,7 @@ function SettingsPageContent() {
                                                 }
                                             } catch (err) {
                                                 if (process.env.NODE_ENV === "development") console.error(err);
-                                                toast.error(err instanceof Error ? err.message : "Failed to open billing portal");
+                                                toast.error(friendlyError(err, "We couldn't open the billing portal. Please try again."));
                                             }
                                         }}>Update Payment Method</Button>
                                     </div>
@@ -1473,7 +1492,7 @@ function SettingsPageContent() {
                                                     window.location.href = result.url;
                                                 }
                                             } catch (err) {
-                                                toast.error(err instanceof Error ? err.message : "Failed to open billing portal");
+                                                toast.error(friendlyError(err, "We couldn't open the billing portal. Please try again."));
                                             }
                                         }} />
                                     </div>
@@ -1774,10 +1793,10 @@ function SettingsPageContent() {
                 const clampedTop = Math.min(anchor.top, viewportH - 120);
                 const clampedLeft = Math.max(8, Math.min(anchor.left, viewportW - 216));
                 return (
-                    <div className="fixed inset-0 z-[60]" onClick={() => { setOpenUserMenu(null); setUserMenuAnchor(null); setEditingRole(null); }}>
+                    <div className="fixed inset-0 z-[60] pointer-events-none" onClick={() => { setOpenUserMenu(null); setUserMenuAnchor(null); setEditingRole(null); }}>
                         <div
                             ref={menuRef}
-                            className="fixed w-52 rounded-lg border border-secondary bg-primary shadow-xl"
+                            className="fixed w-52 rounded-lg border border-secondary bg-primary shadow-xl pointer-events-auto"
                             style={{ top: clampedTop, left: clampedLeft }}
                             onClick={(e) => e.stopPropagation()}
                         >

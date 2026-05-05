@@ -28,6 +28,7 @@ import { Label } from "@/components/base/input/label";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { Toggle } from "@/components/base/toggle/toggle";
 import { ButtonGroup, ButtonGroupItem } from "@/components/base/button-group/button-group";
+import { friendlyError } from "@/lib/friendly-errors";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
 const steps = [
@@ -956,7 +957,15 @@ export default function NewCampaignPage() {
     };
 
     const handleLaunch = async () => {
-        if (!companyId || !user || !company) return;
+        if (!campaignName.trim()) {
+            toast.error("Please enter a campaign name.");
+            setCurrentStep(1);
+            return;
+        }
+        if (!companyId || !user || !company) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         if (selectedLeadIds.size === 0 && selectedContactIds.size === 0) {
             toast.error("Please select at least one lead or contact for your campaign.");
             return;
@@ -968,7 +977,7 @@ export default function NewCampaignPage() {
             const campaignId = await createCampaign({
                 companyId,
                 createdByUserId: user._id,
-                name: campaignName || "Untitled Campaign",
+                name: campaignName.trim(),
                 description: description || undefined,
                 status: requireApproval ? "draft" : "active",
                 cadencePattern: cadence?.name || selectedCadence,
@@ -1010,7 +1019,7 @@ export default function NewCampaignPage() {
                     campaignId,
                     companyId,
                     recipients: [...leadRecipients, ...contactRecipients],
-                    campaignName: campaignName || "Untitled Campaign",
+                    campaignName: campaignName.trim(),
                     campaignDescription: description || undefined,
                     senderName: fullName || "Sales Team",
                     senderCompany: company.name,
@@ -1023,7 +1032,7 @@ export default function NewCampaignPage() {
             router.push("/ai-agents");
         } catch (error) {
             devError("Failed to create campaign:", error);
-            toast.error("Failed to create campaign. Please try again.");
+            toast.error(friendlyError(error, "We couldn't create that campaign. Please try again."));
         } finally {
             setIsLaunching(false);
         }
@@ -1098,7 +1107,7 @@ export default function NewCampaignPage() {
                     <Step4
                         campaignName={campaignName}
                         selectedCadence={selectedCadence}
-                        selectedLeadCount={selectedLeadIds.size}
+                        selectedLeadCount={selectedLeadIds.size + selectedContactIds.size}
                         activeDays={activeDays}
                         startTime={startTime}
                         endTime={endTime}
@@ -1144,7 +1153,7 @@ export default function NewCampaignPage() {
                             iconLeading={Play}
                             onClick={handleLaunch}
                             isLoading={isLaunching}
-                            isDisabled={selectedLeadIds.size === 0}
+                            isDisabled={selectedLeadIds.size === 0 && selectedContactIds.size === 0}
                         >
                             {requireApproval ? "Save as Draft" : "Launch Campaign"}
                         </Button>

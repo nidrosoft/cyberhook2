@@ -32,6 +32,7 @@ import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-m
 import { Toggle } from "@/components/base/toggle/toggle";
 import { DatePicker } from "@/components/application/date-picker/date-picker";
 import { parseDate } from "@internationalized/date";
+import { friendlyError } from "@/lib/friendly-errors";
 
 const TYPE_LABELS: Record<string, string> = {
     meeting: "Meeting",
@@ -153,7 +154,6 @@ function downloadIcsFile(event: { title: string; startDate: number; endDate?: nu
 function buildOutlookCalendarUrl(event: { title: string; startDate: number; endDate?: number; location?: string; description?: string; isVirtual?: boolean }) {
     const iso = (d: Date) => d.toISOString();
     const params = new URLSearchParams({
-        path: "/calendar/action/compose",
         rru: "addevent",
         subject: event.title,
         startdt: iso(new Date(event.startDate)),
@@ -161,8 +161,12 @@ function buildOutlookCalendarUrl(event: { title: string; startDate: number; endD
         ...(event.location && !event.isVirtual ? { location: event.location } : {}),
         ...(event.description ? { body: event.description } : {}),
     });
-    return `https://outlook.live.com/calendar/0/action/compose?${params.toString()}`;
+    return `https://outlook.live.com/calendar/0/deeplink/compose?${params.toString()}`;
 }
+
+// TODO (Post-May-Update): Native Google Calendar + Microsoft Graph API integration
+// to push events directly into user's connected calendar without a deeplink.
+// Requires OAuth flow setup for both providers.
 
 function getTypeColor(type: string): "brand" | "success" | "warning" | "gray" | "error" {
     if (type === "conference" || type === "trade_show") return "brand";
@@ -345,6 +349,7 @@ export default function EventsPage() {
     // to `evtReminderDays`; presets map to 7 / 14 / 30 days.
     const [evtReminderPreset, setEvtReminderPreset] = useState<"none" | "1w" | "2w" | "1m" | "custom">("none");
     const [evtReminderDays, setEvtReminderDays] = useState("");
+    const [evtErrors, setEvtErrors] = useState<{ title?: string; type?: string; startDate?: string }>({});
 
     const [aptTitle, setAptTitle] = useState("");
     const [aptDate, setAptDate] = useState("");
@@ -417,10 +422,12 @@ export default function EventsPage() {
         setEvtOrganizer(""); setEvtHost(""); setEvtMeetingUrl("");
         setEvtTicketUrl(""); setEvtTicketType("free"); setEvtTicketCost(""); setEvtTicketCurrency("USD");
         setEvtReminderPreset("none"); setEvtReminderDays("");
+        setEvtErrors({});
         setEditingEventId(null);
     }
 
     function populateEvtForm(ev: typeof events[0]) {
+        setEvtErrors({});
         setEditingEventId(ev._id);
         setEvtTitle(ev.title);
         setEvtType(ev.type);
@@ -468,7 +475,26 @@ export default function EventsPage() {
     }
 
     const handleCreateEvent = async (close: () => void) => {
-        if (!evtTitle.trim() || !evtType || !evtStartDate || !companyId || !userId) return;
+        const nextErrors: typeof evtErrors = {};
+        if (!evtTitle.trim()) {
+            nextErrors.title = "Please enter an event title.";
+        }
+        if (!evtType) {
+            nextErrors.type = "Please select an event type.";
+        }
+        if (!evtStartDate) {
+            nextErrors.startDate = "Please select a start date.";
+        }
+        if (Object.keys(nextErrors).length > 0) {
+            setEvtErrors(nextErrors);
+            toast.error("Please complete the required event fields.");
+            return;
+        }
+        setEvtErrors({});
+        if (!companyId || !userId) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
 
         const [y, m, d] = evtStartDate.split("-").map(Number);
         const [hours, minutes] = evtStartTime ? evtStartTime.split(":").map(Number) : [0, 0];
@@ -519,16 +545,20 @@ export default function EventsPage() {
             reminderDate: reminderMs,
         };
 
-        if (editingEventId) {
-            await updateEvent({ id: editingEventId as any, ...commonFields });
-            toast.success("Event updated");
-        } else {
-            await createEvent({ companyId, createdByUserId: userId, ...commonFields });
-            toast.success("Event created");
-        }
+        try {
+            if (editingEventId) {
+                await updateEvent({ id: editingEventId as any, ...commonFields });
+                toast.success("Event updated");
+            } else {
+                await createEvent({ companyId, createdByUserId: userId, ...commonFields });
+                toast.success("Event created");
+            }
 
-        resetEvtForm();
-        close();
+            resetEvtForm();
+            close();
+        } catch (error) {
+            toast.error(friendlyError(error, editingEventId ? "We couldn't update that event. Please try again." : "We couldn't create that event. Please try again."));
+        }
     };
 
     const handleArchiveEvent = async (id: string, archive: boolean) => {
@@ -536,7 +566,7 @@ export default function EventsPage() {
             await updateEvent({ id: id as any, isArchived: archive });
             toast.success(archive ? "Event archived" : "Event restored");
             if (viewingEvent?._id === id) setViewingEvent(null);
-        } catch { toast.error("Failed to update event"); }
+        } catch (error) { toast.error(friendlyError(error, "We couldn't update that event. Please try again.")); }
     };
 
     const handleDeleteEvent = async (id: string) => {
@@ -545,11 +575,18 @@ export default function EventsPage() {
             await removeEvent({ id: id as any });
             toast.success("Event deleted");
             if (viewingEvent?._id === id) setViewingEvent(null);
-        } catch { toast.error("Failed to delete event"); }
+        } catch (error) { toast.error(friendlyError(error, "We couldn't delete that event. Please try again.")); }
     };
 
     const handleSchedule = async (close: () => void) => {
-        if (!aptTitle.trim() || !companyId || !userId) return;
+        if (!aptTitle.trim()) {
+            toast.error("Please enter an appointment title.");
+            return;
+        }
+        if (!companyId || !userId) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
 
         let startMs = Date.now();
         if (aptDate) {
@@ -560,24 +597,28 @@ export default function EventsPage() {
 
         const durationMs = parseInt(aptDuration) * 60 * 1000;
 
-        await createEvent({
-            companyId,
-            createdByUserId: userId,
-            title: aptTitle,
-            type: "appointment",
-            startDate: startMs,
-            endDate: startMs + durationMs,
-            description: aptNotes || undefined,
-            isVirtual: true,
-        });
+        try {
+            await createEvent({
+                companyId,
+                createdByUserId: userId,
+                title: aptTitle,
+                type: "appointment",
+                startDate: startMs,
+                endDate: startMs + durationMs,
+                description: aptNotes || undefined,
+                isVirtual: true,
+            });
 
-        toast.success("Appointment scheduled");
-        setAptTitle("");
-        setAptDate("");
-        setAptTime("");
-        setAptDuration("30");
-        setAptNotes("");
-        close();
+            toast.success("Appointment scheduled");
+            setAptTitle("");
+            setAptDate("");
+            setAptTime("");
+            setAptDuration("30");
+            setAptNotes("");
+            close();
+        } catch (error) {
+            toast.error(friendlyError(error, "We couldn't schedule that appointment. Please try again."));
+        }
     };
 
     return (
@@ -610,28 +651,40 @@ export default function EventsPage() {
                                                     <input
                                                         type="text"
                                                         value={evtTitle}
-                                                        onChange={(e) => setEvtTitle(e.target.value)}
+                                                        onChange={(e) => {
+                                                            setEvtTitle(e.target.value);
+                                                            if (evtErrors.title) setEvtErrors((prev) => ({ ...prev, title: undefined }));
+                                                        }}
                                                         placeholder="Event title..."
-                                                        className="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                                                        className={`w-full rounded-lg border bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary ${evtErrors.title ? "border-error-primary" : "border-primary"}`}
                                                     />
+                                                    {evtErrors.title && <p className="mt-1.5 text-sm text-error-primary">{evtErrors.title}</p>}
                                                 </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">Type *</label>
                                                     <NativeSelect
                                                         options={eventTypeOptions}
                                                         value={evtType}
-                                                        onChange={(e) => setEvtType(e.target.value)}
+                                                        onChange={(e) => {
+                                                            setEvtType(e.target.value);
+                                                            if (evtErrors.type) setEvtErrors((prev) => ({ ...prev, type: undefined }));
+                                                        }}
                                                         className="w-full"
-                                                        selectClassName="w-full rounded-lg border border-primary bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500"
+                                                        selectClassName={`w-full rounded-lg border bg-primary px-3.5 py-2.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 ${evtErrors.type ? "border-error-primary" : "border-primary"}`}
                                                     />
+                                                    {evtErrors.type && <p className="mt-1.5 text-sm text-error-primary">{evtErrors.type}</p>}
                                                 </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">Start Date *</label>
                                                     <DatePicker
                                                         aria-label="Start Date"
                                                         value={evtStartDate ? parseDate(evtStartDate) : undefined}
-                                                        onChange={(val) => setEvtStartDate(val ? val.toString() : "")}
+                                                        onChange={(val) => {
+                                                            setEvtStartDate(val ? val.toString() : "");
+                                                            if (evtErrors.startDate) setEvtErrors((prev) => ({ ...prev, startDate: undefined }));
+                                                        }}
                                                     />
+                                                    {evtErrors.startDate && <p className="mt-1.5 text-sm text-error-primary">{evtErrors.startDate}</p>}
                                                 </div>
                                                 <div>
                                                     <label className="block text-sm font-medium text-secondary mb-1.5">Start Time</label>
@@ -1073,7 +1126,7 @@ export default function EventsPage() {
                                                     {ev.description && (
                                                         <p className="text-xs text-tertiary line-clamp-2">{ev.description}</p>
                                                     )}
-                                                    <div className="flex items-center gap-2 mt-auto pt-2 border-t border-secondary">
+                                                    <div className="flex flex-wrap items-center gap-2 mt-auto pt-2 border-t border-secondary">
                                                         <a
                                                             href={buildGoogleCalendarUrl(ev)}
                                                             target="_blank"
@@ -1092,6 +1145,14 @@ export default function EventsPage() {
                                                             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                                             Outlook
                                                         </a>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => downloadIcsFile(ev)}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-secondary bg-primary text-xs font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>
+                                                            .ics
+                                                        </button>
                                                         <button
                                                             onClick={() => setViewingEvent(ev)}
                                                             className="ml-auto text-xs font-medium text-brand-secondary hover:underline"
@@ -1313,19 +1374,19 @@ export default function EventsPage() {
             {viewingEvent && (
                 <div className="fixed inset-0 z-50 flex justify-end">
                     <div className="absolute inset-0 bg-black/50" onClick={() => setViewingEvent(null)} />
-                    <div className="relative w-full max-w-[480px] bg-primary border-l border-secondary shadow-xl flex flex-col h-full animate-in slide-in-from-right">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-secondary">
+                    <div className="relative w-full max-w-[560px] bg-primary border-l border-secondary shadow-xl flex flex-col h-full animate-in slide-in-from-right">
+                        <div className="flex items-center justify-between gap-4 px-4 py-4 border-b border-secondary sm:px-6">
                             <h2 className="text-lg font-semibold text-primary">Event Details</h2>
                             <button onClick={() => setViewingEvent(null)} className="text-tertiary hover:text-secondary transition-colors text-xl">&times;</button>
                         </div>
-                        <div className="flex-1 overflow-y-auto px-6 py-5">
+                        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                             <div className="flex flex-col gap-5">
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-start gap-3 rounded-xl border border-secondary bg-secondary_subtle p-4">
                                     <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-secondary bg-secondary_subtle">
                                         <Calendar className="w-6 h-6 text-brand-secondary" />
                                     </div>
-                                    <div className="flex flex-col gap-0.5">
-                                        <h3 className="text-md font-semibold text-primary">{viewingEvent.title}</h3>
+                                    <div className="flex min-w-0 flex-col gap-1">
+                                        <h3 className="text-md font-semibold text-primary break-words">{viewingEvent.title}</h3>
                                         <Badge color={getTypeColor(viewingEvent.type)} size="sm">
                                             {TYPE_LABELS[viewingEvent.type] ?? viewingEvent.type}
                                         </Badge>
@@ -1334,20 +1395,20 @@ export default function EventsPage() {
 
                                 <hr className="border-secondary" />
 
-                                <div className="flex flex-col gap-4">
+                                <div className="grid grid-cols-1 gap-3">
                                     <div className="flex items-start gap-3">
                                         <Calendar className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
-                                        <div className="flex flex-col gap-0.5">
+                                        <div className="flex min-w-0 flex-col gap-0.5">
                                             <span className="text-xs font-medium text-tertiary uppercase">Date</span>
-                                            <span className="text-sm text-primary">{formatEventDate(viewingEvent.startDate, viewingEvent.endDate)}</span>
+                                            <span className="text-sm text-primary break-words">{formatEventDate(viewingEvent.startDate, viewingEvent.endDate)}</span>
                                         </div>
                                     </div>
 
                                     <div className="flex items-start gap-3">
                                         <Clock className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
-                                        <div className="flex flex-col gap-0.5">
+                                        <div className="flex min-w-0 flex-col gap-0.5">
                                             <span className="text-xs font-medium text-tertiary uppercase">Time</span>
-                                            <span className="text-sm text-primary">
+                                            <span className="text-sm text-primary break-words">
                                                 {new Date(viewingEvent.startDate).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
                                                 {viewingEvent.endDate && ` – ${new Date(viewingEvent.endDate).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`}
                                             </span>
@@ -1356,16 +1417,11 @@ export default function EventsPage() {
 
                                     <div className="flex items-start gap-3">
                                         <MarkerPin01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
-                                        <div className="flex flex-col gap-0.5">
+                                        <div className="flex min-w-0 flex-col gap-0.5">
                                             <span className="text-xs font-medium text-tertiary uppercase">Location</span>
-                                            <span className="text-sm text-primary">
+                                            <span className="text-sm text-primary break-words">
                                                 {viewingEvent.isVirtual ? "Virtual" : (viewingEvent.location || "Not specified")}
                                             </span>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-5 h-5 flex items-center justify-center shrink-0 mt-0.5">
                                             <Badge color={getFormatColor(viewingEvent.isVirtual)} size="sm">
                                                 {viewingEvent.isVirtual ? "Virtual" : "In Person"}
                                             </Badge>
@@ -1375,9 +1431,9 @@ export default function EventsPage() {
                                     {viewingEvent.organizer && (
                                         <div className="flex items-start gap-3">
                                             <User01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
-                                            <div className="flex flex-col gap-0.5">
+                                            <div className="flex min-w-0 flex-col gap-0.5">
                                                 <span className="text-xs font-medium text-tertiary uppercase">Organizer</span>
-                                                <span className="text-sm text-primary">{viewingEvent.organizer}</span>
+                                                <span className="text-sm text-primary break-words">{viewingEvent.organizer}</span>
                                             </div>
                                         </div>
                                     )}
@@ -1385,13 +1441,13 @@ export default function EventsPage() {
                                     {(viewingEvent.ticketUrl || viewingEvent.ticketCost) && (
                                         <div className="flex items-start gap-3">
                                             <Ticket01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
-                                            <div className="flex flex-col gap-0.5">
+                                            <div className="flex min-w-0 flex-col gap-0.5">
                                                 <span className="text-xs font-medium text-tertiary uppercase">Tickets</span>
                                                 {viewingEvent.ticketCost != null && (
                                                     <span className="text-sm text-primary">${viewingEvent.ticketCost.toLocaleString()}</span>
                                                 )}
                                                 {viewingEvent.ticketUrl && (
-                                                    <a href={viewingEvent.ticketUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-brand-secondary hover:underline truncate max-w-[280px]">
+                                                    <a href={viewingEvent.ticketUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-brand-secondary hover:underline break-all">
                                                         {viewingEvent.ticketUrl}
                                                     </a>
                                                 )}
@@ -1402,7 +1458,7 @@ export default function EventsPage() {
                                     {viewingEvent.reminderDate && (
                                         <div className="flex items-start gap-3">
                                             <Bell01 className="w-5 h-5 text-tertiary mt-0.5 shrink-0" />
-                                            <div className="flex flex-col gap-0.5">
+                                            <div className="flex min-w-0 flex-col gap-0.5">
                                                 <span className="text-xs font-medium text-tertiary uppercase">Reminder</span>
                                                 <span className="text-sm text-primary">
                                                     {new Date(viewingEvent.reminderDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
@@ -1417,7 +1473,7 @@ export default function EventsPage() {
                                         <hr className="border-secondary" />
                                         <div className="flex flex-col gap-1.5">
                                             <span className="text-xs font-medium text-tertiary uppercase">Description</span>
-                                            <p className="text-sm text-secondary leading-relaxed whitespace-pre-wrap">{viewingEvent.description}</p>
+                                            <p className="text-sm text-secondary leading-relaxed whitespace-pre-wrap break-words">{viewingEvent.description}</p>
                                         </div>
                                     </>
                                 )}
@@ -1425,12 +1481,12 @@ export default function EventsPage() {
                                 <hr className="border-secondary" />
                                 <div className="flex flex-col gap-2">
                                     <span className="text-xs font-medium text-tertiary uppercase">Add to Calendar</span>
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                         <a
                                             href={buildGoogleCalendarUrl(viewingEvent)}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
                                         >
                                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                             Google Calendar
@@ -1439,7 +1495,7 @@ export default function EventsPage() {
                                             href={buildOutlookCalendarUrl(viewingEvent)}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
                                         >
                                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                             Outlook
@@ -1447,7 +1503,7 @@ export default function EventsPage() {
                                         <button
                                             type="button"
                                             onClick={() => downloadIcsFile(viewingEvent)}
-                                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
+                                            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-secondary bg-primary text-sm font-medium text-secondary hover:bg-secondary_hover transition-colors"
                                         >
                                             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>
                                             Download .ics
@@ -1456,7 +1512,7 @@ export default function EventsPage() {
                                 </div>
                             </div>
                         </div>
-                        <div className="px-6 py-4 border-t border-secondary flex items-center gap-3">
+                        <div className="px-4 py-4 border-t border-secondary flex flex-col gap-3 sm:flex-row sm:items-center sm:px-6">
                             <Button size="md" color="secondary" className="flex-1" onClick={() => setViewingEvent(null)}>Close</Button>
                             <button onClick={() => { populateEvtForm(viewingEvent); setViewingEvent(null); setShowEditSlideout(true); }} className="px-4 py-2.5 rounded-lg border border-primary text-secondary hover:bg-secondary_subtle text-sm font-medium transition-colors">
                                 Edit

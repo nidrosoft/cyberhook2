@@ -187,7 +187,14 @@ export default function WatchlistPage() {
     }, [watchlistItems, domainSearch, filterStatus, filterAlertLevel]);
 
     async function handleAddDomain(close: () => void) {
-        if (!companyId || !user || !newDomain.trim()) return;
+        if (!newDomain.trim()) {
+            toast.error("Please enter a domain to monitor.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
 
         if (!canPerformAction("watchlist")) {
             showUpgradeModal(planId, {

@@ -36,6 +36,7 @@ import { Tabs } from "@/components/application/tabs/tabs";
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { sanitizeUrl } from "@/utils/sanitize-url";
+import { friendlyError } from "@/lib/friendly-errors";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -239,7 +240,14 @@ export default function RfpHubPage() {
     }
 
     async function handleCreateUseCase(close: () => void) {
-        if (!companyId || !user || !ucTitle.trim()) return;
+        if (!ucTitle.trim()) {
+            toast.error("Please enter a use case title.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsUcSubmitting(true);
         try {
             const payload = {
@@ -263,11 +271,18 @@ export default function RfpHubPage() {
             }
             resetUcForm();
             close();
-        } catch (e) { devError("rfp:", e); toast.error(editingUcId ? "Failed to update use case" : "Failed to create use case"); } finally { setIsUcSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error(friendlyError(e, editingUcId ? "We couldn't update that use case. Please try again." : "We couldn't create that use case. Please try again.")); } finally { setIsUcSubmitting(false); }
     }
 
     async function handleCreateCert(close: () => void) {
-        if (!companyId || !user || !certName.trim()) return;
+        if (!certName.trim()) {
+            toast.error("Please enter a certification name.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsCertSubmitting(true);
         try {
             await createCertification({
@@ -278,7 +293,7 @@ export default function RfpHubPage() {
             toast.success("Certification added");
             setCertName(""); setCertCategory("certification"); setCertStatus("active"); setCertAuthority(""); setCertDesc("");
             close();
-        } catch (e) { devError("rfp:", e); toast.error("Failed to add certification"); } finally { setIsCertSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error(friendlyError(e, "We couldn't add that certification. Please try again.")); } finally { setIsCertSubmitting(false); }
     }
 
     function resetRfpForm() {
@@ -295,7 +310,22 @@ export default function RfpHubPage() {
     }
 
     async function handleCreateRfpEntry(close: () => void) {
-        if (!companyId || !user || !rfpTitle.trim() || !rfpClient.trim() || !rfpDeadline) return;
+        if (!rfpTitle.trim()) {
+            toast.error("Please enter an RFP title.");
+            return;
+        }
+        if (!rfpClient.trim()) {
+            toast.error("Please enter the client or prospect name.");
+            return;
+        }
+        if (!rfpDeadline) {
+            toast.error("Please select a submission deadline.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsRfpSubmitting(true);
         try {
             const payload = {
@@ -315,7 +345,7 @@ export default function RfpHubPage() {
             }
             resetRfpForm();
             close();
-        } catch (e) { devError("rfp:", e); toast.error(editingRfpId ? "Failed to update RFP entry" : "Failed to create RFP entry"); } finally { setIsRfpSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error(friendlyError(e, editingRfpId ? "We couldn't update that RFP entry. Please try again." : "We couldn't create that RFP entry. Please try again.")); } finally { setIsRfpSubmitting(false); }
     }
 
     async function handleRfpStatusChange(id: Id<"rfpEntries">, status: "won" | "lost") {
@@ -326,7 +356,18 @@ export default function RfpHubPage() {
     }
 
     async function handleCreateAnswer(close: () => void) {
-        if (!companyId || !user || !ansCategory.trim() || !ansAnswer.trim()) return;
+        if (!ansCategory.trim()) {
+            toast.error("Please enter an answer category.");
+            return;
+        }
+        if (!ansAnswer.trim()) {
+            toast.error("Please enter an answer.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsAnsSubmitting(true);
         try {
             await createRfpAnswer({
@@ -336,7 +377,7 @@ export default function RfpHubPage() {
             toast.success("Answer added to bank");
             setAnsCategory(""); setAnsAnswer("");
             close();
-        } catch (e) { devError("rfp:", e); toast.error("Failed to add answer"); } finally { setIsAnsSubmitting(false); }
+        } catch (e) { devError("rfp:", e); toast.error(friendlyError(e, "We couldn't add that answer. Please try again.")); } finally { setIsAnsSubmitting(false); }
     }
 
     const [pendingDelete, setPendingDelete] = useState<{ label: string; action: () => void } | null>(null);

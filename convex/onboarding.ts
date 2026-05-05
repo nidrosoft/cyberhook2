@@ -4,6 +4,18 @@ import { api, internal } from "./_generated/api";
 import { getPlanLimits, getTokenAllocationForPlan, DEFAULT_PLAN } from "./lib/plans";
 import type { PlanTier } from "./lib/plans";
 
+function requireText(value: string, message: string) {
+  if (!value || !value.trim()) {
+    throw new Error(message);
+  }
+}
+
+function requireNonEmptyArray(value: string[], message: string) {
+  if (!value || value.length === 0 || value.every((item) => !item.trim())) {
+    throw new Error(message);
+  }
+}
+
 // Complete onboarding - creates company and user records
 export const completeOnboarding = mutation({
   args: {
@@ -34,6 +46,7 @@ export const completeOnboarding = mutation({
     notes: v.optional(v.string()),
     // Team & Branding (Step 3)
     logoUrl: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
     teamEmails: v.optional(v.array(v.string())),
     // Plan selection (Step 4)
     selectedPlanId: v.optional(v.string()),
@@ -62,6 +75,15 @@ export const completeOnboarding = mutation({
     if (!args.paymentMethodProvided) {
       throw new Error("Payment details are required to start your trial.");
     }
+    requireText(args.companyName, "Company name is required.");
+    requireText(args.phone, "Phone number is required.");
+    requireText(args.website, "Website is required.");
+    requireText(args.primaryBusinessModel, "Primary business model is required.");
+    requireText(args.annualRevenue, "Annual revenue is required.");
+    requireNonEmptyArray(args.geographicCoverage, "Select at least one geographic coverage area.");
+    requireNonEmptyArray(args.targetCustomerBase, "Select at least one target customer segment.");
+    requireText(args.totalEmployees, "Total employees is required.");
+    requireText(args.totalSalesPeople, "Total sales people is required.");
 
     const now = Date.now();
     const planId = (args.selectedPlanId === "solo" || args.selectedPlanId === "growth" || args.selectedPlanId === "scale")
@@ -95,6 +117,7 @@ export const completeOnboarding = mutation({
       phone: args.phone,
       website: args.website,
       logoUrl: args.logoUrl,
+      logoStorageId: args.logoStorageId,
       primaryBusinessModel: args.primaryBusinessModel,
       secondaryBusinessModel: args.secondaryBusinessModel,
       annualRevenue: args.annualRevenue,
@@ -134,7 +157,7 @@ export const completeOnboarding = mutation({
       updatedAt: now,
     });
 
-    // Create user as sales_admin (first user / company owner is always admin + auto-approved)
+    // Create user as sales_admin (first user / company owner waits for platform approval)
     const userId = await ctx.db.insert("users", {
       clerkId: args.clerkId,
       email: args.email,
@@ -143,7 +166,7 @@ export const completeOnboarding = mutation({
       imageUrl: args.imageUrl,
       companyId,
       role: "sales_admin",
-      status: "approved",
+      status: "pending",
       createdAt: now,
       updatedAt: now,
     });
@@ -167,7 +190,7 @@ export const completeOnboarding = mutation({
 
       for (const email of args.teamEmails) {
         if (email && email.trim() && email !== args.email) {
-          await ctx.db.insert("invitations", {
+          const invitationId = await ctx.db.insert("invitations", {
             companyId,
             email: email.trim().toLowerCase(),
             role: "sales_rep",
@@ -175,10 +198,12 @@ export const completeOnboarding = mutation({
             invitedByUserId: userId,
             expiresAt,
             createdAt: now,
+            emailDeliveryStatus: "pending",
           });
 
           // Send invite email to each team member
           await ctx.scheduler.runAfter(0, internal.emails.sendInviteEmailInternal, {
+            invitationId,
             inviterName,
             companyName: args.companyName,
             inviteeEmail: email.trim().toLowerCase(),

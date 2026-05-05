@@ -5,8 +5,10 @@ import { useUser, useSession } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { setOnboardingComplete } from "@/app/actions/clerk";
 import { useFileUpload } from "@/hooks/use-file-upload";
+import { validateCompanyLogo } from "@/lib/logo-validation";
 import {
     ArrowLeft,
     ArrowRight,
@@ -32,6 +34,7 @@ import { Badge } from "@/components/base/badges/badges";
 import { InputBase, TextField } from "@/components/base/input/input";
 import { Label } from "@/components/base/input/label";
 import { Select } from "@/components/base/select/select";
+import { friendlyError } from "@/lib/friendly-errors";
 import { PLANS, PLAN_ORDER, type PlanTier } from "@/lib/plans";
 import { CheckCircle } from "@untitledui/icons";
 
@@ -42,7 +45,6 @@ const businessModels = [
     { id: "vad", label: "VAD" },
     { id: "tap", label: "TAP" },
     { id: "consultant", label: "Consultant/Referral Partner" },
-    { id: "not-set", label: "Not set" },
 ];
 
 const revenueRanges = [
@@ -108,11 +110,14 @@ interface FormData {
     selectedPlan: PlanTier;
     planSelectedManually: boolean;
     logoUrl: string;
+    logoStorageId: Id<"_storage"> | "";
     cardNumber: string;
     cardExpiry: string;
     cardCvc: string;
     cardZip: string;
 }
+
+type FieldErrors = Partial<Record<keyof FormData, string>>;
 
 const STORAGE_KEY_STEP = "cyberhook_onboarding_step";
 const STORAGE_KEY_FORM = "cyberhook_onboarding_form";
@@ -131,6 +136,7 @@ const defaultFormData: FormData = {
     selectedPlan: "growth",
     planSelectedManually: false,
     logoUrl: "",
+    logoStorageId: "",
     cardNumber: "",
     cardExpiry: "",
     cardCvc: "",
@@ -165,9 +171,10 @@ export default function OnboardingPage() {
     const [step, setStepRaw] = useState(loadSavedStep);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
     const [formData, setFormData] = useState<FormData>(loadSavedForm);
-    const { upload: uploadLogo, isUploading: isLogoUploading } = useFileUpload();
+    const { uploadWithMetadata: uploadLogo, isUploading: isLogoUploading } = useFileUpload();
     const [logoError, setLogoError] = useState<string | null>(null);
 
     const setStep = useCallback((s: number) => {
@@ -219,8 +226,22 @@ export default function OnboardingPage() {
         };
     }, [formData.planSelectedManually, formData.cardNumber, formData.cardExpiry, formData.cardCvc, formData.cardZip]);
 
+    const setErrorsForFields = useCallback((keys: Array<keyof FormData>, errors: FieldErrors) => {
+        setFieldErrors((prev) => {
+            const next = { ...prev };
+            keys.forEach((key) => delete next[key]);
+            return { ...next, ...errors };
+        });
+    }, []);
+
     const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
         setFormData((prev) => ({ ...prev, [key]: value }));
+        setFieldErrors((prev) => {
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
     };
 
     const toggleArrayField = (key: "geoCoverage" | "targetCustomers", value: string) => {
@@ -230,7 +251,49 @@ export default function OnboardingPage() {
                 ? prev[key].filter((v) => v !== value)
                 : [...prev[key], value],
         }));
+        setFieldErrors((prev) => {
+            if (!prev[key]) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
     };
+
+    const validateStep1 = useCallback(() => {
+        const errors: FieldErrors = {};
+        if (!formData.companyName.trim()) errors.companyName = "Company name is required.";
+        if (!formData.phone.trim()) errors.phone = "Phone number is required.";
+        if (!formData.website.trim()) errors.website = "Website is required.";
+        setErrorsForFields(["companyName", "phone", "website"], errors);
+        return Object.keys(errors).length === 0;
+    }, [formData.companyName, formData.phone, formData.website, setErrorsForFields]);
+
+    const validateStep2 = useCallback(() => {
+        const errors: FieldErrors = {};
+        if (!formData.businessModel) errors.businessModel = "Primary business model is required.";
+        if (!formData.annualRevenue) errors.annualRevenue = "Annual revenue is required.";
+        if (formData.geoCoverage.length === 0) errors.geoCoverage = "Select at least one geographic coverage area.";
+        if (formData.targetCustomers.length === 0) errors.targetCustomers = "Select at least one target customer segment.";
+        if (!formData.totalEmployees) errors.totalEmployees = "Total employees is required.";
+        if (!formData.totalSales) errors.totalSales = "Total sales people is required.";
+        setErrorsForFields(["businessModel", "annualRevenue", "geoCoverage", "targetCustomers", "totalEmployees", "totalSales"], errors);
+        return Object.keys(errors).length === 0;
+    }, [formData.businessModel, formData.annualRevenue, formData.geoCoverage, formData.targetCustomers, formData.totalEmployees, formData.totalSales, setErrorsForFields]);
+
+    const goToStep = useCallback((nextStep: number) => {
+        setError(null);
+        if (nextStep > 1 && !validateStep1()) {
+            setError("Please complete the required company fields before continuing.");
+            setStep(1);
+            return;
+        }
+        if (nextStep > 2 && !validateStep2()) {
+            setError("Please complete the required business details before continuing.");
+            setStep(2);
+            return;
+        }
+        setStep(nextStep);
+    }, [setStep, validateStep1, validateStep2]);
 
     const steps = getSteps(step);
 
@@ -275,18 +338,21 @@ export default function OnboardingPage() {
                                 <Label>Company Name</Label>
                                 <InputBase size="md" placeholder="Acme Security LLC" icon={Building07} />
                             </TextField>
+                            {fieldErrors.companyName && <p className="text-xs text-error-primary">{fieldErrors.companyName}</p>}
                             <TextField name="phone" isRequired type="tel" value={formData.phone} onChange={(v) => updateField("phone", v)}>
                                 <Label>Phone</Label>
                                 <InputBase size="md" placeholder="+1 (555) 000-0000" icon={Phone} />
                             </TextField>
+                            {fieldErrors.phone && <p className="text-xs text-error-primary">{fieldErrors.phone}</p>}
                             <TextField name="website" isRequired type="url" value={formData.website} onChange={(v) => updateField("website", v)}>
                                 <Label>Website</Label>
                                 <InputBase size="md" placeholder="https://yourcompany.com" icon={Globe01} />
                             </TextField>
+                            {fieldErrors.website && <p className="text-xs text-error-primary">{fieldErrors.website}</p>}
                         </div>
 
                         <div className="flex justify-end pt-4">
-                            <Button color="primary" size="lg" iconTrailing={ArrowRight} onClick={() => setStep(2)}>
+                            <Button color="primary" size="lg" iconTrailing={ArrowRight} onClick={() => goToStep(2)}>
                                 Next
                             </Button>
                         </div>
@@ -313,6 +379,7 @@ export default function OnboardingPage() {
                                     <Select.Item key={m.id} id={m.id}>{m.label}</Select.Item>
                                 ))}
                             </Select>
+                            {fieldErrors.businessModel && <p className="text-xs text-error-primary">{fieldErrors.businessModel}</p>}
 
                             <Select
                                 name="annualRevenue"
@@ -325,9 +392,10 @@ export default function OnboardingPage() {
                                     <Select.Item key={r.id} id={r.id}>{r.label}</Select.Item>
                                 ))}
                             </Select>
+                            {fieldErrors.annualRevenue && <p className="text-xs text-error-primary">{fieldErrors.annualRevenue}</p>}
 
                             <div className="flex flex-col gap-2">
-                                <Label>Geographic Coverage</Label>
+                                <Label>Geographic Coverage *</Label>
                                 <div className="flex flex-wrap gap-2">
                                     {geoOptions.map((g) => (
                                         <button
@@ -344,10 +412,11 @@ export default function OnboardingPage() {
                                         </button>
                                     ))}
                                 </div>
+                                {fieldErrors.geoCoverage && <p className="text-xs text-error-primary">{fieldErrors.geoCoverage}</p>}
                             </div>
 
                             <div className="flex flex-col gap-2">
-                                <Label>Target Customer Base</Label>
+                                <Label>Target Customer Base *</Label>
                                 <div className="flex flex-wrap gap-2">
                                     {customerOptions.map((c) => (
                                         <button
@@ -364,6 +433,7 @@ export default function OnboardingPage() {
                                         </button>
                                     ))}
                                 </div>
+                                {fieldErrors.targetCustomers && <p className="text-xs text-error-primary">{fieldErrors.targetCustomers}</p>}
                             </div>
 
                             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -378,6 +448,7 @@ export default function OnboardingPage() {
                                         <Select.Item key={e.id} id={e.id}>{e.label}</Select.Item>
                                     ))}
                                 </Select>
+                                {fieldErrors.totalEmployees && <p className="text-xs text-error-primary">{fieldErrors.totalEmployees}</p>}
 
                                 <Select
                                     name="totalSales"
@@ -390,6 +461,7 @@ export default function OnboardingPage() {
                                         <Select.Item key={s.id} id={s.id}>{s.label}</Select.Item>
                                     ))}
                                 </Select>
+                                {fieldErrors.totalSales && <p className="text-xs text-error-primary">{fieldErrors.totalSales}</p>}
                             </div>
                         </div>
 
@@ -397,7 +469,7 @@ export default function OnboardingPage() {
                             <Button color="secondary" size="lg" iconLeading={ArrowLeft} onClick={() => setStep(1)}>
                                 Back
                             </Button>
-                            <Button color="primary" size="lg" iconTrailing={ArrowRight} onClick={() => setStep(3)}>
+                            <Button color="primary" size="lg" iconTrailing={ArrowRight} onClick={() => goToStep(3)}>
                                 Next
                             </Button>
                         </div>
@@ -448,8 +520,8 @@ export default function OnboardingPage() {
                                     </div>
                                 ) : (
                                     <FileUpload.DropZone
-                                        accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml"
-                                        hint="PNG, JPG, JFIF, GIF, or SVG (min 256×256, max 2MB)"
+                                        accept="image/gif,image/png,image/jpeg,image/jpg,image/jfif,.jfif"
+                                        hint="GIF, PNG, JPG, JPEG, or JFIF (min 256×256, max 2MB)"
                                         className="w-full"
                                         allowsMultiple={false}
                                         maxSize={2 * 1024 * 1024}
@@ -459,9 +531,14 @@ export default function OnboardingPage() {
                                             if (!file) return;
                                             setLogoError(null);
                                             try {
-                                                const url = await uploadLogo(file);
-                                                if (url) {
-                                                    setFormData((prev) => ({ ...prev, logoUrl: url }));
+                                                const validationError = await validateCompanyLogo(file);
+                                                if (validationError) {
+                                                    setLogoError(validationError);
+                                                    return;
+                                                }
+                                                const uploadResult = await uploadLogo(file);
+                                                if (uploadResult) {
+                                                    setFormData((prev) => ({ ...prev, logoUrl: uploadResult.url, logoStorageId: uploadResult.storageId as Id<"_storage"> }));
                                                 } else {
                                                     setLogoError("Failed to upload logo. Please try again.");
                                                 }
@@ -486,7 +563,7 @@ export default function OnboardingPage() {
                             <Button color="secondary" size="lg" iconLeading={ArrowLeft} onClick={() => setStep(2)}>
                                 Back
                             </Button>
-                            <Button color="primary" size="lg" iconTrailing={ArrowRight} onClick={() => setStep(4)}>
+                            <Button color="primary" size="lg" iconTrailing={ArrowRight} onClick={() => goToStep(4)}>
                                 Next
                             </Button>
                         </div>
@@ -661,6 +738,20 @@ export default function OnboardingPage() {
                                 disabled={isSubmitting || !step4Validation.allValid}
                                 onClick={async () => {
                                     if (!user) return;
+                                    if (!validateStep1()) {
+                                        setError("Please complete the required company fields before continuing.");
+                                        setStep(1);
+                                        return;
+                                    }
+                                    if (!validateStep2()) {
+                                        setError("Please complete the required business details before continuing.");
+                                        setStep(2);
+                                        return;
+                                    }
+                                    if (!step4Validation.allValid) {
+                                        setError("Please enter your credit card information to start your free trial.");
+                                        return;
+                                    }
                                     setIsSubmitting(true);
                                     setError(null);
                                     try {
@@ -688,6 +779,7 @@ export default function OnboardingPage() {
                                             totalSalesPeople: formData.totalSales,
                                             teamEmails: teamEmailsArray,
                                             logoUrl: formData.logoUrl || undefined,
+                                            logoStorageId: formData.logoStorageId || undefined,
                                             selectedPlanId: formData.selectedPlan,
                                             planSelectedManually: formData.planSelectedManually,
                                             paymentMethodProvided: step4Validation.allValid,
@@ -708,14 +800,14 @@ export default function OnboardingPage() {
                                                 await session.reload();
                                             }
 
-                                            window.location.href = "/dashboard";
+                                            window.location.href = "/pending-approval";
                                         } else {
                                             setError("Failed to complete onboarding. Please try again.");
                                             setIsSubmitting(false);
                                         }
                                     } catch (err) {
                                         if (process.env.NODE_ENV === "development") console.error("Error completing onboarding:", err);
-                                        setError(err instanceof Error ? err.message : "An error occurred");
+                                        setError(friendlyError(err, "We couldn't complete onboarding. Please try again."));
                                         setIsSubmitting(false);
                                     }
                                 }}

@@ -48,7 +48,6 @@ export default defineSchema({
     name: v.string(),
     phone: v.string(),
     website: v.string(),
-    logoUrl: v.optional(v.string()),
     // Business details
     primaryBusinessModel: v.string(),
     secondaryBusinessModel: v.optional(v.string()),
@@ -65,6 +64,9 @@ export default defineSchema({
     supportPhone: v.optional(v.string()),
     salesPhone: v.optional(v.string()),
     salesTeamSize: v.optional(v.string()),
+    // Branding
+    logoUrl: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
     // Multi-location support (V2)
     locations: v.optional(
       v.array(

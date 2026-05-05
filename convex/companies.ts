@@ -107,6 +107,7 @@ export const create = mutation({
     phone: v.string(),
     website: v.string(),
     logoUrl: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
     primaryBusinessModel: v.string(),
     secondaryBusinessModel: v.optional(v.string()),
     annualRevenue: v.string(),
@@ -158,6 +159,7 @@ export const update = mutation({
     phone: v.optional(v.string()),
     website: v.optional(v.string()),
     logoUrl: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
     primaryBusinessModel: v.optional(v.string()),
     secondaryBusinessModel: v.optional(v.string()),
     annualRevenue: v.optional(v.string()),
@@ -448,6 +450,7 @@ export const internalCreate = internalMutation({
     phone: v.string(),
     website: v.string(),
     logoUrl: v.optional(v.string()),
+    logoStorageId: v.optional(v.id("_storage")),
     primaryBusinessModel: v.string(),
     secondaryBusinessModel: v.optional(v.string()),
     annualRevenue: v.string(),
@@ -595,14 +598,6 @@ export const adminUpgradePlan = internalMutation({
       updatedAt: Date.now(),
     });
 
-    // Also approve the user so they can access the dashboard
-    if (user.status !== "approved") {
-      await ctx.db.patch(user._id, {
-        status: "approved",
-        updatedAt: Date.now(),
-      });
-    }
-
-    return { companyId: company._id, companyName: company.name, planId: args.planId, userApproved: true };
+    return { companyId: company._id, companyName: company.name, planId: args.planId, userApproved: user.status === "approved" };
   },
 });

@@ -11,6 +11,7 @@ export interface Company {
     phone: string;
     website?: string;
     logoUrl?: string;
+    logoStorageId?: Id<"_storage">;
     primaryBusinessModel: string;
     secondaryBusinessModel?: string;
     annualRevenue: string;

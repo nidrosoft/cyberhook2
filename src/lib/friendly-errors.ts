@@ -27,6 +27,16 @@ const PATTERNS: Array<{ test: RegExp; message: string }> = [
         message:
             "This feature is temporarily unavailable while our team finishes setting it up. Please check back shortly.",
     },
+    {
+        test: /payment details are required|payment method.*required|card information|required to start.*trial/i,
+        message:
+            "Please enter your credit card information to start your free trial.",
+    },
+    {
+        test: /card.*declined|declined card|do_not_honor|insufficient_funds/i,
+        message:
+            "Your card was declined. Please try a different payment method.",
+    },
 
     // Rate limits / quotas.
     {

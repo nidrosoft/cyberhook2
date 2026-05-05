@@ -80,6 +80,7 @@ export default function LiveSearchPage() {
     const { searches, canPerformAction, planId } = usePlanGate();
     const { showUpgradeModal } = useUpgradeModal();
     const isTrial = companyData?.status === "trial";
+    const resolvedLogoUrl = useQuery(api.storage.getUrl, companyData?.logoStorageId ? { storageId: companyData.logoStorageId } : "skip");
 
     // Fetch recent searches from Convex
     const recentSearches = useQuery(
@@ -133,7 +134,10 @@ export default function LiveSearchPage() {
     const progressPercent = tokensTotal > 0 ? (tokensLeft / tokensTotal) * 100 : 0;
 
     async function handleSearch() {
-        if (!domain.trim()) return;
+        if (!domain.trim()) {
+            setSearchError("Please enter a domain to search.");
+            return;
+        }
         if (!companyId || !user) {
             setSearchError("Please log in to perform searches");
             return;
@@ -202,7 +206,14 @@ export default function LiveSearchPage() {
     }
 
     async function handleAddToWatchlist() {
-        if (!companyId || !user || !domain.trim()) return;
+        if (!domain.trim()) {
+            toast.error("Please enter a domain first.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         try {
             await addToWatchlist({
                 companyId,
@@ -218,7 +229,14 @@ export default function LiveSearchPage() {
     }
 
     async function handleCreateLead() {
-        if (!companyId || !user || !domain.trim()) return;
+        if (!domain.trim()) {
+            toast.error("Please enter a domain first.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         try {
             const companyName = currentSearchResults[0]?.companyName || 
                 (domain.includes(".") ? domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1) : domain);
@@ -498,31 +516,51 @@ export default function LiveSearchPage() {
                             <Button 
                                 color="secondary" 
                                 iconLeading={DownloadCloud01}
-                                onClick={() => {
+                                onClick={async () => {
                                     const companyName = currentSearchResults[0]?.companyName || 
                                         (domain.includes(".") ? domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1) : domain);
-                                    generateExposureReport({
-                                        domain: domain.trim().toLowerCase(),
-                                        companyName,
-                                        credentials: currentSearchResults.map(r => ({
-                                            username: r.username || "",
-                                            password: r.password || "",
-                                            url: r.url || "",
-                                            source: r.source || "",
-                                            severity: r.severity || 0,
-                                            timestamp: r.timestamp || r.infectedAt || "",
-                                            stealer: r.stealer,
-                                            breachName: r.breachName,
-                                            country: r.country,
-                                            computerName: r.computerName,
-                                            operatingSystem: r.operatingSystem,
-                                        })),
-                                        isTrial,
-                                        generatedAt: new Date(),
-                                    });
+                                    toast.info(`Generating report for ${companyName}...`);
+                                    try {
+                                        await generateExposureReport({
+                                            domain: domain.trim().toLowerCase(),
+                                            companyName,
+                                            credentials: currentSearchResults.map(r => ({
+                                                username: r.username || "",
+                                                password: r.password || "",
+                                                url: r.url || "",
+                                                source: r.source || "",
+                                                severity: r.severity || 0,
+                                                timestamp: r.timestamp || r.infectedAt || "",
+                                                stealer: r.stealer,
+                                                breachName: r.breachName,
+                                                country: r.country,
+                                                computerName: r.computerName,
+                                                operatingSystem: r.operatingSystem,
+                                            })),
+                                            isTrial,
+                                            generatedAt: new Date(),
+                                            mspCompanyName: companyData?.name,
+                                            mspLogoUrl: resolvedLogoUrl ?? companyData?.logoUrl,
+                                            brandPrimaryColor: companyData?.brandPrimaryColor,
+                                            brandSecondaryColor: companyData?.brandSecondaryColor,
+                                            leadMetadata: {
+                                                industry: currentSearchResults[0]?.industry,
+                                                website: currentSearchResults[0]?.url,
+                                                location: currentSearchResults[0]?.country,
+                                                exposureCount: currentSearchResults.length,
+                                                exposureSeverity: getSeverityBadge(Math.max(...currentSearchResults.map(r => r.severity || 0), 0)).label,
+                                                source: "Live Search",
+                                                lastScanDate: Date.now(),
+                                            },
+                                        });
+                                        toast.success(`Report downloaded for ${companyName}`);
+                                    } catch (error) {
+                                        devError("Failed to generate report:", error);
+                                        toast.error("We couldn't generate that report. Please try again.");
+                                    }
                                 }}
                             >
-                                Download Report (PDF)
+                                Generate Report
                             </Button>
                             <Button color="secondary" iconLeading={BookmarkCheck} onClick={handleAddToWatchlist}>
                                 Add {domain} to Watchlist

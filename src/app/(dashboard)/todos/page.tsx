@@ -204,7 +204,14 @@ export default function TodosPage() {
     }
 
     async function handleSaveTask(close: () => void) {
-        if (!formTitle.trim() || !companyId || !user) return;
+        if (!formTitle.trim()) {
+            toast.error("Please enter a task title.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsSaving(true);
         try {
             if (editingTaskId) {

@@ -1,20 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useConvex, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 
 interface UseFileUploadOptions {
   onSuccess?: (storageUrl: string) => void;
   onError?: (error: string) => void;
 }
 
+interface UploadResult {
+  url: string;
+  storageId: string;
+}
+
 export function useFileUpload(options?: UseFileUploadOptions) {
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const convex = useConvex();
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const upload = async (file: File): Promise<string | null> => {
+  const uploadWithMetadata = async (file: File): Promise<UploadResult | null> => {
     setIsUploading(true);
     setProgress(10);
 
@@ -41,11 +48,14 @@ export function useFileUpload(options?: UseFileUploadOptions) {
       // Convex storage URLs follow the pattern: https://<deployment>.convex.cloud/api/storage/<storageId>
       // We store the storageId and resolve the URL when needed, but for imageUrl fields
       // we need the full URL. Use the upload response directly.
-      const servingUrl = `${new URL(uploadUrl).origin}/api/storage/${storageId}`;
+      const servingUrl = await convex.query(api.storage.getUrl, { storageId: storageId as Id<"_storage"> });
+      if (!servingUrl) {
+        throw new Error("Upload failed: file URL could not be generated");
+      }
       
       setProgress(100);
       options?.onSuccess?.(servingUrl);
-      return servingUrl;
+      return { url: servingUrl, storageId };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       options?.onError?.(message);
@@ -55,5 +65,10 @@ export function useFileUpload(options?: UseFileUploadOptions) {
     }
   };
 
-  return { upload, isUploading, progress };
+  const upload = async (file: File): Promise<string | null> => {
+    const result = await uploadWithMetadata(file);
+    return result?.url ?? null;
+  };
+
+  return { upload, uploadWithMetadata, isUploading, progress };
 }

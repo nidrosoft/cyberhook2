@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "convex/react";
+import { toast } from "sonner";
+import { devError } from "@/utils/dev-error";
 import {
     ArrowLeft,
     Building01,
@@ -29,6 +31,8 @@ import {
 import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { Tabs } from "@/components/application/tabs/tabs";
+import { useCompany } from "@/hooks/use-company";
+import { generateExposureReport } from "@/lib/pdf-report";
 import { ensureProtocol } from "@/utils/sanitize-url";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
@@ -155,6 +159,7 @@ interface LeadData {
     exposureCount?: number;
     lastExposureDate?: number;
     exposureSeverity?: string;
+    lastScanDate?: number;
     enrichmentData?: {
         headquarters?: string;
         foundedYear?: number;
@@ -505,6 +510,8 @@ export default function LeadDetailPage() {
     const params = useParams();
     const leadId = params.id as Id<"leads">;
     const [activeTab, setActiveTab] = useState("overview");
+    const { company: companyData } = useCompany();
+    const resolvedLogoUrl = useQuery(api.storage.getUrl, companyData?.logoStorageId ? { storageId: companyData.logoStorageId } : "skip");
 
     const lead = useQuery(api.leads.getById, { id: leadId });
     const contacts = useQuery(api.contacts.getByLeadId, { leadId });
@@ -521,6 +528,39 @@ export default function LeadDetailPage() {
     const typedContacts = (contacts ?? []) as ContactData[];
 
     const location = [typedLead.city, typedLead.region, typedLead.country].filter(Boolean).join(", ");
+
+    async function handleGenerateReport() {
+        const domain = typedLead.domain?.trim() || typedLead.name.toLowerCase().replace(/\s+/g, "") + ".com";
+        toast.info(`Generating report for ${typedLead.name}...`);
+        try {
+            await generateExposureReport({
+                domain,
+                companyName: typedLead.name,
+                credentials: [],
+                isTrial: companyData?.status === "trial",
+                generatedAt: new Date(),
+                mspCompanyName: companyData?.name,
+                mspLogoUrl: resolvedLogoUrl ?? companyData?.logoUrl,
+                brandPrimaryColor: companyData?.brandPrimaryColor,
+                brandSecondaryColor: companyData?.brandSecondaryColor,
+                leadMetadata: {
+                    industry: typedLead.industry,
+                    website: typedLead.website || typedLead.domain,
+                    location,
+                    employeeCount: typedLead.employeeCount,
+                    revenueRange: typedLead.revenueRange,
+                    exposureCount: typedLead.exposureCount,
+                    exposureSeverity: typedLead.exposureSeverity,
+                    source: typedLead.source,
+                    lastScanDate: typedLead.lastScanDate || typedLead.lastExposureDate,
+                },
+            });
+            toast.success(`Report downloaded for ${typedLead.name}`);
+        } catch (error) {
+            devError("Failed to generate report:", error);
+            toast.error("We couldn't generate that report. Please try again.");
+        }
+    }
 
     return (
         <div className="pt-8 pb-12 w-full px-4 lg:px-8 max-w-[1600px] mx-auto">
@@ -585,7 +625,7 @@ export default function LeadDetailPage() {
                         <Button color="secondary" size="sm" iconLeading={Copy01}>
                             Push to CRM
                         </Button>
-                        <Button color="primary" size="sm" iconLeading={BarChartSquare02}>
+                        <Button color="primary" size="sm" iconLeading={BarChartSquare02} onClick={handleGenerateReport}>
                             Generate Report
                         </Button>
                     </div>

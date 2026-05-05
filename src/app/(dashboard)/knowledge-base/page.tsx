@@ -229,7 +229,14 @@ export default function KnowledgeBasePage() {
     }
 
     async function handleAddSource(close: () => void) {
-        if (!companyId || !user || !kbSourceName.trim()) return;
+        if (!kbSourceName.trim()) {
+            toast.error("Please enter a source name.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
 
         if (kbSourceType === "faq" && (!kbQuestion.trim() || !kbAnswer.trim())) {
             toast.error("Please fill in both the question and answer"); return;
@@ -343,7 +350,7 @@ export default function KnowledgeBasePage() {
                                         const r = await seedTemplates({ companyId });
                                         toast.success(`Seeded ${r.created} cadence templates (${r.skipped} already existed)`);
                                     } catch (err) {
-                                        toast.error(err instanceof Error ? err.message : "Failed to seed templates");
+                                        toast.error(friendlyError(err, "We couldn't seed cadence templates. Please try again."));
                                     }
                                 }}
                             >

@@ -43,6 +43,7 @@ import { Input } from "@/components/base/input/input";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { TextArea } from "@/components/base/textarea/textarea";
+import { useCompany } from "@/hooks/use-company";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { friendlyError } from "@/lib/friendly-errors";
 import { generateExposureReport } from "@/lib/pdf-report";
@@ -148,6 +149,8 @@ const addLeadRevenueOptions = ["<$1M", "$1M-$5M", "$5M-$10M", "$10M-$50M", "$50M
 
 export default function LiveLeadsPage() {
     const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
+    const { company: companyData } = useCompany();
+    const resolvedLogoUrl = useQuery(api.storage.getUrl, companyData?.logoStorageId ? { storageId: companyData.logoStorageId } : "skip");
 
     // Fetch leads from Convex
     const leads = useQuery(
@@ -477,7 +480,14 @@ export default function LiveLeadsPage() {
     useEffect(() => { setDiscoverPage(1); }, [filteredDiscoveredLeads.length, pageSize, discoverRegion, discoverIndustry, discoverSize]);
 
     async function handleAddLead(close: () => void) {
-        if (!leadCompany.trim() || !companyId || !user) return;
+        if (!leadCompany.trim()) {
+            toast.error("Please enter a company name.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         setIsCreating(true);
         try {
             await createLead({
@@ -519,25 +529,48 @@ export default function LiveLeadsPage() {
         }
     }
 
-    function handleGenerateReport(lead: typeof filteredLeads[0]) {
+    async function handleGenerateReport(lead: typeof filteredLeads[0]) {
         const domain = lead.domain?.trim() || lead.name.toLowerCase().replace(/\s+/g, "") + ".com";
         toast.info(`Generating report for ${lead.name}...`);
         try {
-            generateExposureReport({
+            await generateExposureReport({
                 domain,
                 companyName: lead.name,
                 credentials: [],
-                isTrial: false,
+                isTrial: companyData?.status === "trial",
                 generatedAt: new Date(),
+                mspCompanyName: companyData?.name,
+                mspLogoUrl: resolvedLogoUrl ?? companyData?.logoUrl,
+                brandPrimaryColor: companyData?.brandPrimaryColor,
+                brandSecondaryColor: companyData?.brandSecondaryColor,
+                leadMetadata: {
+                    industry: lead.industry,
+                    website: lead.website || lead.domain,
+                    location: [lead.city, lead.region, lead.country].filter(Boolean).join(", "),
+                    employeeCount: lead.employeeCount,
+                    revenueRange: lead.revenueRange,
+                    exposureCount: lead.exposureCount,
+                    exposureSeverity: lead.exposureSeverity,
+                    source: lead.source,
+                    lastScanDate: lead.lastScanDate,
+                },
             });
             toast.success(`Report downloaded for ${lead.name}`);
         } catch (error) {
-            toast.error("Failed to generate report");
+            devError("Failed to generate report:", error);
+            toast.error("We couldn't generate that report. Please try again.");
         }
     }
 
     async function handleAddToWatchlist(domain: string, name: string) {
-        if (!companyId || !user || !domain) return;
+        if (!domain) {
+            toast.error("This lead does not have a domain to monitor.");
+            return;
+        }
+        if (!companyId || !user) {
+            toast.error("Please wait until your account is loaded, then try again.");
+            return;
+        }
         try {
             await addToWatchlist({
                 companyId,
@@ -1223,6 +1256,7 @@ export default function LiveLeadsPage() {
                             <Table.Head id="exposures" label="Exposures" allowsSorting className="min-w-[150px]" />
                             <Table.Head id="source" label="Source" className="min-w-[100px] hidden lg:table-cell" />
                             <Table.Head id="createdAt" label="Created" allowsSorting className="min-w-[130px] hidden md:table-cell" />
+                            <Table.Head id="report" label="Report" className="min-w-[150px]" />
                             <Table.Head id="actions" className="w-[80px]" />
                         </Table.Header>
 
@@ -1277,6 +1311,13 @@ export default function LiveLeadsPage() {
                                         </Table.Cell>
                                         <Table.Cell className="hidden md:table-cell">
                                             <span className="text-sm text-tertiary">{formatDate(item.createdAt)}</span>
+                                        </Table.Cell>
+                                        <Table.Cell>
+                                            <div className="flex justify-end" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+                                                <Button size="sm" color="secondary" iconLeading={Download01} onClick={() => handleGenerateReport(item)}>
+                                                    Generate Report
+                                                </Button>
+                                            </div>
                                         </Table.Cell>
                                         <Table.Cell className="px-4">
                                             <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>

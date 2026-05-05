@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { friendlyError } from "@/lib/friendly-errors";
 
 import {
     Plus,
@@ -148,7 +149,7 @@ export default function ContactsPage() {
             resetForm();
             close();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Failed to save contact");
+            toast.error(friendlyError(err, "We couldn't save that contact. Please try again."));
         } finally {
             setIsSubmitting(false);
         }
@@ -226,7 +227,7 @@ export default function ContactsPage() {
             setImportHeaders([]);
             setShowImport(false);
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Import failed");
+            toast.error(friendlyError(err, "We couldn't import those contacts. Please check the file and try again."));
         } finally {
             setIsImporting(false);
         }
