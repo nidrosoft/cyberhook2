@@ -15,7 +15,7 @@ const securityHeaders = [
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: https: blob:",
             "font-src 'self' data: https:",
-            "connect-src 'self' https://*.clerk.accounts.dev https://*.convex.cloud https://*.convex.site https://api.stripe.com wss://*.convex.cloud",
+            "connect-src 'self' https://*.clerk.accounts.dev https://clerk-telemetry.com https://*.convex.cloud https://*.convex.site https://api.stripe.com wss://*.convex.cloud",
             "frame-src https://js.stripe.com https://challenges.cloudflare.com https://*.clerk.accounts.dev",
             "worker-src 'self' blob:",
             "object-src 'none'",
