@@ -54,10 +54,17 @@ export async function setPlatformAdminClaims(clerkUserId: string) {
  * Convex bootstrap mutation. Returns the user's profile data so callers
  * don't need to fetch it separately.
  */
-const PLATFORM_ADMIN_EMAILS_LIST = (process.env.SUPER_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+const PLATFORM_ADMIN_EMAILS = ["lbenshoshan@amsysis.com", "cyriac@nidrosoft.com"];
+
+const PLATFORM_ADMIN_EMAILS_LIST = Array.from(
+    new Set([
+        ...PLATFORM_ADMIN_EMAILS,
+        ...(process.env.SUPER_ADMIN_EMAILS ?? "")
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean),
+    ]),
+);
 
 export async function getPlatformAdminProfile() {
     const { userId } = await auth();
