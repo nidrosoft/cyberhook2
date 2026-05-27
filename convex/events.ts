@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
-import { requireAuth, assertCompanyAccess } from "./lib/auth";
+import { requireAuth, assertCompanyAccess, requireAdminAccess } from "./lib/auth";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -240,8 +240,19 @@ export const create = mutation({
     const user = await requireAuth(ctx);
     assertCompanyAccess(user.companyId, args.companyId);
 
+    // Phase 9A — only Sales Admins can publish "Suggested" events that show
+    // up for everyone in the company. Non-admins silently drop the flag so
+    // their own personal events still save.
+    const isSuggested = args.isSuggested === true;
+    if (isSuggested) {
+      requireAdminAccess(user.role);
+    }
+
     const eventId = await ctx.db.insert("events", {
       ...args,
+      isSuggested: isSuggested && (user.role === "sales_admin" || user.role === "super_admin")
+        ? true
+        : undefined,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
@@ -293,6 +304,14 @@ export const update = mutation({
     if (!event) throw new Error("Not found");
     assertCompanyAccess(user.companyId, event.companyId);
 
+    // Phase 9A — gate edits to suggested events (existing or about to become
+    // suggested) behind admin role. Non-admins can still edit their own
+    // personal events.
+    const willBeSuggested = updates.isSuggested === true || (event.isSuggested && updates.isSuggested === undefined);
+    if (willBeSuggested) {
+      requireAdminAccess(user.role);
+    }
+
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
     );
@@ -313,6 +332,12 @@ export const remove = mutation({
     const event = await ctx.db.get(args.id);
     if (!event) throw new Error("Not found");
     assertCompanyAccess(user.companyId, event.companyId);
+
+    // Phase 9A — non-admins cannot delete a suggested event that someone
+    // else published. (They can always delete their own personal events.)
+    if (event.isSuggested && event.createdByUserId !== user._id) {
+      requireAdminAccess(user.role);
+    }
 
     await ctx.db.delete(args.id);
     return args.id;

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 import { requireAuth, assertCompanyAccess } from "./lib/auth";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -292,6 +293,15 @@ export const removeCertification = mutation({
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Not found");
     assertCompanyAccess(user.companyId, item.companyId);
+    // Phase 9B — also drop the linked file from Convex storage so we don't
+    // leak orphaned blobs after deletion.
+    if (item.documentFileId) {
+      try {
+        await ctx.storage.delete(item.documentFileId as Id<"_storage">);
+      } catch {
+        // Storage ID may already be invalid (manually deleted); swallow.
+      }
+    }
     await ctx.db.delete(args.id);
     return args.id;
   },

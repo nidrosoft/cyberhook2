@@ -32,9 +32,15 @@ interface NavItemBaseProps {
     onClick?: MouseEventHandler;
     /** Content to display. */
     children?: ReactNode;
+    /**
+     * Phase 10 — selector hook used by the guided walkthrough overlay to
+     * highlight this nav item. Renders as `data-walkthrough="..."` so the
+     * tour controller can call `document.querySelector` against it.
+     */
+    dataWalkthrough?: string;
 }
 
-export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, truncate = true, onClick }: NavItemBaseProps) => {
+export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, truncate = true, onClick, dataWalkthrough }: NavItemBaseProps) => {
     const iconElement = Icon && <Icon aria-hidden="true" className={cx("mr-2 size-5 shrink-0 text-fg-quaternary transition-inherit-all", current && "!text-brand-700")} />;
 
     const badgeElement =
@@ -63,7 +69,7 @@ export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, 
 
     if (type === "collapsible") {
         return (
-            <summary className={cx("px-3 py-2", styles.root, current && styles.rootSelected)} onClick={onClick}>
+            <summary className={cx("px-3 py-2", styles.root, current && styles.rootSelected)} onClick={onClick} data-walkthrough={dataWalkthrough}>
                 {iconElement}
 
                 {labelElement}
@@ -84,6 +90,7 @@ export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, 
                 className={cx("py-2 pr-3 pl-10", styles.root, current && styles.rootSelected)}
                 onClick={onClick}
                 aria-current={current ? "page" : undefined}
+                data-walkthrough={dataWalkthrough}
             >
                 {labelElement}
                 {externalIcon}
@@ -100,6 +107,7 @@ export const NavItemBase = ({ current, type, badge, href, icon: Icon, children, 
             className={cx("px-3 py-2", styles.root, current && styles.rootSelected)}
             onClick={onClick}
             aria-current={current ? "page" : undefined}
+            data-walkthrough={dataWalkthrough}
         >
             {iconElement}
             {labelElement}

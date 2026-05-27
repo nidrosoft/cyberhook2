@@ -10,7 +10,7 @@ const items = [
     },
     {
         title: "Customer stories",
-        subtitle: "Learn how our customers are using CyberHook to 10x their growth.",
+        subtitle: "Learn how our customers are using CyberHook AI to 10x their growth.",
         href: "/customer-stories",
         Icon: Stars02,
     },

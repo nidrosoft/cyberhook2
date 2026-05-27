@@ -23,7 +23,7 @@ export default function DeactivatedPage() {
 
                     {/* Description */}
                     <p className="mt-3 text-md text-secondary max-w-sm">
-                        Your CyberHook account has been deactivated. This may be due to subscription cancellation or an administrative action.
+                        Your CyberHook AI account has been deactivated. This may be due to subscription cancellation or an administrative action.
                     </p>
 
                     {/* Info Card */}

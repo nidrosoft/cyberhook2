@@ -9,7 +9,85 @@ import { useState } from "react";
 import { useAction } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { toast } from "sonner";
+import { PLANS, PLAN_ORDER, type PlanTier } from "@/lib/plans";
 
+// Pricing-card-specific marketing copy. Keep this thin: prices, plan IDs,
+// Stripe price IDs, and entitlements live in `src/lib/plans.ts` so this is
+// purely the UI shape.
+const planMarketing: Record<PlanTier, {
+  description: string;
+  features: { text: string; icon: React.ReactElement }[];
+  includes: string[];
+  popular?: boolean;
+}> = {
+  solo: {
+    description: "For individual reps exploring cybersecurity sales intelligence",
+    features: [
+      { text: "250 Live Searches/mo", icon: <Search size={18} /> },
+      { text: "1 User", icon: <Users size={18} /> },
+      { text: "Email Support", icon: <Headphones size={18} /> },
+    ],
+    includes: [
+      "Solo includes:",
+      "Live Search & Exposure Reports",
+      "Live Leads Discovery",
+      "3 Watchlist Domains",
+      "Basic Reporting",
+    ],
+  },
+  growth: {
+    description: "For growing teams that need AI outreach and integrations",
+    popular: true,
+    features: [
+      { text: "1,000 Live Searches/mo", icon: <Search size={18} /> },
+      { text: "3 Users", icon: <Users size={18} /> },
+      { text: "Priority Support", icon: <Headphones size={18} /> },
+    ],
+    includes: [
+      "Everything in Solo, plus:",
+      "AI Email Campaigns",
+      "CRM Integrations",
+      "10 Watchlist Domains",
+      "Advanced Reporting",
+    ],
+  },
+  scale: {
+    description: "Unlimited access with white-label and dedicated support",
+    features: [
+      { text: "5,000 Live Searches/mo", icon: <Search size={18} /> },
+      { text: "10 Users", icon: <Shield size={18} /> },
+      { text: "Dedicated Support", icon: <Headphones size={18} /> },
+    ],
+    includes: [
+      "Everything in Growth, plus:",
+      "White-Label Reports",
+      "25 Watchlist Domains",
+      "Unlimited Reports",
+      "Dedicated Success Manager",
+    ],
+  },
+};
+
+// Stable card list ordered solo → growth → scale, derived from the central
+// plan config so prices and Stripe IDs can never drift between sources.
+const plans = PLAN_ORDER.map((tier) => {
+  const p = PLANS[tier];
+  return {
+    name: p.name,
+    description: planMarketing[tier].description,
+    price: p.price,
+    yearlyPrice: p.yearlyPrice,
+    planId: p.id,
+    stripePriceId: p.stripePriceId,
+    stripeYearlyPriceId: p.stripeYearlyPriceId,
+    popular: planMarketing[tier].popular,
+    features: planMarketing[tier].features,
+    includes: planMarketing[tier].includes,
+  };
+});
+
+// Tier indexing for current-vs-upgrade comparison. Includes a few legacy
+// aliases for older `planId` values that may still be on company records.
 const planTierOrder: Record<string, number> = {
   solo: 0,
   starter: 0,
@@ -18,73 +96,6 @@ const planTierOrder: Record<string, number> = {
   scale: 2,
   enterprise: 2,
 };
-
-const plans = [
-  {
-    name: "Solo",
-    description: "For individual reps exploring cybersecurity sales intelligence",
-    price: 99,
-    yearlyPrice: 950,
-    planId: "solo",
-    stripePriceId: "price_1TILtWBs6XEduMNFnbOxNXbH",
-    stripeYearlyPriceId: "price_1TILtWBs6XEduMNFmuGWVEav",
-    features: [
-      { text: "50 Live Searches/mo", icon: <Search size={18} /> },
-      { text: "1 User", icon: <Users size={18} /> },
-      { text: "Email Support", icon: <Headphones size={18} /> },
-    ],
-    includes: [
-      "Solo includes:",
-      "Live Search & Exposure Reports",
-      "Live Leads Discovery",
-      "10 Watchlist Domains",
-      "Basic Reporting",
-    ],
-  },
-  {
-    name: "Growth",
-    description: "For growing teams that need AI outreach and integrations",
-    price: 299,
-    yearlyPrice: 2870,
-    planId: "growth",
-    stripePriceId: "price_1TILtWBs6XEduMNFGSeE9yjS",
-    stripeYearlyPriceId: "price_1TILtWBs6XEduMNFRE8Rc9SV",
-    popular: true,
-    features: [
-      { text: "200 Live Searches/mo", icon: <Search size={18} /> },
-      { text: "5 Users", icon: <Users size={18} /> },
-      { text: "Priority Support", icon: <Headphones size={18} /> },
-    ],
-    includes: [
-      "Everything in Solo, plus:",
-      "AI Email Campaigns",
-      "CRM Integrations",
-      "50 Watchlist Domains",
-      "Advanced Reporting",
-    ],
-  },
-  {
-    name: "Scale",
-    description: "Unlimited access with white-label and dedicated support",
-    price: 499,
-    yearlyPrice: 4790,
-    planId: "scale",
-    stripePriceId: "price_1TILtXBs6XEduMNFxtWYdxHH",
-    stripeYearlyPriceId: "price_1TILtXBs6XEduMNFY0oTCnSN",
-    features: [
-      { text: "Unlimited Searches", icon: <Search size={18} /> },
-      { text: "Unlimited Users", icon: <Shield size={18} /> },
-      { text: "Dedicated Support", icon: <Headphones size={18} /> },
-    ],
-    includes: [
-      "Everything in Growth, plus:",
-      "White-Label Reports",
-      "Unlimited Watchlist Domains",
-      "Unlimited Reports",
-      "Dedicated Success Manager",
-    ],
-  },
-];
 
 const PricingSwitch = ({
   onSwitch,

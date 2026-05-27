@@ -32,6 +32,12 @@ export type PortalFetchResult = {
   source: "hhs_ocr" | "california_ag" | "privacy_rights";
   rows: PortalRow[];
   error?: string;
+  /**
+   * Phase 6D: when true, the upstream portal has no automated data feed
+   * available yet. The UI renders an interim "This source is not yet
+   * connected. Watch this space." state instead of a hard error banner.
+   */
+  notYetConnected?: boolean;
 };
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -39,7 +45,7 @@ export type PortalFetchResult = {
 const COMMON_FETCH_HEADERS = {
   // Identify ourselves; some government portals reject blank User-Agent.
   "User-Agent":
-    "Mozilla/5.0 (compatible; CyberHookBot/1.0; +https://cyberhook.ai)",
+    "Mozilla/5.0 (compatible; CyberHookAIBot/1.0; +https://cyberhook.ai)",
   Accept: "text/html,application/json,*/*;q=0.8",
 };
 
@@ -91,17 +97,17 @@ function extractCells(rowHtml: string): string[] {
 }
 
 // ─── HHS OCR ─────────────────────────────────────────────────────────────────
-// The HHS OCR Breach Portal ("Wall of Shame") is JSF-driven and not
-// directly parseable. There is no official public JSON feed. We return
-// an empty result with `success: true` so the UI shows the
-// "open-in-new-tab" fallback card.
+// The HHS OCR Breach Portal is JSF-driven and not directly parseable; no
+// official public JSON feed exists today. Phase 6D treats this as a
+// "not yet connected" portal so the UI can render the interim state copy
+// instead of an error.
 
 async function fetchHHSOCR(): Promise<PortalFetchResult> {
   return {
     success: true,
     source: "hhs_ocr",
     rows: [],
-    error: "HHS OCR portal does not expose a public JSON feed. Use 'Open in new tab' to view.",
+    notYetConnected: true,
   };
 }
 

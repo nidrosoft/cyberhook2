@@ -5,6 +5,7 @@ export { usePlanGate } from "./use-plan-gate";
 export { useFileUpload } from "./use-file-upload";
 export { usePermissions, canAccessRoute, ROUTE_PERMISSIONS } from "./use-permissions";
 export { useDashboardData } from "./use-dashboard-data";
+export { useReportConsumer } from "./use-report-consumer";
 export type { UserRole, Permissions } from "./use-permissions";
 export type { CurrentUser } from "./use-current-user";
 export type { Company } from "./use-company";

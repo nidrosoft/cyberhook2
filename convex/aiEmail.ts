@@ -293,8 +293,15 @@ export const sendCampaignEmails = action({
 
     if (messages.length === 0) throw new Error("No draft messages to send");
 
-    const fromEmail = company.salesEmail || `noreply@${company.website || "cyberhook.ai"}`;
-    const fromName = company.name;
+    // Resend will reject any send whose From domain is not verified on the
+    // CyberHook Resend account. We can only safely send from @cyberhook.ai
+    // (the verified domain). To keep replies flowing back to the customer,
+    // we route Resend sends through campaigns@cyberhook.ai and set
+    // `replyTo` to the customer's configured salesEmail (or a sensible
+    // fallback). When the customer has Outlook connected we still send via
+    // Graph so the email truly leaves their own mailbox.
+    const replyToEmail = company.salesEmail?.trim();
+    const senderName = company.name ?? "CyberHook AI";
 
     let sentCount = 0;
     let failedCount = 0;
@@ -312,13 +319,41 @@ export const sendCampaignEmails = action({
           </div>
         `;
 
-        await resend.sendEmail(ctx, {
-          from: `${fromName} <${fromEmail}>`,
-          to: message.recipientEmail,
-          subject: message.subject,
-          html,
-          text: message.body,
-        });
+        // Phase 7C: if the company has Outlook connected, send through
+        // their own Microsoft Graph token so the email lands in their
+        // sent items and shows their own from address. We fall back to
+        // Resend when either (a) Outlook isn't connected, or (b) Graph
+        // returns an unrecoverable error (the helper marks the token as
+        // needing re-auth in that case).
+        const graphResult: { ok: boolean; fallback: boolean; error?: string } =
+          await ctx.runAction(
+            internal.integrationsActions.sendEmailViaGraphIfConnected,
+            {
+              companyId: campaign.companyId,
+              to: message.recipientEmail,
+              subject: message.subject,
+              bodyHtml: html,
+            },
+          );
+
+        if (!graphResult.ok && graphResult.fallback) {
+          // Fallback path — Resend. Send From the verified cyberhook.ai
+          // domain so the message isn't rejected, but set replyTo to the
+          // company's sales email so replies land where the customer
+          // expects.
+          await resend.sendEmail(ctx, {
+            from: `${senderName} <campaigns@cyberhook.ai>`,
+            to: message.recipientEmail,
+            subject: message.subject,
+            html,
+            text: message.body,
+            ...(replyToEmail ? { replyTo: [replyToEmail] } : {}),
+          });
+        } else if (!graphResult.ok) {
+          // Graph reported a hard failure (not a "no integration"
+          // fallback) — surface as a send failure for this message.
+          throw new Error(graphResult.error ?? "Graph send failed.");
+        }
 
         await ctx.runMutation(internal.aiEmail.updateMessageStatus, {
           messageId: message.messageId,
@@ -360,12 +395,20 @@ export const sendSingleEmail = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthorized");
 
+    // Resend only allows sends from verified domains. Coerce any custom
+    // From into the verified cyberhook.ai domain and route replies back
+    // to whatever address the caller specified.
+    const safeFrom = args.from.includes("@cyberhook.ai")
+      ? args.from
+      : "CyberHook AI <noreply@cyberhook.ai>";
+
     const emailId = await resend.sendEmail(ctx, {
-      from: args.from,
+      from: safeFrom,
       to: args.to,
       subject: args.subject,
       html: args.html,
       text: args.text,
+      ...(!args.from.includes("@cyberhook.ai") ? { replyTo: [args.from] } : {}),
     });
 
     return emailId;
@@ -432,6 +475,21 @@ export const updateMessageStatus = internalMutation({
     await ctx.db.patch(args.recipientId, {
       status: args.status === "sent" ? "sent" : "pending",
     });
+
+    // Phase 8B: keep a cumulative failure counter on the parent campaign
+    // so the AI Agents list can surface a "needs attention" badge without
+    // having to join campaignMessages on every render.
+    if (args.status === "failed") {
+      const message = await ctx.db.get(args.messageId);
+      if (message) {
+        const campaign = await ctx.db.get(message.campaignId);
+        if (campaign) {
+          await ctx.db.patch(message.campaignId, {
+            emailsFailed: (campaign.emailsFailed ?? 0) + 1,
+          });
+        }
+      }
+    }
   },
 });
 

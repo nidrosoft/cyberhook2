@@ -20,7 +20,7 @@ export const CyberHookLogo = (props: HTMLAttributes<HTMLDivElement>) => {
                     fillOpacity="0.3"
                 />
             </svg>
-            <span className="text-lg font-bold tracking-tight text-primary whitespace-nowrap">CyberHook</span>
+            <span className="text-lg font-bold tracking-tight text-primary whitespace-nowrap">CyberHook AI</span>
         </div>
     );
 };

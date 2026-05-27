@@ -351,7 +351,7 @@ export default function ContactsPage() {
             </div>
 
             {/* Table */}
-            <TableCard.Root>
+            <TableCard.Root data-tour="contacts-list">
                 <TableCard.Header
                     title="All Contacts"
                     badge={`${filtered.length} ${filtered.length === 1 ? "contact" : "contacts"}`}

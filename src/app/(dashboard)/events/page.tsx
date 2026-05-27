@@ -129,7 +129,7 @@ function downloadIcsFile(event: { title: string; startDate: number; endDate?: nu
     const lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//CyberHook//Events//EN",
+        "PRODID:-//CyberHook AI//Events//EN",
         "CALSCALE:GREGORIAN",
         "BEGIN:VEVENT",
         `UID:${uid}`,
@@ -768,11 +768,13 @@ export default function EventsPage() {
                                                         onChange={setEvtIsVirtual}
                                                     />
                                                 </div>
-                                                {/* Admin-only: suggest event to the entire company.
-                                                    When enabled, the event appears in the "Suggested"
-                                                    tab for all users instead of the creator's
-                                                    personal upcoming list. */}
-                                                {userRole === "sales_admin" && (
+                                                {/* Phase 9A — admin-only toggle: publish the event as a
+                                                    Suggested event visible to everyone in the company
+                                                    instead of as a personal entry on the admin's calendar.
+                                                    Sales reps and billing users don't see this control,
+                                                    and the backend mutation rejects the flag for non-admins
+                                                    as a defense-in-depth check. */}
+                                                {(userRole === "sales_admin" || userRole === "super_admin") && (
                                                     <div>
                                                         <Toggle
                                                             label="Suggest to team"
@@ -913,6 +915,7 @@ export default function EventsPage() {
 
                     {/* Tabs */}
                     <Tabs className="w-full">
+                        <div data-tour="events-tabs">
                         <Tabs.List
                             size="sm"
                             type="underline"
@@ -926,6 +929,7 @@ export default function EventsPage() {
                         >
                             {(item) => <Tabs.Item id={item.id}>{item.label}</Tabs.Item>}
                         </Tabs.List>
+                        </div>
 
                         {/* =================== UPCOMING EVENTS TAB =================== */}
                         <Tabs.Panel id="upcoming">
@@ -1102,8 +1106,36 @@ export default function EventsPage() {
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div className="flex flex-col gap-1 min-w-0">
                                                             <span className="text-sm font-semibold text-primary truncate">{ev.title}</span>
-                                                            <Badge color={getTypeColor(ev.type)} size="sm">{TYPE_LABELS[ev.type] || ev.type}</Badge>
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                                <Badge color={getTypeColor(ev.type)} size="sm">{TYPE_LABELS[ev.type] || ev.type}</Badge>
+                                                                {/* Phase 9A — visible marker so users can tell at a glance
+                                                                    that this event was published by their admin instead of
+                                                                    something they personally added. */}
+                                                                <Badge color="brand" size="sm">Suggested</Badge>
+                                                            </div>
                                                         </div>
+                                                        {/* Phase 9A — admin-only quick edit/delete on suggested cards.
+                                                            Non-admins still see the cards but only get calendar actions. */}
+                                                        {(userRole === "sales_admin" || userRole === "super_admin") && (
+                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => { populateEvtForm(ev); setShowEditSlideout(true); }}
+                                                                    className="p-1.5 rounded-md text-tertiary hover:text-brand-secondary hover:bg-brand-secondary_alt transition-colors"
+                                                                    aria-label="Edit suggested event"
+                                                                >
+                                                                    <Edit05 className="w-4 h-4" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleDeleteEvent(ev._id)}
+                                                                    className="p-1.5 rounded-md text-tertiary hover:text-error-primary hover:bg-error-secondary transition-colors"
+                                                                    aria-label="Delete suggested event"
+                                                                >
+                                                                    <Trash01 className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div className="flex flex-col gap-1.5 text-xs text-secondary">
                                                         <div className="flex items-center gap-1.5">
@@ -1567,11 +1599,10 @@ export default function EventsPage() {
                                     <Toggle isSelected={evtIsVirtual} onChange={setEvtIsVirtual} aria-label="Virtual" />
                                     <span className="text-sm text-secondary">Virtual Event</span>
                                 </div>
-                                {/* Admin-only: suggest event to the entire company.
-                                    When enabled, the event appears in the "Suggested"
-                                    tab for all users instead of the creator's
-                                    personal upcoming list. */}
-                                {userRole === "sales_admin" && (
+                                {/* Phase 9A — admin-only toggle (Edit view). Same gating as the
+                                    create form: only Sales Admin / super_admin can publish to
+                                    the company-wide Suggested tab. */}
+                                {(userRole === "sales_admin" || userRole === "super_admin") && (
                                     <div className="flex items-center gap-3">
                                         <Toggle isSelected={evtIsSuggested} onChange={setEvtIsSuggested} aria-label="Suggest to team" />
                                         <span className="text-sm text-secondary">Suggest to team</span>

@@ -4,7 +4,7 @@ import { internal } from "./_generated/api";
 import { requireAuth, requireSuperAdmin } from "./lib/auth";
 
 /**
- * Super-admin endpoints for CyberHook internal ops (blue item 1.4).
+ * Super-admin endpoints for CyberHook AI internal ops (blue item 1.4).
  *
  * Unlike `convex/users.ts` which enforces same-company access, these
  * endpoints deliberately read/write across every tenant — they power
@@ -125,12 +125,16 @@ export const bootstrapSelf = mutation({
     }
 
     // Find or create the platform-internal company.
+    // Accept legacy "CyberHook Platform" name so existing rows still match after the
+    // rebrand to "CyberHook AI Platform".
     const allCompanies = await ctx.db.query("companies").collect();
-    let systemCompany = allCompanies.find((c) => c.name === "CyberHook Platform");
+    let systemCompany = allCompanies.find(
+      (c) => c.name === "CyberHook AI Platform" || c.name === "CyberHook Platform",
+    );
     if (!systemCompany) {
       const now = Date.now();
       const newCompanyId = await ctx.db.insert("companies", {
-        name: "CyberHook Platform",
+        name: "CyberHook AI Platform",
         phone: "",
         website: "https://cyberhook.ai",
         primaryBusinessModel: "Platform",
@@ -243,7 +247,7 @@ export const approveAccount = mutation({
       await ctx.scheduler.runAfter(0, internal.emails.sendApprovalEmail, {
         email: target.email,
         firstName: target.firstName,
-        companyName: company?.name ?? "CyberHook",
+        companyName: company?.name ?? "CyberHook AI",
       });
     }
     await writeAdminAudit(

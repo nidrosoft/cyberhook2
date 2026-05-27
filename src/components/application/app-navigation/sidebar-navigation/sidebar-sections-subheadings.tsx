@@ -50,9 +50,16 @@ export const SidebarNavigationSectionsSubheadings = ({ activeUrl = "/", items }:
                         )}
                         <ul className={cx("pb-1", isExpanded ? "px-4" : "px-3 flex flex-col gap-1 items-center")}>
                             {group.items.map((item) => (
-                                <li key={item.label} className="py-0.5 w-full">
+                                <li key={item.label} className="py-0.5 w-full" data-walkthrough={item.dataWalkthrough}>
                                     {isExpanded ? (
-                                        <NavItemBase icon={item.icon} href={item.href} badge={item.badge} type="link" current={item.href === activeUrl}>
+                                        <NavItemBase
+                                            icon={item.icon}
+                                            href={item.href}
+                                            badge={item.badge}
+                                            type="link"
+                                            current={item.href === activeUrl}
+                                            dataWalkthrough={item.dataWalkthrough}
+                                        >
                                             {item.label}
                                         </NavItemBase>
                                     ) : (

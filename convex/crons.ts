@@ -31,4 +31,13 @@ crons.daily(
   internal.breachPortalsApi.fetchPrivacyRightsBreaches
 );
 
+// Phase 7: refresh OAuth access tokens before they expire. Runs every
+// 5 minutes; only touches integrations whose `tokenExpiresAt` is within
+// the next 10 minutes, so it's cheap to keep on a tight schedule.
+crons.interval(
+  "refresh-oauth-tokens",
+  { minutes: 5 },
+  internal.integrationsActions.refreshExpiring
+);
+
 export default crons;

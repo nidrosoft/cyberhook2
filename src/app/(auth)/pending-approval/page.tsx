@@ -127,7 +127,7 @@ export default function PendingApprovalPage() {
                     {/* Why we review */}
                     <div className="mt-6 rounded-lg bg-primary border border-secondary p-4 w-full">
                         <p className="text-sm text-tertiary">
-                            <span className="font-medium text-secondary">Why manual review?</span> CyberHook provides access to sensitive dark web intelligence. We verify all accounts to prevent misuse and ensure only authorized partners gain access.
+                            <span className="font-medium text-secondary">Why manual review?</span> CyberHook AI provides access to sensitive dark web intelligence. We verify all accounts to prevent misuse and ensure only authorized partners gain access.
                         </p>
                     </div>
 

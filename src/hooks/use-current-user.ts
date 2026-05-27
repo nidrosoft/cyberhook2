@@ -23,6 +23,15 @@ export interface CurrentUser {
     notificationFrequency?: string;
     criticalAlertsOnly?: boolean;
     guidedTourCompleted?: boolean;
+    guidedTourCompletedAt?: number;
+    tourProgress?: {
+        completed: boolean;
+        skipped: boolean;
+        lastSection?: string;
+        lastStepIndex?: number;
+        completedSections?: string[];
+        updatedAt: number;
+    };
     createdAt: number;
     updatedAt: number;
     lastAccessedAt?: number;

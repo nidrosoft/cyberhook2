@@ -103,6 +103,56 @@ export const getStats = query({
   },
 });
 
+/**
+ * Phase 8A: per-recipient send history for a single campaign.
+ *
+ * Powers the "View Logs" panel inside the AI Agents slide-over. Returns
+ * one row per `campaignMessages` document, joined with the recipient's
+ * email/name, sorted with most recent activity first so a user can
+ * immediately see what just happened.
+ *
+ * Access is gated by the caller's company — the same pattern the rest
+ * of this module uses — so users can never inspect another tenant's
+ * email logs.
+ */
+export const getLogs = query({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) return [];
+    assertCompanyAccess(currentUser.companyId, campaign.companyId);
+
+    const messages = await ctx.db
+      .query("campaignMessages")
+      .withIndex("by_campaignId", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+
+    const logs = await Promise.all(
+      messages.map(async (m) => {
+        const recipient = await ctx.db.get(m.recipientId);
+        return {
+          messageId: m._id,
+          recipientId: m.recipientId,
+          recipientEmail: recipient?.email ?? "(deleted)",
+          recipientName: recipient?.name ?? "",
+          subject: m.subject,
+          status: m.status as "draft" | "scheduled" | "sent" | "failed",
+          sentAt: m.sentAt,
+          createdAt: m.createdAt,
+          errorMessage: m.errorMessage,
+        };
+      })
+    );
+
+    return logs.sort((a, b) => {
+      const aTs = a.sentAt ?? a.createdAt;
+      const bTs = b.sentAt ?? b.createdAt;
+      return bTs - aTs;
+    });
+  },
+});
+
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
 export const create = mutation({

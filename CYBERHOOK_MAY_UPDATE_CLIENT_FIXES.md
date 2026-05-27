@@ -1150,29 +1150,31 @@ These ambiguities exist in the May review and should be confirmed before declari
 
 ```
 === Phase 1 — Signup & Onboarding Hardening ===
-1.1 Required fields enforcement   | [ ] | files: ___
-1.2 Stripe friendly errors        | [ ] | files: ___
-1.3 Invite emails delivery        | [ ] | files: ___
-1.4 Invite UI stale state         | [ ] | files: ___
+1.1 Required fields enforcement   | [x] | files: src/app/(onboarding)/onboarding/page.tsx, convex/onboarding.ts
+1.2 Stripe friendly errors        | [x] | files: src/lib/friendly-errors.ts, src/app/(onboarding)/onboarding/page.tsx
+1.3 Invite emails delivery        | [/] | files: convex/onboarding.ts (Invite Token Gap found), convex/invitations.ts, convex/emails.ts
+1.4 Invite UI stale state         | [x] | files: src/app/(dashboard)/settings/page.tsx
 
 === Phase 2 — Prospecting Report ===
-2.1 Report template + dynamic data| [ ] | files: ___
-2.2 MSP logo upload + propagation | [ ] | files: ___
+2.1 Report template + dynamic data| [/] | files: src/lib/pdf-report.ts (Naming Discrepancy found: CyberHook-AI-Report-... instead of CyberHook-Report-...)
+2.2 MSP logo upload + propagation | [x] | files: src/app/(dashboard)/settings/page.tsx, src/app/(onboarding)/onboarding/page.tsx, convex/storage.ts
 
 === Phase 3 — Events ===
-3.1 Event detail formatting       | [ ] | files: ___
-3.2 Google + Outlook deeplinks    | [ ] | files: ___
-3.3 .ics download verified        | [ ] | files: ___
-3.4 Native OAuth (deferred)       | TODO comment added | files: ___
+3.1 Event detail formatting       | [x] | files: src/app/(dashboard)/events/page.tsx
+3.2 Google + Outlook deeplinks    | [x] | files: src/app/(dashboard)/events/page.tsx
+3.3 .ics download verified        | [x] | files: src/app/(dashboard)/events/page.tsx
+3.4 Native OAuth (deferred)       | TODO comment added | files: src/app/(dashboard)/events/page.tsx
 
 === Phase 4 — Cross-cutting ===
-4.1 Form audit                    | [ ] | files: ___
-4.2 Error message audit           | [ ] | files: ___
-4.3 Report entry points wired     | [ ] | files: ___
+4.1 Form audit                    | [x] | files: settings/page.tsx, todos/page.tsx, watchlist/page.tsx, ai-agents/new/page.tsx, rfp-hub/page.tsx, knowledge-base/page.tsx
+4.2 Error message audit           | [x] | files: src/lib/friendly-errors.ts
+4.3 Report entry points wired     | [x] | files: live-search/page.tsx, live-leads/page.tsx, live-leads/[id]/page.tsx
 
 === Phase 5 — Regression Test ===
-End-to-end smoke test passed: [ ] blocker fixes implemented; fresh-account browser retest still required
-Blocking issues found: invite email receipt still requires inbox verification; account-review screen needs fresh-account browser retest after bypass fix
+End-to-end smoke test passed: [/] blocker fixes implemented; fresh-account browser retest still required
+Blocking issues found: 
+1. Onboarding Invite Token Gap: completeOnboarding mutation does not generate inviteToken, leading to legacy ?invite=<email> link.
+2. PDF File Naming Discrepancy: generateExposureReport saves files as CyberHook-AI-Report-... instead of CyberHook-Report-...
 ```
 
 ---

@@ -2,7 +2,8 @@ import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { requireAuth, assertCompanyAccess, requireRole } from "./lib/auth";
+import { requireAuth, assertCompanyAccess, requireRole, requireAdminAccess } from "./lib/auth";
+import { getPlanLimits } from "./lib/plans";
 
 // ============================================
 // QUERIES
@@ -204,6 +205,9 @@ export const update = mutation({
       assertCompanyAccess(currentUser.companyId, targetUser.companyId);
     }
 
+    const oldUser = await ctx.db.get(args.id);
+    if (!oldUser) throw new Error("User not found");
+
     const { id, ...updates } = args;
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
@@ -213,6 +217,27 @@ export const update = mutation({
       ...filteredUpdates,
       updatedAt: Date.now(),
     });
+
+    // Notify user if role has changed
+    if (updates.role && oldUser.role !== updates.role && oldUser.email) {
+      const company = await ctx.db.get(oldUser.companyId);
+      await ctx.scheduler.runAfter(0, internal.emails.sendRoleUpdateEmailInternal, {
+        email: oldUser.email,
+        firstName: oldUser.firstName,
+        companyName: company?.name ?? "CyberHook AI",
+        newRole: updates.role,
+      });
+    }
+
+    // Notify user if account is deactivated
+    if (updates.status === "deactivated" && oldUser.status !== "deactivated" && oldUser.email) {
+      const company = await ctx.db.get(oldUser.companyId);
+      await ctx.scheduler.runAfter(0, internal.emails.sendUserDeactivatedEmailInternal, {
+        email: oldUser.email,
+        firstName: oldUser.firstName,
+        companyName: company?.name ?? "CyberHook AI",
+      });
+    }
   },
 });
 
@@ -243,13 +268,17 @@ export const approveUser = mutation({
       updatedAt: Date.now(),
     });
 
-    // Send approval email
+    // Send approval email and notify other team admins that they joined
     if (targetUser.email) {
       const company = await ctx.db.get(targetUser.companyId);
       await ctx.scheduler.runAfter(0, internal.emails.sendApprovalEmail, {
         email: targetUser.email,
         firstName: targetUser.firstName,
-        companyName: company?.name ?? "CyberHook",
+        companyName: company?.name ?? "CyberHook AI",
+      });
+      await ctx.scheduler.runAfter(0, internal.emails.sendTeamMemberJoinedEmailInternal, {
+        companyId: targetUser.companyId,
+        newUserId: args.id,
       });
     }
   },
@@ -292,6 +321,15 @@ export const deactivateUser = mutation({
       status: "deactivated",
       updatedAt: Date.now(),
     });
+
+    if (targetUser.email) {
+      const company = await ctx.db.get(targetUser.companyId);
+      await ctx.scheduler.runAfter(0, internal.emails.sendUserDeactivatedEmailInternal, {
+        email: targetUser.email,
+        firstName: targetUser.firstName,
+        companyName: company?.name ?? "CyberHook AI",
+      });
+    }
   },
 });
 
@@ -305,6 +343,87 @@ export const completeGuidedTour = mutation({
     await ctx.db.patch(args.id, {
       guidedTourCompleted: true,
       guidedTourCompletedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+// ============================================
+// PHASE 9C — Per-user search quota (admin override)
+// ============================================
+//
+// Behaviour:
+// - `searchQuotaMonthly === undefined`  → user inherits the company plan cap.
+//   Searches are only blocked when the company-wide allocation is exhausted.
+// - `searchQuotaMonthly !== undefined`  → user is also blocked once their
+//   personal `searchQuotaUsed >= searchQuotaMonthly`, even if the company has
+//   capacity left.
+//
+// The counter resets monthly. We piggy-back on the company's
+// `usageResetDate` (already used to roll over `searchesUsed`) and lazily reset
+// `searchQuotaUsed` on the next consumption attempt that lands after the
+// reset boundary — see `searches.create`.
+
+export const getQuota = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser) return null;
+    // Members can view their own quota; admins can view anyone in their company.
+    if (currentUser._id !== args.userId) {
+      requireAdminAccess(currentUser.role);
+      assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+    }
+
+    const company = await ctx.db.get(targetUser.companyId);
+    const planLimit = company ? getPlanLimits(company.planId).searchesPerMonth : 0;
+    const isInherited = targetUser.searchQuotaMonthly === undefined;
+    const allocation = isInherited ? planLimit : (targetUser.searchQuotaMonthly ?? 0);
+    const used = targetUser.searchQuotaUsed ?? 0;
+    const remaining = Math.max(0, allocation - used);
+
+    return {
+      allocation,
+      used,
+      remaining,
+      isInherited,
+      planLimit,
+      resetDate: targetUser.searchQuotaResetDate ?? company?.usageResetDate ?? null,
+    };
+  },
+});
+
+export const setSearchQuota = mutation({
+  args: {
+    userId: v.id("users"),
+    // `null` clears the override and reverts the user back to the company plan.
+    monthlyAllocation: v.union(v.number(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const currentUser = await requireAuth(ctx);
+    requireAdminAccess(currentUser.role);
+
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser) throw new Error("User not found");
+    assertCompanyAccess(currentUser.companyId, targetUser.companyId);
+
+    if (args.monthlyAllocation !== null) {
+      if (!Number.isFinite(args.monthlyAllocation) || args.monthlyAllocation < 0) {
+        throw new Error("Allocation must be a non-negative number");
+      }
+      if (args.monthlyAllocation > 1_000_000) {
+        throw new Error("Allocation is too large");
+      }
+    }
+
+    await ctx.db.patch(args.userId, {
+      searchQuotaMonthly:
+        args.monthlyAllocation === null ? undefined : Math.floor(args.monthlyAllocation),
+      // Initialize used/reset counters the first time a quota is set so the
+      // deduction path always has a clean baseline to compare against.
+      searchQuotaUsed: targetUser.searchQuotaUsed ?? 0,
+      searchQuotaResetDate: targetUser.searchQuotaResetDate ?? Date.now() + 30 * 24 * 60 * 60 * 1000,
       updatedAt: Date.now(),
     });
   },
@@ -385,5 +504,12 @@ export const internalDelete = internalMutation({
     if (user) {
       await ctx.db.delete(user._id);
     }
+  },
+});
+
+export const internalGetById = internalQuery({
+  args: { id: v.id("users") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
   },
 });

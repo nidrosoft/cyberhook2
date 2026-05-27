@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * CyberHook super-admin console (blue item 1.4, richer build).
+ * CyberHook AI super-admin console (blue item 1.4, richer build).
  *
  * Sections:
  *   - Platform KPI strip (total tenants, users, pending, signups 7d)
@@ -153,7 +153,7 @@ function AccessDenied() {
                 </div>
                 <h1 className="text-display-xs font-semibold text-primary">Access Restricted</h1>
                 <p className="mt-2 text-sm text-tertiary">
-                    This console is for CyberHook platform administrators only. Contact ops at{" "}
+                    This console is for CyberHook AI platform administrators only. Contact ops at{" "}
                     <a href="mailto:support@cyberhook.ai" className="text-brand-600 hover:underline">
                         support@cyberhook.ai
                     </a>
@@ -197,7 +197,7 @@ function AdminConsole() {
                             <div className="flex items-center gap-2">
                                 <Shield01 className="h-5 w-5 text-brand-600" />
                                 <h1 className="text-display-sm font-semibold text-primary">
-                                    CyberHook Admin Console
+                                    CyberHook AI Admin Console
                                 </h1>
                             </div>
                             <p className="mt-1 text-sm text-tertiary">
@@ -850,7 +850,7 @@ function CompanyDrawer({
         requestConfirm({
             title: `Permanently delete ${name}?`,
             description:
-                "This removes the account record from CyberHook. The Clerk identity is unaffected. This action cannot be undone.",
+                "This removes the account record from CyberHook AI. The Clerk identity is unaffected. This action cannot be undone.",
             confirmLabel: "Delete account",
             tone: "destructive",
             onConfirm: async () => {

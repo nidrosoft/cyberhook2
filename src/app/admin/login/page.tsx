@@ -262,7 +262,7 @@ export default function AdminLoginPage() {
                         <Shield01 className="size-6 text-brand-700" />
                     </div>
                     <div className="flex flex-col gap-2 md:gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-tertiary">CyberHook Internal</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-tertiary">CyberHook AI Internal</p>
                         <h1 className="text-display-xs font-semibold text-primary md:text-display-sm">
                             {mode === "signin" && "Super Admin Sign In"}
                             {mode === "verify_email_code" && "Verify Your Email"}

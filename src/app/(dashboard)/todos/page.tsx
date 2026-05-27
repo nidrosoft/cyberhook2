@@ -547,7 +547,7 @@ export default function TodosPage() {
                         if (open) openCreateForm();
                         else { setIsSlideoutOpen(false); resetForm(); }
                     }}>
-                        <Button color="primary" iconLeading={Plus}>
+                        <Button color="primary" iconLeading={Plus} data-tour="todos-create">
                             New Task
                         </Button>
                         <SlideoutMenu>
@@ -657,6 +657,7 @@ export default function TodosPage() {
 
                 {/* Task Table */}
                 {viewMode === "list" ? (
+                    <div data-tour="todos-list">
                     <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary">
                         <TableCard.Header title="Tasks" badge={`${filtered.length} tasks`} />
                         <div className="overflow-x-auto">
@@ -771,6 +772,7 @@ export default function TodosPage() {
                             </div>
                         )}
                     </TableCard.Root>
+                    </div>
                 ) : (
                     /* Board / Kanban View */
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

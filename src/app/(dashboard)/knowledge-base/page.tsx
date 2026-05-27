@@ -357,7 +357,7 @@ export default function KnowledgeBasePage() {
                                 Seed Cadence Templates
                             </Button>
                             <SlideoutMenu.Trigger>
-                                <Button size="md" color="primary" iconLeading={Plus}>Add Source</Button>
+                                <Button size="md" color="primary" iconLeading={Plus} data-tour="kb-add">Add Source</Button>
                                 <SlideoutMenu className="max-w-[600px]">
                                     {({ close }) => (
                                         <>

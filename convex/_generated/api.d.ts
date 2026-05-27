@@ -18,11 +18,16 @@ import type * as crons from "../crons.js";
 import type * as emails from "../emails.js";
 import type * as events from "../events.js";
 import type * as http from "../http.js";
+import type * as integrations from "../integrations.js";
+import type * as integrationsActions from "../integrationsActions.js";
 import type * as invitations from "../invitations.js";
 import type * as knowledgeBase from "../knowledgeBase.js";
 import type * as leads from "../leads.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_crypto from "../lib/crypto.js";
+import type * as lib_emailDomain from "../lib/emailDomain.js";
 import type * as lib_plans from "../lib/plans.js";
+import type * as migrations from "../migrations.js";
 import type * as notifications from "../notifications.js";
 import type * as onboarding from "../onboarding.js";
 import type * as portalsLive from "../portalsLive.js";
@@ -36,6 +41,7 @@ import type * as stripe from "../stripe.js";
 import type * as superAdmin from "../superAdmin.js";
 import type * as syncLogs from "../syncLogs.js";
 import type * as tasks from "../tasks.js";
+import type * as tour from "../tour.js";
 import type * as users from "../users.js";
 import type * as watchlist from "../watchlist.js";
 
@@ -56,11 +62,16 @@ declare const fullApi: ApiFromModules<{
   emails: typeof emails;
   events: typeof events;
   http: typeof http;
+  integrations: typeof integrations;
+  integrationsActions: typeof integrationsActions;
   invitations: typeof invitations;
   knowledgeBase: typeof knowledgeBase;
   leads: typeof leads;
   "lib/auth": typeof lib_auth;
+  "lib/crypto": typeof lib_crypto;
+  "lib/emailDomain": typeof lib_emailDomain;
   "lib/plans": typeof lib_plans;
+  migrations: typeof migrations;
   notifications: typeof notifications;
   onboarding: typeof onboarding;
   portalsLive: typeof portalsLive;
@@ -74,6 +85,7 @@ declare const fullApi: ApiFromModules<{
   superAdmin: typeof superAdmin;
   syncLogs: typeof syncLogs;
   tasks: typeof tasks;
+  tour: typeof tour;
   users: typeof users;
   watchlist: typeof watchlist;
 }>;
@@ -563,6 +575,8 @@ export declare const components: {
         "mutation",
         "internal",
         {
+          bcc?: Array<string> | string;
+          cc?: Array<string> | string;
           from: string;
           headers?: Array<{ name: string; value: string }>;
           replyTo?: Array<string>;

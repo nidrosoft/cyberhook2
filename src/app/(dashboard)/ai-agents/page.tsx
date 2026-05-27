@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, MouseEvent } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useAction } from "convex/react";
@@ -30,6 +30,10 @@ import {
     Clock,
     Globe02,
     LinkExternal01,
+    File04,
+    AlertCircle,
+    CheckCircle,
+    XCircle,
 } from "@untitledui/icons";
 
 import { Table, TableCard } from "@/components/application/table/table";
@@ -40,6 +44,7 @@ import { Button } from "@/components/base/buttons/button";
 import { ButtonUtility } from "@/components/base/buttons/button-utility";
 import { InputBase } from "@/components/base/input/input";
 import { FilterDropdown } from "@/components/base/dropdown/filter-dropdown";
+import { ConfirmModal } from "@/components/application/modals/confirm-modal";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -77,18 +82,21 @@ function getActions(status: CampaignStatus) {
         case "active":
             return [
                 { label: "View Details", icon: Eye, action: "view" as const },
+                { label: "View Logs", icon: File04, action: "logs" as const },
                 { label: "Pause Campaign", icon: PauseCircle, action: "pause" as const },
                 { label: "Archive", icon: Archive, action: "archive" as const },
             ];
         case "paused":
             return [
                 { label: "View Details", icon: Eye, action: "view" as const },
+                { label: "View Logs", icon: File04, action: "logs" as const },
                 { label: "Resume", icon: PlayCircle, action: "resume" as const },
                 { label: "Archive", icon: Archive, action: "archive" as const },
             ];
         case "completed":
             return [
                 { label: "View Details", icon: Eye, action: "view" as const },
+                { label: "View Logs", icon: File04, action: "logs" as const },
                 { label: "Duplicate", icon: Copy06, action: "duplicate" as const },
                 { label: "Archive", icon: Archive, action: "archive" as const },
             ];
@@ -155,21 +163,32 @@ export default function AiAgentsPage() {
     const [activeTab, setActiveTab] = useState("all");
     const [sendingCampaignId, setSendingCampaignId] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState("all");
-    const [dateRange, setDateRange] = useState("30d");
+    // Default to "all" so users see every campaign on first paint. The
+    // previous default ("30d") combined with the now-functional filter
+    // hides older campaigns and surprises first-time visitors.
+    const [dateRange, setDateRange] = useState("all");
     const [searchQuery, setSearchQuery] = useState("");
-    const [openMenu, setOpenMenu] = useState<string | null>(null);
+    const [openMenu, setOpenMenu] = useState<{ campaignId: string; rect: { top: number; left: number; height: number } } | null>(null);
     const [viewingCampaign, setViewingCampaign] = useState<any | null>(null);
+    const [slideoverTab, setSlideoverTab] = useState<"details" | "logs">("details");
+    const [pendingDelete, setPendingDelete] = useState<{ id: Id<"campaigns">; name: string } | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
         column: "name",
         direction: "ascending",
     });
 
-    const menuRef = useRef<HTMLDivElement>(null);
-
+    // Dismiss the campaign action menu on any click that lands outside the
+    // floating menu container. The trigger button itself toggles the menu via
+    // its own onClick + stopPropagation, so clicks on it never reach the
+    // document listener.
     useEffect(() => {
         if (!openMenu) return;
-        function handleClickOutside(e: any) {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        function handleClickOutside(e: globalThis.MouseEvent) {
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+            const inside = target.closest("[data-campaign-menu]");
+            if (!inside) {
                 setOpenMenu(null);
             }
         }
@@ -177,13 +196,48 @@ export default function AiAgentsPage() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [openMenu]);
 
+    // Phase 8A: Logs feed for the currently open slide-over campaign.
+    // Skipped (returns undefined) when no campaign is open, so the query
+    // only runs when the panel is visible.
+    const campaignLogs = useQuery(
+        api.campaigns.getLogs,
+        viewingCampaign ? { campaignId: viewingCampaign._id } : "skip"
+    );
+
     const isLoading = isUserLoading || campaigns === undefined || stats === undefined;
 
     const allCampaigns = campaigns ?? [];
 
+    // Phase 8A: actually wire the date range filter. Previously the dropdown
+    // state existed but was never consumed by `filteredCampaigns`, so the
+    // control was purely decorative. We bucket each campaign by its createdAt
+    // and drop anything older than the selected window.
+    const dateRangeCutoff = useMemo(() => {
+        const now = Date.now();
+        const day = 86_400_000;
+        switch (dateRange) {
+            case "7d":
+                return now - 7 * day;
+            case "30d":
+                return now - 30 * day;
+            case "90d":
+                return now - 90 * day;
+            case "year": {
+                const start = new Date();
+                start.setMonth(0, 1);
+                start.setHours(0, 0, 0, 0);
+                return start.getTime();
+            }
+            case "all":
+            default:
+                return 0;
+        }
+    }, [dateRange]);
+
     const filteredCampaigns = allCampaigns.filter((c) => {
         if (statusFilter !== "all" && c.status !== statusFilter) return false;
         if (searchQuery && !c.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+        if (dateRangeCutoff > 0 && (c.createdAt ?? 0) < dateRangeCutoff) return false;
         return true;
     });
 
@@ -204,7 +258,20 @@ export default function AiAgentsPage() {
         switch (action) {
             case "view": {
                 const campaign = allCampaigns.find((c) => c._id === campaignId);
-                if (campaign) setViewingCampaign(campaign);
+                if (campaign) {
+                    setSlideoverTab("details");
+                    setViewingCampaign(campaign);
+                }
+                break;
+            }
+            case "logs": {
+                // Phase 8A: open the same slide-over but start on the Logs
+                // tab so users land directly on per-recipient send history.
+                const campaign = allCampaigns.find((c) => c._id === campaignId);
+                if (campaign) {
+                    setSlideoverTab("logs");
+                    setViewingCampaign(campaign);
+                }
                 break;
             }
             case "pause":
@@ -241,10 +308,33 @@ export default function AiAgentsPage() {
                     toast.error("Failed to duplicate campaign");
                 }
                 break;
-            case "delete":
-                await removeCampaign({ id: campaignId });
-                toast.success("Campaign deleted");
+            case "delete": {
+                // Phase 8A: never delete without confirmation. We pop a
+                // destructive ConfirmModal first; the actual remove call
+                // is wired in `confirmDelete` below.
+                const campaign = allCampaigns.find((c) => c._id === campaignId);
+                setPendingDelete({ id: campaignId, name: campaign?.name ?? "this campaign" });
                 break;
+            }
+        }
+    }
+
+    async function confirmDelete() {
+        if (!pendingDelete) return;
+        setIsDeleting(true);
+        try {
+            await removeCampaign({ id: pendingDelete.id });
+            toast.success("Campaign deleted");
+            // If the slide-over was open for this campaign, close it.
+            if (viewingCampaign && viewingCampaign._id === pendingDelete.id) {
+                setViewingCampaign(null);
+            }
+            setPendingDelete(null);
+        } catch (err) {
+            devError("Failed to delete campaign:", err);
+            toast.error("Failed to delete campaign");
+        } finally {
+            setIsDeleting(false);
         }
     }
 
@@ -292,7 +382,7 @@ export default function AiAgentsPage() {
                                 New Campaign
                             </Button>
                         ) : (
-                            <Link href="/ai-agents/new">
+                            <Link href="/ai-agents/new" data-tour="ai-agents-new">
                                 <Button color="primary" iconLeading={Plus}>
                                     New Campaign
                                 </Button>
@@ -354,7 +444,7 @@ export default function AiAgentsPage() {
 
                     {/* All Campaigns Tab */}
                     <Tabs.Panel id="all" className="pt-6">
-                        <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary">
+                        <TableCard.Root data-tour="ai-agents-list" className="rounded-xl border border-secondary shadow-sm bg-primary">
                             <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-secondary p-4 sm:px-6 sm:py-5">
                                 <div className="flex w-full sm:w-auto items-center gap-3">
                                     <InputBase
@@ -435,9 +525,23 @@ export default function AiAgentsPage() {
                                                     </div>
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    <BadgeWithDot size="sm" type="pill-color" color={statusBadge[item.status].color}>
-                                                        {statusBadge[item.status].label}
-                                                    </BadgeWithDot>
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <BadgeWithDot size="sm" type="pill-color" color={statusBadge[item.status].color}>
+                                                            {statusBadge[item.status].label}
+                                                        </BadgeWithDot>
+                                                        {/*
+                                                          Phase 8B: surface partial / total send failures as a
+                                                          warning badge on the row so users see at a glance
+                                                          which campaigns need attention. Reads from the
+                                                          cumulative `emailsFailed` counter incremented by
+                                                          `updateMessageStatus` whenever a send fails.
+                                                        */}
+                                                        {item.emailsFailed && item.emailsFailed > 0 ? (
+                                                            <Badge size="sm" type="pill-color" color="error">
+                                                                {item.emailsFailed} failed
+                                                            </Badge>
+                                                        ) : null}
+                                                    </div>
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     <span className="text-secondary whitespace-nowrap">{item.totalRecipients ?? 0} contacts</span>
@@ -452,38 +556,38 @@ export default function AiAgentsPage() {
                                                     <span className="text-secondary">{calcRate(item.emailsClicked, item.emailsSent)}%</span>
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    <div className="relative" ref={menuRef}>
-                                                        <ButtonUtility
-                                                            size="sm"
-                                                            icon={DotsVertical}
-                                                            aria-label="Actions"
-                                                            onClick={(e: MouseEvent) => {
-                                                                e.stopPropagation();
-                                                                setOpenMenu(openMenu === item._id ? null : item._id);
-                                                            }}
-                                                        />
-                                                        {openMenu === item._id && (
-                                                            <div className="absolute right-0 top-8 z-50 min-w-[180px] rounded-lg border border-secondary bg-primary py-1 shadow-lg">
-                                                                {getActions(item.status).map((actionItem) => (
-                                                                    <button
-                                                                        key={actionItem.label}
-                                                                        disabled={sendingCampaignId === item._id}
-                                                                        className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-secondary_subtle transition-colors ${
-                                                                            "className" in actionItem && actionItem.className
-                                                                                ? actionItem.className
-                                                                                : "text-secondary"
-                                                                        } ${sendingCampaignId === item._id ? "opacity-50 cursor-not-allowed" : ""}`}
-                                                                        onClick={() => handleAction(item._id, actionItem.action)}
-                                                                    >
-                                                                        <actionItem.icon className="w-4 h-4" />
-                                                                        {sendingCampaignId === item._id && actionItem.action === "launch"
-                                                                            ? "Sending..."
-                                                                            : actionItem.label}
-                                                                    </button>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                    {/*
+                                                      The row lives inside a react-aria-components Table Collection
+                                                      which uses an internal virtual-tree reconciler that does not
+                                                      reliably re-render row content in response to outer parent
+                                                      state changes. To make the action menu actually open, the
+                                                      trigger captures its viewport coordinates and the popover is
+                                                      rendered at page level (outside the Collection) below.
+                                                    */}
+                                                    <button
+                                                        type="button"
+                                                        aria-label="Actions"
+                                                        aria-haspopup="menu"
+                                                        aria-expanded={openMenu?.campaignId === item._id}
+                                                        onPointerDown={(e) => e.stopPropagation()}
+                                                        onMouseDown={(e) => e.stopPropagation()}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const target = e.currentTarget as HTMLButtonElement;
+                                                            const rect = target.getBoundingClientRect();
+                                                            if (openMenu?.campaignId === item._id) {
+                                                                setOpenMenu(null);
+                                                            } else {
+                                                                setOpenMenu({
+                                                                    campaignId: item._id,
+                                                                    rect: { top: rect.top, left: rect.left, height: rect.height },
+                                                                });
+                                                            }
+                                                        }}
+                                                        className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md bg-primary text-fg-quaternary ring-1 ring-primary ring-inset shadow-xs-skeumorphic hover:bg-primary_hover hover:text-fg-quaternary_hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                                                    >
+                                                        <DotsVertical className="size-5" />
+                                                    </button>
                                                 </Table.Cell>
                                             </Table.Row>
                                         )}
@@ -705,54 +809,89 @@ export default function AiAgentsPage() {
                             <h2 className="text-lg font-semibold text-primary">Campaign Details</h2>
                             <ButtonUtility size="sm" icon={XClose} aria-label="Close" onClick={() => setViewingCampaign(null)} />
                         </div>
+
+                        {/*
+                          Phase 8A: tabbed slide-over so the existing campaign panel
+                          can host the new "View Logs" feed without losing the
+                          configuration / metrics view. Tab state is owned by the
+                          parent so the row menu can open the slide-over directly
+                          to a chosen tab (logs vs details).
+                        */}
+                        <div className="px-6 pt-4 border-b border-secondary flex items-center gap-1">
+                            {(["details", "logs"] as const).map((tab) => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setSlideoverTab(tab)}
+                                    className={`px-3 py-2 -mb-px text-sm font-medium border-b-2 transition-colors ${
+                                        slideoverTab === tab
+                                            ? "border-brand-600 text-brand-600"
+                                            : "border-transparent text-tertiary hover:text-secondary"
+                                    }`}
+                                >
+                                    {tab === "details" ? "Details" : `Logs${campaignLogs ? ` (${campaignLogs.length})` : ""}`}
+                                </button>
+                            ))}
+                        </div>
+
                         <div className="p-6 flex flex-col gap-6">
                             <div>
-                                <div className="flex items-center gap-3 mb-2">
+                                <div className="flex items-center gap-3 mb-2 flex-wrap">
                                     <h3 className="text-xl font-semibold text-primary">{viewingCampaign.name}</h3>
                                     <BadgeWithDot size="sm" type="pill-color" color={statusBadge[viewingCampaign.status as CampaignStatus].color}>
                                         {statusBadge[viewingCampaign.status as CampaignStatus].label}
                                     </BadgeWithDot>
+                                    {viewingCampaign.emailsFailed && viewingCampaign.emailsFailed > 0 ? (
+                                        <Badge size="sm" type="pill-color" color="error">
+                                            {viewingCampaign.emailsFailed} failed
+                                        </Badge>
+                                    ) : null}
                                 </div>
                                 {viewingCampaign.description && (
                                     <p className="text-sm text-tertiary">{viewingCampaign.description}</p>
                                 )}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <DetailRow icon={Users01} label="Recipients" value={`${viewingCampaign.totalRecipients ?? 0} contacts`} />
-                                <DetailRow icon={Mail01} label="Emails Sent" value={String(viewingCampaign.emailsSent ?? 0)} />
-                                <DetailRow icon={Eye} label="Opened" value={String(viewingCampaign.emailsOpened ?? 0)} />
-                                <DetailRow icon={LinkExternal01} label="Clicked" value={String(viewingCampaign.emailsClicked ?? 0)} />
-                                <DetailRow icon={Calendar} label="Created" value={formatDate(viewingCampaign.createdAt)} />
-                                <DetailRow icon={Clock} label="Updated" value={formatDate(viewingCampaign.updatedAt)} />
-                            </div>
+                            {slideoverTab === "details" ? (
+                                <>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <DetailRow icon={Users01} label="Recipients" value={`${viewingCampaign.totalRecipients ?? 0} contacts`} />
+                                        <DetailRow icon={Mail01} label="Emails Sent" value={String(viewingCampaign.emailsSent ?? 0)} />
+                                        <DetailRow icon={Eye} label="Opened" value={String(viewingCampaign.emailsOpened ?? 0)} />
+                                        <DetailRow icon={LinkExternal01} label="Clicked" value={String(viewingCampaign.emailsClicked ?? 0)} />
+                                        <DetailRow icon={Calendar} label="Created" value={formatDate(viewingCampaign.createdAt)} />
+                                        <DetailRow icon={Clock} label="Updated" value={formatDate(viewingCampaign.updatedAt)} />
+                                    </div>
 
-                            {viewingCampaign.cadencePattern && (
-                                <div className="rounded-lg border border-secondary p-4">
-                                    <p className="text-xs text-tertiary uppercase tracking-wide mb-1">Cadence</p>
-                                    <p className="text-sm font-medium text-primary">{viewingCampaign.cadencePattern}</p>
-                                </div>
-                            )}
+                                    {viewingCampaign.cadencePattern && (
+                                        <div className="rounded-lg border border-secondary p-4">
+                                            <p className="text-xs text-tertiary uppercase tracking-wide mb-1">Cadence</p>
+                                            <p className="text-sm font-medium text-primary">{viewingCampaign.cadencePattern}</p>
+                                        </div>
+                                    )}
 
-                            {(viewingCampaign.sendingWindowStart || viewingCampaign.sendingWindowEnd) && (
-                                <div className="rounded-lg border border-secondary p-4">
-                                    <p className="text-xs text-tertiary uppercase tracking-wide mb-1">Sending Window</p>
-                                    <p className="text-sm text-primary">
-                                        {viewingCampaign.sendingDays?.join(", ") || "Mon–Fri"},{" "}
-                                        {viewingCampaign.sendingWindowStart || "09:00"}–{viewingCampaign.sendingWindowEnd || "17:00"}{" "}
-                                        {viewingCampaign.timezone?.toUpperCase() || ""}
-                                    </p>
-                                </div>
-                            )}
+                                    {(viewingCampaign.sendingWindowStart || viewingCampaign.sendingWindowEnd) && (
+                                        <div className="rounded-lg border border-secondary p-4">
+                                            <p className="text-xs text-tertiary uppercase tracking-wide mb-1">Sending Window</p>
+                                            <p className="text-sm text-primary">
+                                                {viewingCampaign.sendingDays?.join(", ") || "Mon–Fri"},{" "}
+                                                {viewingCampaign.sendingWindowStart || "09:00"}–{viewingCampaign.sendingWindowEnd || "17:00"}{" "}
+                                                {viewingCampaign.timezone?.toUpperCase() || ""}
+                                            </p>
+                                        </div>
+                                    )}
 
-                            {viewingCampaign.maxEmailsPerDay && (
-                                <div className="rounded-lg border border-secondary p-4">
-                                    <p className="text-xs text-tertiary uppercase tracking-wide mb-1">Throttling</p>
-                                    <p className="text-sm text-primary">
-                                        Max {viewingCampaign.maxEmailsPerDay} emails/day
-                                        {viewingCampaign.minDelayBetweenSends ? `, ${viewingCampaign.minDelayBetweenSends}min delay` : ""}
-                                    </p>
-                                </div>
+                                    {viewingCampaign.maxEmailsPerDay && (
+                                        <div className="rounded-lg border border-secondary p-4">
+                                            <p className="text-xs text-tertiary uppercase tracking-wide mb-1">Throttling</p>
+                                            <p className="text-sm text-primary">
+                                                Max {viewingCampaign.maxEmailsPerDay} emails/day
+                                                {viewingCampaign.minDelayBetweenSends ? `, ${viewingCampaign.minDelayBetweenSends}min delay` : ""}
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <CampaignLogsList logs={campaignLogs} />
                             )}
 
                             <div className="flex items-center gap-2 pt-2 border-t border-secondary">
@@ -801,8 +940,11 @@ export default function AiAgentsPage() {
                                     color="tertiary-destructive"
                                     iconLeading={Trash01}
                                     onClick={() => {
+                                        // Don't auto-close the slide-over here — the
+                                        // ConfirmModal needs to overlay it. The slide-over
+                                        // is closed by `confirmDelete` once the delete
+                                        // actually succeeds.
                                         handleAction(viewingCampaign._id, "delete");
-                                        setViewingCampaign(null);
                                     }}
                                 >
                                     Delete
@@ -812,6 +954,184 @@ export default function AiAgentsPage() {
                     </div>
                 </div>
             )}
+
+            {/*
+              Phase 8A: destructive delete confirmation. Mounted once at the
+              root level so it can overlay both the campaign table and the
+              slide-over. The actual `removeCampaign` call lives in
+              `confirmDelete` so the modal can show a spinner while the
+              mutation is in flight.
+            */}
+            <ConfirmModal
+                open={pendingDelete !== null}
+                onClose={() => {
+                    if (!isDeleting) setPendingDelete(null);
+                }}
+                onConfirm={confirmDelete}
+                title="Delete this campaign?"
+                description={
+                    <>
+                        <p>
+                            <span className="font-medium text-primary">{pendingDelete?.name}</span> will be
+                            permanently removed, along with its draft messages and recipients.
+                        </p>
+                        <p className="mt-2 text-xs text-tertiary">
+                            This action can&apos;t be undone.
+                        </p>
+                    </>
+                }
+                confirmLabel="Delete campaign"
+                tone="destructive"
+                loading={isDeleting}
+            />
+
+            {/*
+              Campaign action menu. Rendered at the page root (outside the
+              react-aria Table Collection) so its open/close state is driven
+              by ordinary React reconciliation. Positioned with the trigger
+              button's viewport rect that was captured at click time.
+            */}
+            {openMenu && (() => {
+                const item = allCampaigns.find((c) => c._id === openMenu.campaignId);
+                if (!item) return null;
+                const menuWidth = 200;
+                const viewportW = typeof window !== "undefined" ? window.innerWidth : 1280;
+                const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
+                // Anchor the top-right of the menu to the bottom-right of the trigger.
+                const top = Math.min(openMenu.rect.top + openMenu.rect.height + 4, viewportH - 200);
+                const left = Math.max(8, Math.min(openMenu.rect.left, viewportW - menuWidth - 8));
+                return (
+                    <div
+                        data-campaign-menu
+                        className="fixed z-[60] rounded-lg border border-secondary bg-primary py-1 shadow-xl"
+                        style={{ top, left, width: menuWidth }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {getActions(item.status).map((actionItem) => (
+                            <button
+                                key={actionItem.label}
+                                type="button"
+                                disabled={sendingCampaignId === item._id}
+                                className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-secondary_subtle transition-colors ${
+                                    "className" in actionItem && actionItem.className
+                                        ? actionItem.className
+                                        : "text-secondary"
+                                } ${sendingCampaignId === item._id ? "opacity-50 cursor-not-allowed" : ""}`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAction(item._id, actionItem.action);
+                                }}
+                            >
+                                <actionItem.icon className="w-4 h-4" />
+                                {sendingCampaignId === item._id && actionItem.action === "launch"
+                                    ? "Sending..."
+                                    : actionItem.label}
+                            </button>
+                        ))}
+                    </div>
+                );
+            })()}
+        </div>
+    );
+}
+
+// Phase 8A: per-recipient send log entries shown inside the slide-over's
+// "Logs" tab. Renders status, timestamp, and any error so users can
+// diagnose failed sends without leaving the campaign panel.
+function CampaignLogsList({
+    logs,
+}: {
+    logs: Array<{
+        messageId: string;
+        recipientEmail: string;
+        recipientName: string;
+        subject: string;
+        status: "draft" | "scheduled" | "sent" | "failed";
+        sentAt?: number;
+        createdAt: number;
+        errorMessage?: string;
+    }> | undefined;
+}) {
+    if (logs === undefined) {
+        return (
+            <div className="flex flex-col gap-2 animate-pulse">
+                {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="h-16 rounded-lg bg-quaternary" />
+                ))}
+            </div>
+        );
+    }
+
+    if (logs.length === 0) {
+        return (
+            <div className="rounded-lg border border-dashed border-secondary p-8 text-center">
+                <File04 className="w-6 h-6 text-tertiary mx-auto mb-2" />
+                <p className="text-sm text-tertiary">No send activity yet</p>
+                <p className="text-xs text-tertiary mt-1">
+                    Once this campaign launches, every send attempt will be logged here.
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex flex-col gap-2">
+            {logs.map((log) => {
+                const statusPill =
+                    log.status === "sent"
+                        ? { color: "success" as const, icon: CheckCircle, label: "Sent" }
+                        : log.status === "failed"
+                          ? { color: "error" as const, icon: XCircle, label: "Failed" }
+                          : log.status === "scheduled"
+                            ? { color: "blue" as const, icon: Clock, label: "Scheduled" }
+                            : { color: "gray" as const, icon: AlertCircle, label: "Draft" };
+                const Icon = statusPill.icon;
+                const ts = log.sentAt ?? log.createdAt;
+                return (
+                    <div
+                        key={log.messageId}
+                        className={`rounded-lg border p-3 ${
+                            log.status === "failed"
+                                ? "border-error-200 bg-error-50"
+                                : "border-secondary bg-primary"
+                        }`}
+                    >
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-start gap-2 min-w-0">
+                                <Icon
+                                    className={`w-4 h-4 mt-0.5 shrink-0 ${
+                                        log.status === "sent"
+                                            ? "text-success-600"
+                                            : log.status === "failed"
+                                              ? "text-error-600"
+                                              : "text-tertiary"
+                                    }`}
+                                />
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-primary truncate">
+                                        {log.recipientName || log.recipientEmail}
+                                    </p>
+                                    {log.recipientName && (
+                                        <p className="text-xs text-tertiary truncate">{log.recipientEmail}</p>
+                                    )}
+                                    <p className="text-xs text-tertiary mt-1 truncate">{log.subject}</p>
+                                </div>
+                            </div>
+                            <Badge size="sm" type="pill-color" color={statusPill.color}>
+                                {statusPill.label}
+                            </Badge>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-2 pl-6 text-xs text-tertiary">
+                            <span>{new Date(ts).toLocaleString()}</span>
+                        </div>
+                        {log.errorMessage && (
+                            <p className="text-xs text-error-700 mt-2 pl-6 break-words">
+                                {log.errorMessage}
+                            </p>
+                        )}
+                    </div>
+                );
+            })}
         </div>
     );
 }

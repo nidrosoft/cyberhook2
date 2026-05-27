@@ -1,9 +1,20 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+
+// Phase 3: honor a `return_to` query param so deep links like
+// /accept-invite?token=… can route through sign-in and come back. Only
+// accept same-origin relative paths to avoid open-redirect abuse.
+function sanitizeReturnTo(raw: string | null): string | null {
+    if (!raw) return null;
+    if (!raw.startsWith("/")) return null;
+    if (raw.startsWith("//")) return null; // protocol-relative
+    if (raw.startsWith("/api/")) return null;
+    return raw;
+}
 import { Mail01 } from "@untitledui/icons";
 import { Shield01 } from "@untitledui/icons";
 
@@ -33,11 +44,24 @@ export default function AuthPage() {
     const { isSignedIn, isLoaded: authLoaded } = useAuth();
     const router = useRouter();
 
+    // Resolve `return_to` once on mount from window.location (no Suspense needed).
+    const returnTo = useMemo(() => {
+        if (typeof window === "undefined") return null;
+        try {
+            const url = new URL(window.location.href);
+            return sanitizeReturnTo(url.searchParams.get("return_to"));
+        } catch {
+            return null;
+        }
+    }, []);
+    const postSignInTarget = returnTo ?? "/dashboard";
+    const postSignUpTarget = returnTo ?? "/onboarding";
+
     useEffect(() => {
         if (authLoaded && isSignedIn) {
-            router.replace("/dashboard");
+            router.replace(postSignInTarget);
         }
-    }, [authLoaded, isSignedIn, router]);
+    }, [authLoaded, isSignedIn, router, postSignInTarget]);
 
     const handleOAuthSignIn = async (strategy: "oauth_google" | "oauth_microsoft" | "oauth_linkedin_oidc") => {
         if (!signInLoaded || !signIn) return;
@@ -48,7 +72,7 @@ export default function AuthPage() {
             await signIn.authenticateWithRedirect({
                 strategy,
                 redirectUrl: "/sso-callback",
-                redirectUrlComplete: "/dashboard",
+                redirectUrlComplete: postSignInTarget,
             });
         } catch (err: any) {
             logError("OAuth error:", err);
@@ -66,7 +90,7 @@ export default function AuthPage() {
             await signUp.authenticateWithRedirect({
                 strategy,
                 redirectUrl: "/sso-callback",
-                redirectUrlComplete: "/onboarding",
+                redirectUrlComplete: postSignUpTarget,
             });
         } catch (err: any) {
             logError("OAuth error:", err);
@@ -94,7 +118,7 @@ export default function AuthPage() {
 
             if (result.status === "complete") {
                 await setActive({ session: result.createdSessionId });
-                router.push("/dashboard");
+                router.push(postSignInTarget);
             } else if (result.status === "needs_second_factor") {
                 const secondFactors = result.supportedSecondFactors;
                 const emailFactor = secondFactors?.find(
@@ -166,7 +190,7 @@ export default function AuthPage() {
 
             if (result.status === "complete") {
                 await setActive({ session: result.createdSessionId });
-                router.push("/dashboard");
+                router.push(postSignInTarget);
             } else {
                 logError("Second factor incomplete:", result?.status);
                 setError("Verification incomplete. Please try again.");
@@ -193,7 +217,7 @@ export default function AuthPage() {
 
             if (result.status === "complete") {
                 await setSignUpActive({ session: result.createdSessionId });
-                router.push("/onboarding");
+                router.push(postSignUpTarget);
             } else {
                 logError("Verification incomplete:", result?.status);
                 setError("Verification incomplete. Please try again.");
@@ -435,7 +459,7 @@ export default function AuthPage() {
                 </div>
 
                 <footer className="hidden justify-between px-8 py-4 md:flex">
-                    <p className="text-sm text-tertiary">© CyberHook 2026</p>
+                    <p className="text-sm text-tertiary">© CyberHook AI 2026</p>
                     <a href="mailto:help@cyberhook.ai" className="flex items-center gap-2 text-sm text-tertiary">
                         <Mail01 className="size-4 text-fg-quaternary" />
                         help@cyberhook.ai
@@ -454,7 +478,7 @@ export default function AuthPage() {
                     <div className="relative z-10 flex flex-col gap-8">
                         <div className="flex items-center gap-2 text-xl font-bold tracking-tight text-primary_on-brand">
                             <Shield01 className="h-6 w-6" />
-                            <span>CyberHook</span>
+                            <span>CyberHook AI</span>
                         </div>
 
                         <div className="max-w-lg">

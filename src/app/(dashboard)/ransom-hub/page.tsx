@@ -34,7 +34,7 @@ import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { sanitizeUrl } from "@/utils/sanitize-url";
 import { friendlyError } from "@/lib/friendly-errors";
-import { STATE_PORTALS_SORTED, resolveStatePortal } from "@/lib/state-breach-portals";
+import { resolveStatePortal } from "@/lib/state-breach-portals";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -105,7 +105,7 @@ function exportRansomCSV(incidents: Array<{ ransomwareGroup?: string; companyNam
     const a = document.createElement("a");
     a.href = url;
     const dateStr = new Date().toISOString().slice(0, 10);
-    a.download = `CyberHook_RansomHub_Export_${dateStr}.csv`;
+    a.download = `CyberHook_AI_RansomHub_Export_${dateStr}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -128,9 +128,11 @@ export default function RansomHubPage() {
         ...(dateFrom ? { dateFrom } : {}),
     });
 
-    // Fetch breach notifications
+    // Fetch breach notifications — Phase 6 (Section 17): both tabs now share
+    // the same Time Period filter from the global Advanced Filters panel.
     const breachIncidents = useQuery(api.ransomHub.list, {
         incidentType: "breach_notification",
+        ...(dateFrom ? { dateFrom } : {}),
     });
 
     // Stats
@@ -151,10 +153,11 @@ export default function RansomHubPage() {
 
     const [searchQuery, setSearchQuery] = useState("");
     const [breachSearchQuery, setBreachSearchQuery] = useState("");
-    const [region, setRegion] = useState("all");
+    // Phase 6 (Section 17): Region filter removed from Ransom Hub; both tabs
+    // now share Time Period + Threat Group from the global Advanced Filters
+    // panel below. The state-specific breach filters (Regulation dropdown,
+    // per-state pill toggles) were also removed per client direction.
     const [threatGroup, setThreatGroup] = useState("all");
-
-    const [breachRegulation, setBreachRegulation] = useState("all");
 
     // Pagination state — 15 rows per page for both tables.
     const PAGE_SIZE = 15;
@@ -183,6 +186,8 @@ export default function RansomHubPage() {
         loading: boolean;
         rows?: PortalRow[];
         error?: string;
+        /** Phase 6D: portal has no automated feed yet. Show interim state copy. */
+        notYetConnected?: boolean;
     };
     const [portalView, setPortalView] = useState<PortalView | null>(null);
     const fetchPortalLive = useAction(api.portalsLive.fetchPortalLive);
@@ -206,6 +211,7 @@ export default function RansomHubPage() {
                 loading: false,
                 rows: result.rows,
                 error: result.error,
+                notYetConnected: result.notYetConnected,
             });
         } catch (err) {
             setPortalView({
@@ -217,23 +223,6 @@ export default function RansomHubPage() {
             });
         }
     }
-
-    // Per-state toggle persistence (orange item 12.2). Users can toggle
-    // individual US states on/off to focus on their service area. State
-    // selections persist across reloads via localStorage so the toggle sticks.
-    const [breachStateFilter, setBreachStateFilter] = useState<string[]>(() => {
-        if (typeof window === "undefined") return [];
-        try {
-            const raw = window.localStorage.getItem("breachStateFilter");
-            return raw ? (JSON.parse(raw) as string[]) : [];
-        } catch {
-            return [];
-        }
-    });
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        window.localStorage.setItem("breachStateFilter", JSON.stringify(breachStateFilter));
-    }, [breachStateFilter]);
 
     const [showFilterPanel, setShowFilterPanel] = useState(false);
 
@@ -249,18 +238,13 @@ export default function RansomHubPage() {
                 }
             }
             if (threatGroup !== "all" && !inc.ransomwareGroup?.toLowerCase().includes(threatGroup)) return false;
-            if (region !== "all" && inc.region !== region) return false;
             return true;
         });
-    }, [ransomwareIncidents, searchQuery, threatGroup, region]);
+    }, [ransomwareIncidents, searchQuery, threatGroup]);
 
-    const regulationSourceMap: Record<string, string[]> = {
-        hipaa: ["hhs_ocr"],
-        ccpa: ["california_ag"],
-        glba: ["privacy_rights"],
-    };
-
-    // Filter breach notifications locally
+    // Filter breach notifications locally — Phase 6 (Section 17): Both tabs
+    // now share the same Threat Group filter from the Advanced Filters panel.
+    // (Time Period is applied server-side via `dateFrom` on the query above.)
     const filteredBreaches = useMemo(() => {
         if (!breachIncidents) return [];
         return breachIncidents.filter((inc) => {
@@ -268,22 +252,14 @@ export default function RansomHubPage() {
                 const q = breachSearchQuery.toLowerCase();
                 if (!inc.companyName.toLowerCase().includes(q)) return false;
             }
-            if (breachRegulation !== "all") {
-                const allowedSources = regulationSourceMap[breachRegulation];
-                if (allowedSources && !allowedSources.includes(inc.source)) return false;
-            }
-            // Per-state filter (orange item 12.2). If the user selected at
-            // least one state, only keep rows whose region matches.
-            if (breachStateFilter.length > 0) {
-                if (!inc.region || !breachStateFilter.includes(inc.region)) return false;
-            }
+            if (threatGroup !== "all" && !inc.ransomwareGroup?.toLowerCase().includes(threatGroup)) return false;
             return true;
         });
-    }, [breachIncidents, breachSearchQuery, breachRegulation, breachStateFilter]);
+    }, [breachIncidents, breachSearchQuery, threatGroup]);
 
     // Reset page when filters change so the user always sees results from page 1.
-    useEffect(() => { setRansomwarePage(1); }, [searchQuery, threatGroup, region, timePeriod]);
-    useEffect(() => { setBreachesPage(1); }, [breachSearchQuery, breachRegulation, breachStateFilter]);
+    useEffect(() => { setRansomwarePage(1); }, [searchQuery, threatGroup, timePeriod]);
+    useEffect(() => { setBreachesPage(1); }, [breachSearchQuery, threatGroup, timePeriod]);
 
     // Paginated slices.
     const ransomwareTotalPages = Math.max(1, Math.ceil(filteredRansomware.length / PAGE_SIZE));
@@ -440,7 +416,10 @@ export default function RansomHubPage() {
                                 <XClose className="w-4 h-4" />
                             </button>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* Phase 6 (Section 17): Region filter removed. Both Ransomware
+                            and Breach Notification tabs now share only Time Period
+                            and Threat Group from this panel. */}
+                        <div data-tour="ransom-filters" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="flex flex-col gap-1.5">
                                 <label className="text-sm font-medium text-secondary">Time Period</label>
                                 <FilterDropdown
@@ -452,22 +431,6 @@ export default function RansomHubPage() {
                                         { label: "Last 7 Days", value: "7d" },
                                         { label: "Last 30 Days", value: "30d" },
                                         { label: "Last 90 Days", value: "90d" },
-                                    ]}
-                                    className="w-full"
-                                />
-                            </div>
-                            <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-medium text-secondary">Region</label>
-                                <FilterDropdown
-                                    aria-label="Region"
-                                    value={region}
-                                    onChange={(v) => setRegion(v)}
-                                    options={[
-                                        { label: "All Regions", value: "all" },
-                                        { label: "North America", value: "na" },
-                                        { label: "Europe", value: "eu" },
-                                        { label: "Asia", value: "asia" },
-                                        { label: "South America", value: "sa" },
                                     ]}
                                     className="w-full"
                                 />
@@ -499,9 +462,7 @@ export default function RansomHubPage() {
                                 color="secondary"
                                 onClick={() => {
                                     setTimePeriod("all");
-                                    setRegion("all");
                                     setThreatGroup("all");
-                                    setBreachRegulation("all");
                                     setSearchQuery("");
                                     setBreachSearchQuery("");
                                     toast.success("All filters cleared");
@@ -530,7 +491,7 @@ export default function RansomHubPage() {
                         </div>
 
                         {/* Incidents Table */}
-                        <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary">
+                        <TableCard.Root data-tour="ransom-table" className="rounded-xl border border-secondary shadow-sm bg-primary">
                             <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-secondary p-4 sm:px-6 sm:py-5">
                                 <div className="flex w-full items-center gap-3 flex-wrap">
                                     <InputBase
@@ -670,65 +631,9 @@ export default function RansomHubPage() {
 
                     {/* Breach Notifications Tab */}
                     <TabPanel id="breaches" className="pt-6 flex flex-col gap-6">
-                        {/* Breach Filters */}
-                        <div className="flex flex-col gap-3">
-                            <div className="flex flex-wrap items-end gap-3">
-                                <FilterDropdown
-                                    aria-label="Regulation"
-                                    value={breachRegulation}
-                                    onChange={(v) => setBreachRegulation(v)}
-                                    options={[
-                                        { label: "All", value: "all" },
-                                        { label: "HIPAA", value: "hipaa" },
-                                        { label: "CCPA", value: "ccpa" },
-                                        { label: "GLBA", value: "glba" },
-                                    ]}
-                                />
-                                {breachStateFilter.length > 0 && (
-                                    <Button size="sm" color="link-gray" onClick={() => setBreachStateFilter([])}>
-                                        Clear states ({breachStateFilter.length})
-                                    </Button>
-                                )}
-                            </div>
-                            {/* Per-state quick toggles (orange item 12.2). Clicks toggle
-                                membership in breachStateFilter and persist to localStorage. */}
-                            <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-xs font-semibold text-tertiary uppercase tracking-wide mr-1">Filter by state:</span>
-                                {/* All 50 states + DC, alphabetized (red item 12.1). */}
-                                {STATE_PORTALS_SORTED.map((portal) => {
-                                        const active =
-                                            breachStateFilter.includes(portal.code) ||
-                                            breachStateFilter.includes(portal.name);
-                                        return (
-                                            <button
-                                                key={portal.code}
-                                                type="button"
-                                                title={`Toggle ${portal.name}`}
-                                                onClick={() => {
-                                                    setBreachStateFilter((prev) => {
-                                                        const has =
-                                                            prev.includes(portal.code) ||
-                                                            prev.includes(portal.name);
-                                                        if (has)
-                                                            return prev.filter(
-                                                                (s) => s !== portal.code && s !== portal.name,
-                                                            );
-                                                        // Store both so the filter matches both data shapes.
-                                                        return [...prev, portal.code, portal.name];
-                                                    });
-                                                }}
-                                                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                                                    active
-                                                        ? "border-brand-solid bg-brand-primary_alt text-brand-secondary"
-                                                        : "border-secondary bg-primary text-secondary hover:bg-secondary_subtle"
-                                                }`}
-                                            >
-                                                {portal.code}
-                                            </button>
-                                        );
-                                    })}
-                            </div>
-                        </div>
+                        {/* Phase 6 (Section 17): Regulation dropdown and per-state
+                            pill toggles removed. Time Period and Threat Group are
+                            controlled via the global Advanced Filters panel above. */}
 
                         {/* Breach Portals Dropdown — uses FilterDropdown for
                             consistency with the rest of the app. Selecting a
@@ -776,14 +681,18 @@ export default function RansomHubPage() {
                             <div className={`flex flex-col gap-2 rounded-lg border px-4 py-3 ${
                                 portalView.loading
                                     ? "border-brand-200 bg-brand-50"
-                                    : portalView.rows && portalView.rows.length > 0
-                                        ? "border-success-200 bg-success-50"
-                                        : "border-warning-200 bg-warning-50"
+                                    : portalView.notYetConnected
+                                        ? "border-secondary bg-secondary_subtle"
+                                        : portalView.rows && portalView.rows.length > 0
+                                            ? "border-success-200 bg-success-50"
+                                            : "border-warning-200 bg-warning-50"
                             }`}>
                                 <div className="flex items-center justify-between gap-3 flex-wrap">
                                     <div className="flex items-center gap-2 min-w-0">
                                         {portalView.loading ? (
                                             <Loading02 className="w-4 h-4 animate-spin text-brand-600 shrink-0" />
+                                        ) : portalView.notYetConnected ? (
+                                            <AlertCircle className="w-4 h-4 text-tertiary shrink-0" />
                                         ) : portalView.rows && portalView.rows.length > 0 ? (
                                             <CheckCircle className="w-4 h-4 text-success-600 shrink-0" />
                                         ) : (
@@ -791,10 +700,12 @@ export default function RansomHubPage() {
                                         )}
                                         <span className="text-sm font-medium text-primary truncate">
                                             {portalView.loading
-                                                ? `Loading ${portalView.label}…`
-                                                : portalView.rows && portalView.rows.length > 0
-                                                    ? `Showing live data from ${portalView.label} (${portalView.rows.length} rows)`
-                                                    : `Couldn't embed ${portalView.label}`}
+                                                ? `Loading…`
+                                                : portalView.notYetConnected
+                                                    ? `This source is not yet connected`
+                                                    : portalView.rows && portalView.rows.length > 0
+                                                        ? `Showing ${portalView.rows.length} live ${portalView.rows.length === 1 ? "row" : "rows"} from the selected source`
+                                                        : `Could not load incidents from the selected source`}
                                         </span>
                                     </div>
                                     <a
@@ -807,9 +718,21 @@ export default function RansomHubPage() {
                                         Open in new tab
                                     </a>
                                 </div>
-                                {!portalView.loading && portalView.error && (!portalView.rows || portalView.rows.length === 0) && (
+                                {/* Phase 6D interim-state copy. The spec wording is
+                                    intentionally generic — we don't name the upstream
+                                    portal here per the client direction to keep this
+                                    copy clean and user-facing. */}
+                                {!portalView.loading && portalView.notYetConnected && (
+                                    <p className="text-xs text-tertiary">
+                                        This source is not yet connected. Watch this space —
+                                        we&apos;ll surface incidents here as soon as the data
+                                        feed is wired up.
+                                    </p>
+                                )}
+                                {!portalView.loading && !portalView.notYetConnected && portalView.error && (!portalView.rows || portalView.rows.length === 0) && (
                                     <p className="text-xs text-warning-700">
-                                        {portalView.error} Use &ldquo;Open in new tab&rdquo; to view directly.
+                                        We couldn&apos;t load incidents from the selected source.
+                                        Use &ldquo;Open in new tab&rdquo; to view the portal directly.
                                     </p>
                                 )}
                             </div>
@@ -934,18 +857,20 @@ export default function RansomHubPage() {
                             {filteredBreaches.length === 0 && (
                                 <div className="px-5 py-12 text-center">
                                     {breachIncidents?.length === 0 ? (
-                                        <>
-                                            <p className="text-sm font-medium text-secondary mb-2">
-                                                No breach notifications loaded yet.
+                                        /* Phase 6 (Section 17): rewritten user-facing copy.
+                                           Removes references to specific portals + the CSV
+                                           bulk-import flow per client direction. The portal
+                                           selector above lets users pick a source. */
+                                        <div className="flex flex-col items-center gap-2 max-w-md mx-auto">
+                                            <p className="text-sm font-medium text-secondary">
+                                                No breach notifications yet
                                             </p>
-                                            <p className="text-sm text-tertiary max-w-md mx-auto leading-relaxed">
-                                                The HHS OCR &ldquo;Wall of Shame&rdquo;, California AG,
-                                                and Privacy Rights Clearinghouse don&apos;t expose public
-                                                JSON APIs. An admin can populate this view by uploading a
-                                                CSV export from the official portal &mdash; reach out to
-                                                support to enable the bulk-import flow for your account.
+                                            <p className="text-sm text-tertiary leading-relaxed">
+                                                Select a breach portal to view the latest reported
+                                                incidents and breach disclosures. Data will populate
+                                                automatically based on your selected source.
                                             </p>
-                                        </>
+                                        </div>
                                     ) : (
                                         <p className="text-sm text-tertiary">
                                             No notifications match your filters.

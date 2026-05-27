@@ -45,6 +45,7 @@ import { NativeSelect } from "@/components/base/select/select-native";
 import { TextArea } from "@/components/base/textarea/textarea";
 import { useCompany } from "@/hooks/use-company";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useReportConsumer } from "@/hooks/use-report-consumer";
 import { friendlyError } from "@/lib/friendly-errors";
 import { generateExposureReport } from "@/lib/pdf-report";
 import { ensureProtocol } from "@/utils/sanitize-url";
@@ -110,6 +111,23 @@ const daysOptions = [
     { label: "Last 30 days", value: "30" },
 ];
 
+// 50 US states + DC, used to populate the State dropdown when Country is
+// "united states". Redrok's `/search/regions` endpoint returns empty for
+// every input we tested, so we ship a canonical list instead of relying
+// on the upstream feed. The value sent to Redrok is the lowercase state
+// name (e.g. "minnesota") — verified against the live API.
+const US_STATES = [
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+    "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia",
+    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky",
+    "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+    "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
+    "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota",
+    "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+    "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia",
+    "Washington", "West Virginia", "Wisconsin", "Wyoming",
+];
+
 function getSeverityIndicator(severity: ExposureSeverity) {
     const colors: Record<ExposureSeverity, { dot: string; color: "error" | "warning" | "success"; label: string }> = {
         critical: { dot: "bg-error-500", color: "error", label: "Critical" },
@@ -150,6 +168,7 @@ const addLeadRevenueOptions = ["<$1M", "$1M-$5M", "$5M-$10M", "$10M-$50M", "$50M
 export default function LiveLeadsPage() {
     const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
     const { company: companyData } = useCompany();
+    const consumeReportQuota = useReportConsumer();
     const resolvedLogoUrl = useQuery(api.storage.getUrl, companyData?.logoStorageId ? { storageId: companyData.logoStorageId } : "skip");
 
     // Fetch leads from Convex
@@ -168,25 +187,26 @@ export default function LiveLeadsPage() {
     const addToWatchlist = useMutation(api.watchlist.add);
     const fetchLiveLeads = useAction(api.redrokApi.liveLeads);
     const fetchCountries = useAction(api.redrokApi.getCountries);
-    const fetchRegions = useAction(api.redrokApi.getRegions);
 
     // Tab: "my-leads" or "discover"
     const [activeTab, setActiveTab] = useState<"my-leads" | "discover">("discover");
 
-    // Discover state
+    // Discover state.
+    // `discoverState` (replaces the broken Region dropdown) and
+    // `discoverCity` are new in Phase 5. Industry / Size / City are
+    // applied client-side because Redrok silently ignores those params.
     const [discoverDays, setDiscoverDays] = useState("7");
     const [discoverCountry, setDiscoverCountry] = useState("");
-    const [discoverRegion, setDiscoverRegion] = useState("");
-    // Industry + Size filters live on the discover tab too (client request).
-    // We also apply these client-side to the returned list so they always
-    // refine results even if the upstream API ignores them.
+    const [discoverState, setDiscoverState] = useState("");
+    const [discoverCity, setDiscoverCity] = useState("");
     const [discoverIndustry, setDiscoverIndustry] = useState("All");
     const [discoverSize, setDiscoverSize] = useState("All");
     const [isDiscovering, setIsDiscovering] = useState(false);
     const [discoveredLeads, setDiscoveredLeads] = useState<RedrokCompany[]>([]);
+    // `discoverError` is used only for hard upstream errors. The empty-
+    // results case is handled by the inline empty state below the table.
     const [discoverError, setDiscoverError] = useState<string | null>(null);
     const [countriesList, setCountriesList] = useState<Array<{ val: string; regions: boolean }>>([]);
-    const [regionsList, setRegionsList] = useState<string[]>([]);
     const [countriesLoaded, setCountriesLoaded] = useState(false);
 
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({
@@ -356,18 +376,12 @@ export default function LiveLeadsPage() {
         }
     }, [activeTab, loadCountries, companyId]);
 
-    async function handleCountryChange(country: string) {
+    function handleCountryChange(country: string) {
         setDiscoverCountry(country);
-        setDiscoverRegion("");
-        setRegionsList([]);
-        if (country && companyId) {
-            try {
-                const result = await fetchRegions({ companyId, country });
-                if (result.success) setRegionsList(result.regions);
-            } catch (e) {
-                devError("Failed to load regions:", e);
-            }
-        }
+        // State dropdown is US-specific. Reset state/city when switching
+        // away from a country that supports states client-side.
+        setDiscoverState("");
+        setDiscoverCity("");
     }
 
     async function handleDiscover() {
@@ -380,18 +394,20 @@ export default function LiveLeadsPage() {
                 companyId,
                 days: parseInt(discoverDays),
                 country: discoverCountry,
-                region: discoverRegion,
+                // `region` is the Redrok parameter name; on the UI we
+                // surface it as "State" since we only support US states
+                // (Redrok's /search/regions endpoint is broken upstream).
+                region: discoverState,
             });
             if (result.success) {
                 setDiscoveredLeads(result.companies);
-                if (result.companies.length === 0) {
-                    setDiscoverError("No leads found for the selected criteria. Try expanding your search.");
-                }
+                // Empty-result case is rendered as a friendly empty state
+                // below the table; we no longer surface it as an error.
             } else {
-                setDiscoverError(friendlyError(result.error, "We couldn't load new leads right now. Please try again in a few minutes."));
+                setDiscoverError(friendlyError(result.error, "We couldn't load leads right now. Please try again or contact support."));
             }
         } catch (error) {
-            setDiscoverError(friendlyError(error, "We couldn't load new leads right now. Please try again in a few minutes."));
+            setDiscoverError(friendlyError(error, "We couldn't load leads right now. Please try again or contact support."));
         } finally {
             setIsDiscovering(false);
         }
@@ -449,25 +465,26 @@ export default function LiveLeadsPage() {
         return filteredLeads.slice(start, start + pageSize);
     }, [filteredLeads, myLeadsPage, pageSize]);
 
-    // Client-side post-filter for the discover list. Region, industry and
-    // size are applied here in addition to the upstream Redrok filters so
-    // they always work — addresses the client's "filters are not working"
-    // feedback, since the upstream API was returning broader results than
-    // requested. City was removed per client request.
+    // Client-side post-filter for the discover list. State (region) is
+    // already applied server-side by Redrok but we re-apply here to keep
+    // the result tight in case the user changes State after fetching.
+    // Industry / Size / City are *only* applied here because Redrok
+    // silently ignores those params upstream (Phase 5 root cause).
+    // Comparisons are case-insensitive throughout since Redrok returns
+    // lowercase values (e.g. "higher education", "minnesota").
     const filteredDiscoveredLeads = useMemo(() => {
+        const stateWanted = discoverState.toLowerCase();
+        const industryWanted = discoverIndustry === "All" ? "" : discoverIndustry.toLowerCase();
+        const sizeWanted = discoverSize === "All" ? "" : discoverSize;
+        const cityWanted = discoverCity.toLowerCase().trim();
         return discoveredLeads.filter((c) => {
-            if (discoverRegion && (c.region ?? "").toLowerCase() !== discoverRegion.toLowerCase()) {
-                return false;
-            }
-            if (discoverIndustry !== "All" && (c.industry ?? "") !== discoverIndustry) {
-                return false;
-            }
-            if (discoverSize !== "All" && (c.size ?? "") !== discoverSize) {
-                return false;
-            }
+            if (stateWanted && (c.region ?? "").toLowerCase() !== stateWanted) return false;
+            if (industryWanted && (c.industry ?? "").toLowerCase() !== industryWanted) return false;
+            if (sizeWanted && (c.size ?? "") !== sizeWanted) return false;
+            if (cityWanted && !(c.locality ?? "").toLowerCase().includes(cityWanted)) return false;
             return true;
         });
-    }, [discoveredLeads, discoverRegion, discoverIndustry, discoverSize]);
+    }, [discoveredLeads, discoverState, discoverIndustry, discoverSize, discoverCity]);
 
     const discoverTotalPages = Math.max(1, Math.ceil(filteredDiscoveredLeads.length / pageSize));
     const paginatedDiscoverLeads = useMemo(() => {
@@ -475,9 +492,10 @@ export default function LiveLeadsPage() {
         return filteredDiscoveredLeads.slice(start, start + pageSize);
     }, [filteredDiscoveredLeads, discoverPage, pageSize]);
 
-    // Reset page on filter or page-size change.
+    // Reset page on filter or page-size change so pagination always
+    // starts from page 1 of the narrowed result set.
     useEffect(() => { setMyLeadsPage(1); }, [searchQuery, industry, sizeFilter, pageSize]);
-    useEffect(() => { setDiscoverPage(1); }, [filteredDiscoveredLeads.length, pageSize, discoverRegion, discoverIndustry, discoverSize]);
+    useEffect(() => { setDiscoverPage(1); }, [filteredDiscoveredLeads.length, pageSize, discoverState, discoverIndustry, discoverSize, discoverCity]);
 
     async function handleAddLead(close: () => void) {
         if (!leadCompany.trim()) {
@@ -531,6 +549,9 @@ export default function LiveLeadsPage() {
 
     async function handleGenerateReport(lead: typeof filteredLeads[0]) {
         const domain = lead.domain?.trim() || lead.name.toLowerCase().replace(/\s+/g, "") + ".com";
+        // Phase 4H: meter against the plan's monthly report quota.
+        const allowed = await consumeReportQuota(companyId);
+        if (!allowed) return;
         toast.info(`Generating report for ${lead.name}...`);
         try {
             await generateExposureReport({
@@ -794,7 +815,7 @@ export default function LiveLeadsPage() {
                             const a = document.createElement("a");
                             a.href = url;
                             const dateStr = new Date().toISOString().slice(0, 10);
-                            a.download = `CyberHook_All_Leads_Export_${dateStr}.csv`;
+                            a.download = `CyberHook_AI_All_Leads_Export_${dateStr}.csv`;
                             a.click();
                             URL.revokeObjectURL(url);
                             toast.success(`Exported ${filteredLeads.length} lead(s) to CSV`);
@@ -923,7 +944,7 @@ export default function LiveLeadsPage() {
                                 <Compass className="w-5 h-5 text-brand-600" />
                                 <h3 className="text-md font-semibold text-primary">Discover Companies with Recent Exposures</h3>
                             </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 items-end gap-x-5 gap-y-4 xl:gap-x-6">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 items-end gap-x-5 gap-y-4 xl:gap-x-6">
                                 <div className="flex flex-col gap-1 min-w-0">
                                     <label className="text-xs font-medium text-tertiary">Time Range</label>
                                     <NativeSelect
@@ -943,7 +964,7 @@ export default function LiveLeadsPage() {
                                         options={[
                                             { label: "All Countries", value: "" },
                                             ...(() => {
-                                                const priority = countriesList.filter(c => 
+                                                const priority = countriesList.filter(c =>
                                                     c.val.toLowerCase() === "united states" || c.val.toLowerCase() === "canada"
                                                 ).sort((a, b) => {
                                                     if (a.val.toLowerCase() === "united states") return -1;
@@ -962,17 +983,35 @@ export default function LiveLeadsPage() {
                                         selectClassName="text-sm"
                                     />
                                 </div>
+                                {/*
+                                  State + City: only meaningful when the
+                                  user has scoped Country to United States.
+                                  We hardcode the 50 states + DC because
+                                  Redrok's /search/regions endpoint is
+                                  broken (returns empty for every input).
+                                */}
                                 <div className="flex flex-col gap-1 min-w-0">
-                                    <label className="text-xs font-medium text-tertiary">Region</label>
+                                    <label className="text-xs font-medium text-tertiary">State</label>
                                     <NativeSelect
-                                        aria-label="Region"
-                                        value={discoverRegion}
-                                        onChange={(e) => setDiscoverRegion(e.target.value)}
+                                        aria-label="State"
+                                        value={discoverState}
+                                        onChange={(e) => setDiscoverState(e.target.value)}
+                                        disabled={discoverCountry !== "" && discoverCountry.toLowerCase() !== "united states"}
                                         options={[
-                                            { label: "All Regions", value: "" },
-                                            ...regionsList.map(r => ({ label: typeof r === "string" ? r : "", value: typeof r === "string" ? r : "" })),
+                                            { label: discoverCountry && discoverCountry.toLowerCase() !== "united states" ? "Select USA" : "All States", value: "" },
+                                            ...US_STATES.map((s) => ({ label: s, value: s })),
                                         ]}
                                         selectClassName="text-sm"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-1 min-w-0">
+                                    <label className="text-xs font-medium text-tertiary">City</label>
+                                    <InputBase
+                                        aria-label="City"
+                                        placeholder="Any city"
+                                        value={discoverCity}
+                                        onChange={(value: string) => setDiscoverCity(value)}
+                                        inputClassName="text-sm"
                                     />
                                 </div>
                                 <div className="flex flex-col gap-1 min-w-0">
@@ -1015,9 +1054,21 @@ export default function LiveLeadsPage() {
                             </div>
 
                             {discoverError && (
-                                <div className="flex items-center gap-2 text-sm text-warning-700 bg-warning-50 px-4 py-2.5 rounded-lg">
-                                    <AlertCircle className="w-4 h-4 shrink-0" />
-                                    <span>{discoverError}</span>
+                                <div className="flex items-center justify-between gap-2 text-sm text-warning-700 bg-warning-50 px-4 py-2.5 rounded-lg">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <AlertCircle className="w-4 h-4 shrink-0" />
+                                        <span className="truncate">{discoverError}</span>
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        color="secondary"
+                                        iconLeading={RefreshCw01}
+                                        onClick={handleDiscover}
+                                        isDisabled={isDiscovering}
+                                        className="shrink-0"
+                                    >
+                                        Retry
+                                    </Button>
                                 </div>
                             )}
                         </div>
@@ -1035,9 +1086,14 @@ export default function LiveLeadsPage() {
                             </div>
                         )}
 
-                        {/* Discovered Results Table */}
-                        {!isDiscovering && discoveredLeads.length > 0 && (
-                            <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
+                        {/* Discovered Results Table — only render when
+                            the filtered set has rows. If the upstream
+                            fetch returned results but every row was
+                            filtered out, fall through to the empty-state
+                            block below so the user gets a clear "no
+                            matches" message rather than an empty table. */}
+                        {!isDiscovering && filteredDiscoveredLeads.length > 0 && (
+                            <TableCard.Root data-tour="live-leads-table" className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
                                 <Table
                                     aria-label="Discovered Leads"
                                     className="bg-primary w-full"
@@ -1072,7 +1128,7 @@ export default function LiveLeadsPage() {
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     {item.industry ? (
-                                                        <Badge color="gray" size="sm">{item.industry}</Badge>
+                                                        <Badge color="gray" size="sm" className="capitalize">{item.industry}</Badge>
                                                     ) : (
                                                         <span className="text-sm text-quaternary">—</span>
                                                     )}
@@ -1083,7 +1139,11 @@ export default function LiveLeadsPage() {
                                                 <Table.Cell>
                                                     <div className="flex flex-col">
                                                         <span className="text-sm text-secondary capitalize">{item.country || "—"}</span>
-                                                        {item.region && <span className="text-xs text-tertiary capitalize">{item.region}</span>}
+                                                        {(item.region || item.locality) && (
+                                                            <span className="text-xs text-tertiary capitalize">
+                                                                {[item.locality, item.region].filter(Boolean).join(", ")}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </Table.Cell>
                                                 <Table.Cell>
@@ -1105,7 +1165,7 @@ export default function LiveLeadsPage() {
 
                                 <div className="flex items-center justify-between border-t border-secondary px-5 py-3.5">
                                     <span className="text-sm text-tertiary">
-                                        Showing <span className="font-medium text-secondary">{(discoverPage - 1) * pageSize + 1}–{Math.min(discoverPage * pageSize, discoveredLeads.length)}</span> of <span className="font-medium text-secondary">{discoveredLeads.length}</span> companies
+                                        Showing <span className="font-medium text-secondary">{(discoverPage - 1) * pageSize + 1}–{Math.min(discoverPage * pageSize, filteredDiscoveredLeads.length)}</span> of <span className="font-medium text-secondary">{filteredDiscoveredLeads.length}</span> {filteredDiscoveredLeads.length !== discoveredLeads.length ? <>(filtered from {discoveredLeads.length})</> : null} companies
                                     </span>
                                     {discoverTotalPages > 1 && (
                                         <div className="flex items-center gap-2">
@@ -1118,14 +1178,36 @@ export default function LiveLeadsPage() {
                             </TableCard.Root>
                         )}
 
-                        {!isDiscovering && discoveredLeads.length === 0 && !discoverError && (
+                        {/*
+                          Empty state. Three sub-cases, all rendered with
+                          the same container so the layout stays stable:
+                          1. Hard upstream error → handled by the inline
+                             `discoverError` banner inside the filter card.
+                          2. Upstream returned rows but every row was
+                             filtered out by client-side Industry / Size /
+                             City / State filters.
+                          3. Upstream returned zero rows (the "true" empty
+                             state — broad search yielded nothing).
+                        */}
+                        {!isDiscovering && filteredDiscoveredLeads.length === 0 && !discoverError && (
                             <div className="flex flex-col items-center justify-center py-16 gap-4 rounded-xl border border-dashed border-secondary bg-secondary_subtle">
                                 <Compass className="w-12 h-12 text-tertiary" />
                                 <div className="text-center">
-                                    <h3 className="text-md font-semibold text-primary">No Leads Found</h3>
-                                    <p className="text-sm text-tertiary mt-1 max-w-md">
-                                        Try adjusting the filters above or expanding the time range to discover more companies with breach exposures.
-                                    </p>
+                                    {discoveredLeads.length > 0 ? (
+                                        <>
+                                            <h3 className="text-md font-semibold text-primary">No leads match these filters</h3>
+                                            <p className="text-sm text-tertiary mt-1 max-w-md">
+                                                {discoveredLeads.length} {discoveredLeads.length === 1 ? "company" : "companies"} matched your Country/State search but none match the current Industry, Size, or City. Try widening one of those filters.
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <h3 className="text-md font-semibold text-primary">No leads found</h3>
+                                            <p className="text-sm text-tertiary mt-1 max-w-md">
+                                                Try adjusting the filters above or expanding the time range to discover more companies with breach exposures.
+                                            </p>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1228,7 +1310,7 @@ export default function LiveLeadsPage() {
                                 const a = document.createElement("a");
                                 a.href = url;
                                 const dateStr = new Date().toISOString().slice(0, 10);
-                                a.download = `CyberHook_Leads_Export_${dateStr}.csv`;
+                                a.download = `CyberHook_AI_Leads_Export_${dateStr}.csv`;
                                 a.click();
                                 URL.revokeObjectURL(url);
                                 toast.success(`Exported ${selected.length} lead(s) to CSV`);

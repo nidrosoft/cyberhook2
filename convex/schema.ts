@@ -35,6 +35,32 @@ export default defineSchema({
     // Guided tour (V2)
     guidedTourCompleted: v.optional(v.boolean()),
     guidedTourCompletedAt: v.optional(v.number()),
+    // Phase 10 — Guided Onboarding (driver.js-driven product tour).
+    //
+    // `guidedTourCompleted` above is the legacy boolean kept for backwards
+    // compat. `tourProgress` is the source of truth going forward: it tracks
+    // the section/step a user paused on, whether they skipped, and the last
+    // update timestamp so we can resume across refreshes.
+    tourProgress: v.optional(
+      v.object({
+        completed: v.boolean(),
+        skipped: v.boolean(),
+        lastSection: v.optional(v.string()),
+        lastStepIndex: v.optional(v.number()),
+        // Sections the user has finished walking through (deduped list).
+        // Drives the News-page checklist tile ("X/Y sections completed").
+        completedSections: v.optional(v.array(v.string())),
+        updatedAt: v.number(),
+      }),
+    ),
+    // Phase 9C — per-user search quota (admin-set override).
+    // When `searchQuotaMonthly` is undefined/null, the user inherits the
+    // company-level allocation (no per-user cap). When set, the user is
+    // blocked from running searches once `searchQuotaUsed >= searchQuotaMonthly`
+    // (in addition to the company cap, which is enforced separately).
+    searchQuotaMonthly: v.optional(v.number()),
+    searchQuotaUsed: v.optional(v.number()),
+    searchQuotaResetDate: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
     lastAccessedAt: v.optional(v.number()),
@@ -169,15 +195,22 @@ export default defineSchema({
       v.union(
         v.literal("pending"),
         v.literal("sent"),
+        v.literal("delivered"),
         v.literal("failed"),
       ),
     ),
     emailLastAttemptAt: v.optional(v.number()),
     emailError: v.optional(v.string()),
+    // Phase 3 — random opaque token used by the accept-invite flow. Optional
+    // so existing rows (pre-Phase 3) remain valid; new invites always set it.
+    inviteToken: v.optional(v.string()),
+    acceptedAt: v.optional(v.number()),
+    acceptedByUserId: v.optional(v.id("users")),
   })
     .index("by_companyId", ["companyId"])
     .index("by_email", ["email"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_token", ["inviteToken"]),
 
   // ============================================
   // LEADS & CONTACTS
@@ -440,6 +473,10 @@ export default defineSchema({
     emailsSent: v.optional(v.number()),
     emailsOpened: v.optional(v.number()),
     emailsClicked: v.optional(v.number()),
+    // Phase 8B: cumulative failure counter, surfaced as a warning badge on
+    // the campaign row and used by the slide-over Logs panel to highlight
+    // campaigns that need attention.
+    emailsFailed: v.optional(v.number()),
     // Template reference
     knowledgeBaseEntryId: v.optional(v.id("knowledgeBaseEntries")),
     createdAt: v.number(),

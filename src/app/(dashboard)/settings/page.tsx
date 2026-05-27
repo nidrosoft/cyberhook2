@@ -13,6 +13,18 @@ import { getPlan } from "@/lib/plans";
 import { friendlyError } from "@/lib/friendly-errors";
 import { validateCompanyLogo } from "@/lib/logo-validation";
 import {
+    PRIMARY_BUSINESS_MODEL_OPTIONS,
+    ANNUAL_REVENUE_OPTIONS,
+    GEOGRAPHIC_COVERAGE_OPTIONS,
+    TARGET_CUSTOMER_BASE_OPTIONS,
+    TOTAL_EMPLOYEES_OPTIONS,
+    SALES_TEAM_SIZE_OPTIONS,
+    normalizeLegacyPrimaryBusinessModel,
+    normalizeLegacyAnnualRevenue,
+    normalizeLegacyTotalEmployees,
+    normalizeLegacySalesTeamSize,
+} from "@/lib/constants/profile-options";
+import {
     CreditCard02,
     Copy06,
     DownloadCloud01,
@@ -43,21 +55,31 @@ import { Table, TableCard } from "@/components/application/table/table";
 import { ButtonUtility } from "@/components/base/buttons/button-utility";
 import type { SortDescriptor } from "react-aria-components";
 
+// Phase 4E: "Plan & Billing" was split into a "Plan" tab (subscription
+// selection) and a new "Billing" tab (invoices, payment methods, manage
+// subscription). The `plan` id is preserved so existing deep links keep
+// working; `billing` is new.
 const tabs = [
     { id: "profile", label: "My details" },
     { id: "company", label: "Company Settings" },
     { id: "team", label: "Team" },
-    { id: "plan", label: "Plan & Billing" },
+    { id: "plan", label: "Plan" },
+    { id: "billing", label: "Billing" },
     { id: "integrations", label: "Integrations" },
     { id: "audit", label: "Audit Log" },
     { id: "usage", label: "Usage" },
 ];
 
-// Brand logos sourced from Simple Icons (https://simpleicons.org). Each tile
-// renders a publicly-hosted CDN SVG so there's no extra dependency to bundle.
-// `slug` is the Simple Icons identifier; `monogram` is a 1–3 character
-// fallback rendered if Simple Icons doesn't ship that brand (e.g. ConnectWise).
-const simpleIcon = (slug: string, color = "FFFFFF") => `https://cdn.simpleicons.org/${slug}/${color}`;
+// Phase 7D: Brand logos sourced from the `simple-icons` package and rendered
+// via the BrandLogo component (self-hosted SVG, no CDN dependency). Some
+// brands (Microsoft, Slack, LinkedIn) were removed from Simple Icons in
+// 2023-2024 over trademark concerns — for those we either use a custom
+// inline SimpleIcon record (Microsoft's four-square mark below) or fall
+// back to a brand-color monogram (ConnectWise, GoHighLevel, Slack,
+// LinkedIn).
+import { siGmail, siGooglecalendar, siHubspot } from "simple-icons";
+import { BrandLogo } from "@/components/integrations/brand-logo";
+import type { SimpleIcon } from "simple-icons";
 
 type IntegrationCategory = "Payments" | "Email" | "Calendar" | "CRM" | "Messaging" | "Social" | "PSA / RMM";
 
@@ -65,11 +87,15 @@ type Integration = {
     name: string;
     category: IntegrationCategory;
     description: string;
-    logoUrl?: string;
+    /** Simple Icons brand data (if available). */
+    icon?: SimpleIcon;
+    /** Override the rendered brand color (Simple Icons stores black-on-white). */
+    iconColor?: string;
+    /** Fallback monogram (1–3 chars) for brands missing from Simple Icons. */
     monogram?: string;
-    logoColor: string;
+    /** Tailwind background class for the tile chip behind the logo. */
+    tileColor: string;
     provider:
-        | "stripe"
         | "outlook_email"
         | "gmail"
         | "outlook_calendar"
@@ -83,23 +109,41 @@ type Integration = {
     available: boolean;
 };
 
+// Microsoft brands (Outlook, Teams) were removed from Simple Icons in 2023
+// over trademark concerns. We render the official Microsoft "four-square"
+// logomark instead, which Microsoft permits for product integrations.
+// Source: https://aka.ms/brandcentral
+const MICROSOFT_ICON: SimpleIcon = {
+    title: "Microsoft",
+    slug: "microsoft",
+    hex: "5E5E5E",
+    source: "https://www.microsoft.com",
+    svg: "",
+    path: "M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zm12.6 0H12.6V0H24v11.4z",
+    guidelines: undefined,
+    license: undefined,
+};
+
 // Flat list rendered in a single 3-column grid. Category is shown as a small
 // label inside each card so we keep the grouping context without breaking
 // the row-of-three layout the way per-category sub-grids did.
+// Phase 4D: Stripe was dropped from the integrations grid. It isn't a
+// pluggable third-party connector — payments are a first-class concern
+// surfaced through the dedicated "Billing" tab.
+// Phase 7: HubSpot + Outlook moved from "Coming Soon" to "available" so
+// the new OAuth Connect flow renders the live button. Other providers
+// stay gated until their OAuth implementations ship.
 const integrations: Integration[] = [
-    { name: "Stripe", category: "Payments", description: "Process payments and manage subscriptions", logoUrl: simpleIcon("stripe"), logoColor: "bg-[#635BFF]", provider: "stripe", available: true },
-    { name: "Outlook", category: "Email", description: "Sync emails and contacts from Microsoft Outlook", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_email", available: false },
-    { name: "Gmail", category: "Email", description: "Sync emails and contacts from Google Workspace", logoUrl: simpleIcon("gmail"), logoColor: "bg-[#EA4335]", provider: "gmail", available: false },
-    { name: "Outlook Calendar", category: "Calendar", description: "Sync meetings and events from Outlook Calendar", logoUrl: simpleIcon("microsoftoutlook"), logoColor: "bg-[#0078D4]", provider: "outlook_calendar", available: false },
-    { name: "Google Calendar", category: "Calendar", description: "Sync meetings and events from Google Calendar", logoUrl: simpleIcon("googlecalendar"), logoColor: "bg-[#4285F4]", provider: "google_calendar", available: false },
-    { name: "HubSpot", category: "CRM", description: "Two-way sync contacts, deals, and activities", logoUrl: simpleIcon("hubspot"), logoColor: "bg-[#FF7A59]", provider: "hubspot", available: false },
-    // GoHighLevel: not in Simple Icons, render a "GHL" monogram on brand green.
-    { name: "GoHighLevel", category: "CRM", description: "Sync leads and pipeline data with GHL", monogram: "GHL", logoColor: "bg-[#18A957]", provider: "ghl", available: false },
-    { name: "Microsoft Teams", category: "Messaging", description: "Send notifications and alerts to Teams channels", logoUrl: simpleIcon("microsoftteams"), logoColor: "bg-[#4B53BC]", provider: "teams", available: false },
-    { name: "Slack", category: "Messaging", description: "Send notifications and alerts to Slack channels", logoUrl: simpleIcon("slack"), logoColor: "bg-[#4A154B]", provider: "slack", available: false },
-    { name: "LinkedIn", category: "Social", description: "Enrich leads and automate outreach via LinkedIn", logoUrl: simpleIcon("linkedin"), logoColor: "bg-[#0A66C2]", provider: "linkedin", available: false },
-    // ConnectWise: not in Simple Icons, render a "CW" monogram on brand blue.
-    { name: "ConnectWise", category: "PSA / RMM", description: "Sync tickets, contacts, and companies with ConnectWise Manage", monogram: "CW", logoColor: "bg-[#006FBA]", provider: "connectwise", available: false },
+    { name: "Outlook", category: "Email", description: "Send AI Agent emails from your Microsoft Outlook account", icon: MICROSOFT_ICON, iconColor: "#0078D4", tileColor: "bg-[#EFF6FC]", provider: "outlook_email", available: true },
+    { name: "Gmail", category: "Email", description: "Sync emails and contacts from Google Workspace", icon: siGmail, tileColor: "bg-[#FCE8E6]", provider: "gmail", available: false },
+    { name: "Outlook Calendar", category: "Calendar", description: "Sync meetings and events from Outlook Calendar", icon: MICROSOFT_ICON, iconColor: "#0078D4", tileColor: "bg-[#EFF6FC]", provider: "outlook_calendar", available: false },
+    { name: "Google Calendar", category: "Calendar", description: "Sync meetings and events from Google Calendar", icon: siGooglecalendar, tileColor: "bg-[#E8F0FE]", provider: "google_calendar", available: false },
+    { name: "HubSpot", category: "CRM", description: "Push leads to HubSpot as contacts and companies", icon: siHubspot, tileColor: "bg-[#FFF1EC]", provider: "hubspot", available: true },
+    { name: "GoHighLevel", category: "CRM", description: "Sync leads and pipeline data with GHL", monogram: "GHL", tileColor: "bg-[#E8F8F0]", provider: "ghl", available: false },
+    { name: "Microsoft Teams", category: "Messaging", description: "Send notifications and alerts to Teams channels", icon: MICROSOFT_ICON, iconColor: "#4B53BC", tileColor: "bg-[#EEEFFA]", provider: "teams", available: false },
+    { name: "Slack", category: "Messaging", description: "Send notifications and alerts to Slack channels", monogram: "Sl", tileColor: "bg-[#F4EAF5]", provider: "slack", available: false },
+    { name: "LinkedIn", category: "Social", description: "Enrich leads and automate outreach via LinkedIn", monogram: "in", tileColor: "bg-[#E7F1F9]", provider: "linkedin", available: false },
+    { name: "ConnectWise", category: "PSA / RMM", description: "Sync tickets, contacts, and companies with ConnectWise Manage", monogram: "CW", tileColor: "bg-[#E6F1F9]", provider: "connectwise", available: false },
 ];
 
 function formatRole(role: string): string {
@@ -198,6 +242,118 @@ function LoadingSpinner() {
     );
 }
 
+// Phase 9C — Inline editor that opens inside the team-row popover when an
+// admin clicks "Set Search Quota". Fetches the user's live usage via
+// api.users.getQuota and lets the admin set or clear the override.
+function QuotaEditor({
+    userId,
+    value,
+    onChange,
+    onSave,
+    onCancel,
+    isSaving,
+}: {
+    userId: string;
+    value: string;
+    onChange: (v: string) => void;
+    onSave: (v: string | null) => void;
+    onCancel: () => void;
+    isSaving: boolean;
+}) {
+    const quota = useQuery(api.users.getQuota, { userId: userId as Id<"users"> });
+    // Prefill the input with the current override (or empty if the user
+    // inherits the plan), but only on first render of this editor instance.
+    const [didPrefill, setDidPrefill] = useState(false);
+    useEffect(() => {
+        if (didPrefill || quota === undefined) return;
+        if (quota && !quota.isInherited) {
+            onChange(String(quota.allocation));
+        }
+        setDidPrefill(true);
+    }, [didPrefill, quota, onChange]);
+
+    return (
+        <div className="flex w-full flex-col">
+            <div className="flex items-center justify-between border-b border-secondary px-3 py-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-tertiary">Search Quota</span>
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    aria-label="Close"
+                    className="text-tertiary hover:text-secondary text-base leading-none"
+                >
+                    ×
+                </button>
+            </div>
+            <div className="flex flex-col gap-2.5 px-3 py-3">
+                {quota === undefined ? (
+                    <span className="text-sm text-tertiary">Loading current usage…</span>
+                ) : quota === null ? (
+                    <span className="text-sm text-error-primary">Couldn&apos;t load quota.</span>
+                ) : (
+                    <>
+                        <div className="flex flex-col gap-0.5 rounded-md bg-secondary_subtle px-2.5 py-2">
+                            <span className="text-xs text-tertiary">
+                                Used this month: <span className="font-semibold text-secondary">{quota.used.toLocaleString()}</span> / {quota.allocation.toLocaleString()}
+                            </span>
+                            <span className="text-xs text-tertiary">
+                                Remaining: <span className="font-semibold text-secondary">{quota.remaining.toLocaleString()}</span>
+                                {quota.isInherited && (
+                                    <span className="ml-1">(inherits plan: {quota.planLimit.toLocaleString()})</span>
+                                )}
+                            </span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium text-secondary">Monthly allocation</label>
+                            <input
+                                type="number"
+                                inputMode="numeric"
+                                min={0}
+                                step={1}
+                                value={value}
+                                onChange={(e) => onChange(e.target.value)}
+                                placeholder={`Inherit plan (${quota.planLimit})`}
+                                className="w-full min-w-0 rounded-md border border-primary bg-primary px-2.5 py-1.5 text-sm text-primary shadow-xs outline-none focus:ring-2 focus:ring-brand-500 placeholder:text-quaternary"
+                            />
+                            <p className="text-[11px] leading-snug text-tertiary">Leave blank to clear the override and use the company plan cap.</p>
+                        </div>
+                    </>
+                )}
+            </div>
+            {quota && (
+                <div className="flex items-center justify-between gap-2 border-t border-secondary bg-secondary_subtle/50 px-3 py-2">
+                    <button
+                        type="button"
+                        disabled={isSaving || quota.isInherited}
+                        onClick={() => onSave(null)}
+                        className="rounded-md px-2 py-1 text-xs font-medium text-tertiary hover:text-error-primary disabled:opacity-40 disabled:hover:text-tertiary"
+                    >
+                        Clear override
+                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            disabled={isSaving}
+                            className="rounded-md border border-secondary bg-primary px-2.5 py-1 text-xs font-medium text-secondary hover:bg-secondary_hover"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onSave(value === "" ? null : value)}
+                            disabled={isSaving}
+                            className="rounded-md bg-brand-solid px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-solid_hover disabled:opacity-60"
+                        >
+                            {isSaving ? "Saving…" : "Save"}
+                        </button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function SettingsPage() {
     return (
         <Suspense fallback={
@@ -292,7 +448,7 @@ function ChipInput({
 
 function SettingsPageContent() {
     const searchParams = useSearchParams();
-    const validTabs = ["profile", "company", "team", "plan", "integrations", "audit", "usage"];
+    const validTabs = ["profile", "company", "team", "plan", "billing", "integrations", "audit", "usage"];
     const tabFromUrl = searchParams.get("tab");
     const [selectedTab, setSelectedTab] = useState<string>(
         tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "profile"
@@ -330,6 +486,8 @@ function SettingsPageContent() {
     // Initialized from the loaded company record below via effect.
     const [associationChips, setAssociationChips] = useState<string[]>([]);
     const [programChips, setProgramChips] = useState<string[]>([]);
+    const [geoCoverageSelected, setGeoCoverageSelected] = useState<string[]>([]);
+    const [targetCustomerSelected, setTargetCustomerSelected] = useState<string[]>([]);
 
     // Brand colors — hex text input is the primary control (client request).
     // The native <input type="color"> swatch is a visual companion that
@@ -357,6 +515,11 @@ function SettingsPageContent() {
     const [openUserMenu, setOpenUserMenu] = useState<string | null>(null);
     const [userMenuAnchor, setUserMenuAnchor] = useState<{ top: number; left: number } | null>(null);
     const [editingRole, setEditingRole] = useState<{ userId: string; role: string } | null>(null);
+    // Phase 9C — inline quota editor inside the user popover. When non-null,
+    // the popover shows a number input + Save/Cancel + Clear-override buttons
+    // rather than the default action list for that one user.
+    const [editingQuota, setEditingQuota] = useState<{ userId: string; value: string } | null>(null);
+    const [isSavingQuota, setIsSavingQuota] = useState(false);
 
     const [auditSearch, setAuditSearch] = useState("");
     const [auditDateFilter, setAuditDateFilter] = useState("");
@@ -386,6 +549,8 @@ function SettingsPageContent() {
     useEffect(() => {
         setAssociationChips(company?.associations ?? []);
         setProgramChips(company?.programs ?? []);
+        setGeoCoverageSelected(company?.geographicCoverage ?? []);
+        setTargetCustomerSelected(company?.targetCustomerBase ?? []);
         if (company?.brandPrimaryColor) setBrandPrimaryColor(company.brandPrimaryColor);
         if (company?.brandSecondaryColor) setBrandSecondaryColor(company.brandSecondaryColor);
         const sar = company?.serviceAreaRadius;
@@ -405,12 +570,24 @@ function SettingsPageContent() {
     const approveUser = useMutation(api.users.approveUser);
     const rejectUser = useMutation(api.users.rejectUser);
     const updateCompany = useMutation(api.companies.update);
+    // Phase 9C — admin-only mutation to override per-user monthly search quota.
+    // Null clears the override so the user reverts to the company plan cap.
+    const setSearchQuota = useMutation(api.users.setSearchQuota);
     const createInvitation = useMutation(api.invitations.create);
     const cancelInvitation = useMutation(api.invitations.cancel);
     const resendInvitation = useMutation(api.invitations.resendInvitation);
     const createAuditLog = useMutation(api.audit.create);
     const openPortal = useAction(api.stripe.createPortalSession);
     const invitations = useQuery(api.invitations.list, companyId ? { companyId } : "skip");
+
+    // Phase 7: list of connected/disconnected integrations for this company.
+    // The query returns metadata only (no decrypted tokens) so it's safe to
+    // expose to the client.
+    const companyIntegrations = useQuery(
+        api.integrations.listByCompany,
+        companyId ? { companyId } : "skip",
+    );
+    const disconnectIntegration = useMutation(api.integrations.disconnect);
 
     const teamMembers = useQuery(
         api.users.getByCompanyId,
@@ -595,10 +772,13 @@ function SettingsPageContent() {
         setIsSaving(true);
         try {
             const data = Object.fromEntries(new FormData(e.currentTarget));
+            const companyTypeValue = (data.companyType as string) || undefined;
+            const salesTeamSizeValue = (data.salesTeamSize as string) || undefined;
             await updateCompany({
                 id: company._id,
                 name: data.companyName as string,
-                companyType: data.companyType as string,
+                companyType: companyTypeValue,
+                primaryBusinessModel: companyTypeValue,
                 website: data.website as string,
                 phone: data.phone as string,
                 supportEmail: data.supportEmail as string,
@@ -607,7 +787,9 @@ function SettingsPageContent() {
                 salesPhone: data.salesPhone as string,
                 annualRevenue: data.revenue as string,
                 totalEmployees: data.companySize as string,
-                salesTeamSize: data.salesTeamSize as string,
+                salesTeamSize: salesTeamSizeValue,
+                totalSalesPeople: salesTeamSizeValue,
+                targetCustomerBase: targetCustomerSelected.length > 0 ? targetCustomerSelected : undefined,
                 mrrTarget: data.mrrTarget ? Number(data.mrrTarget) : undefined,
                 appointmentTarget: data.appointmentTarget ? Number(data.appointmentTarget) : undefined,
                 brandPrimaryColor: (data.brandPrimaryColor as string) || undefined,
@@ -615,9 +797,7 @@ function SettingsPageContent() {
                 serviceArea: (data.serviceArea as string)?.trim()
                     ? (data.serviceArea as string).split(",").map((s) => s.trim()).filter(Boolean)
                     : undefined,
-                geographicCoverage: (data.geographicCoverage as string)?.trim()
-                    ? (data.geographicCoverage as string).split(",").map((s) => s.trim()).filter(Boolean)
-                    : undefined,
+                geographicCoverage: geoCoverageSelected.length > 0 ? geoCoverageSelected : undefined,
                 // Associations & Programs come from the chip inputs (17.1).
                 associations: associationChips.length > 0 ? associationChips : undefined,
                 programs: programChips.length > 0 ? programChips : undefined,
@@ -726,6 +906,54 @@ function SettingsPageContent() {
             return () => document.removeEventListener("mousedown", handleClickOutside);
         }
     }, [openUserMenu]);
+
+    // Phase 9C — save the inline-edited quota and close the popover.
+    // `value === ""` or `null` clears the override so the user inherits the
+    // company plan cap. Otherwise we coerce to a non-negative integer.
+    const handleSaveQuota = async (userId: string, raw: string | null) => {
+        if (user && userId === user._id && raw !== null && raw.trim() !== "") {
+            toast.error("Use the Plan tab to manage your own usage.");
+            return;
+        }
+        let monthlyAllocation: number | null;
+        if (raw === null || raw.trim() === "") {
+            monthlyAllocation = null;
+        } else {
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed) || parsed < 0) {
+                toast.error("Allocation must be a non-negative number.");
+                return;
+            }
+            monthlyAllocation = Math.floor(parsed);
+        }
+        setIsSavingQuota(true);
+        try {
+            await setSearchQuota({
+                userId: userId as Parameters<typeof setSearchQuota>[0]["userId"],
+                monthlyAllocation,
+            });
+            if (companyId && user) {
+                await createAuditLog({
+                    companyId,
+                    userId: user._id,
+                    action: "user.updated",
+                    entityType: "user",
+                    entityId: userId,
+                    details: monthlyAllocation === null
+                        ? "Search quota override cleared (inherits plan)"
+                        : `Search quota set to ${monthlyAllocation}/month`,
+                });
+            }
+            toast.success(monthlyAllocation === null ? "Quota override cleared" : "Search quota updated");
+            setEditingQuota(null);
+            setOpenUserMenu(null);
+            setUserMenuAnchor(null);
+        } catch (err) {
+            toast.error(friendlyError(err, "We couldn't update that quota. Please try again."));
+        } finally {
+            setIsSavingQuota(false);
+        }
+    };
 
     const handleRoleChange = async (userId: string, newRole: "sales_rep" | "sales_admin" | "billing") => {
         if (user && userId === user._id) {
@@ -843,7 +1071,7 @@ function SettingsPageContent() {
                         onChange={(event) => setSelectedTab(event.target.value)}
                         options={tabs.map((tab) => ({ label: tab.label, value: tab.id }))}
                     />
-                    <div className="-mx-4 -my-1 scrollbar-hide flex overflow-x-auto px-4 py-1 lg:-mx-8 lg:px-8">
+                    <div data-tour="settings-tabs" className="-mx-4 -my-1 scrollbar-hide flex overflow-x-auto px-4 py-1 lg:-mx-8 lg:px-8">
                         <Tabs className="hidden md:flex xl:w-full" selectedKey={selectedTab} onSelectionChange={(value) => setSelectedTab(value as string)}>
                             <TabList type="underline" className="w-full gap-4 min-w-max" items={tabs} />
                         </Tabs>
@@ -975,7 +1203,19 @@ function SettingsPageContent() {
                                         <div className="flex flex-col gap-1.5">
                                             <Label>Location ID</Label>
                                             <div className="flex items-center gap-2">
-                                                <InputBase size="md" value={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`} isDisabled isReadOnly className="flex-1" />
+                                                {/* Wrap in TextField so react-aria owns the value/readonly state.
+                                                    Previously we passed `value` + `isReadOnly` directly to InputBase
+                                                    which produced two React warnings: an unknown DOM attribute for
+                                                    `isReadOnly` and a "controlled value without onChange" warning. */}
+                                                <TextField
+                                                    aria-label="Location ID"
+                                                    isReadOnly
+                                                    isDisabled
+                                                    value={company?.locationId || `LOC-${(company?._id as string)?.slice(-6).toUpperCase() || "000000"}`}
+                                                    className="flex-1"
+                                                >
+                                                    <InputBase size="md" />
+                                                </TextField>
                                                 <Button
                                                     color="secondary"
                                                     size="md"
@@ -989,10 +1229,14 @@ function SettingsPageContent() {
                                                 </Button>
                                             </div>
                                         </div>
-                                        <Select name="companyType" label="Company Type" defaultSelectedKey={company?.companyType ?? company?.primaryBusinessModel ?? "msp"}>
-                                            <Select.Item id="msp">MSP/MSSP</Select.Item>
-                                            <Select.Item id="var">Value Added Reseller</Select.Item>
-                                            <Select.Item id="vendor">Vendor</Select.Item>
+                                        <Select
+                                            name="companyType"
+                                            label="Company Type"
+                                            defaultSelectedKey={normalizeLegacyPrimaryBusinessModel(company?.companyType ?? company?.primaryBusinessModel ?? "msp") || "msp"}
+                                        >
+                                            {PRIMARY_BUSINESS_MODEL_OPTIONS.map((opt) => (
+                                                <Select.Item key={opt.value} id={opt.value}>{opt.label}</Select.Item>
+                                            ))}
                                         </Select>
                                         <TextField name="website" defaultValue={company?.website ?? ""}>
                                             <Label>Website</Label>
@@ -1069,28 +1313,91 @@ function SettingsPageContent() {
                                 <div className="flex flex-col gap-5">
                                     <h3 className="text-sm font-semibold text-primary mb-2">BUSINESS DETAILS</h3>
                                     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-8">
-                                        <Select name="revenue" label="Annual Revenue" defaultSelectedKey={company?.annualRevenue ?? ""}>
-                                            <Select.Item id="0-1">Under $1M</Select.Item>
-                                            <Select.Item id="1-10">$1M - $10M</Select.Item>
-                                            <Select.Item id="10-24">$10M - $24M</Select.Item>
-                                            <Select.Item id="25+">$25M+</Select.Item>
+                                        <Select
+                                            name="revenue"
+                                            label="Annual Revenue"
+                                            defaultSelectedKey={normalizeLegacyAnnualRevenue(company?.annualRevenue) || undefined}
+                                        >
+                                            {ANNUAL_REVENUE_OPTIONS.map((opt) => (
+                                                <Select.Item key={opt.value} id={opt.value}>{opt.label}</Select.Item>
+                                            ))}
                                         </Select>
-                                        <Select name="companySize" label="Company Size" defaultSelectedKey={company?.totalEmployees ?? ""}>
-                                            <Select.Item id="1-10">1-10 Employees</Select.Item>
-                                            <Select.Item id="11-50">11-50 Employees</Select.Item>
-                                            <Select.Item id="51-100">51-100 Employees</Select.Item>
-                                            <Select.Item id="101+">101+ Employees</Select.Item>
+                                        <Select
+                                            name="companySize"
+                                            label="Total Employees"
+                                            defaultSelectedKey={normalizeLegacyTotalEmployees(company?.totalEmployees) || undefined}
+                                        >
+                                            {TOTAL_EMPLOYEES_OPTIONS.map((opt) => (
+                                                <Select.Item key={opt.value} id={opt.value}>{opt.label}</Select.Item>
+                                            ))}
                                         </Select>
-                                        <Select name="salesTeamSize" label="Sales Team Size" defaultSelectedKey={company?.salesTeamSize ?? company?.totalSalesPeople ?? ""}>
-                                            <Select.Item id="1">1 Person</Select.Item>
-                                            <Select.Item id="2-5">2-5 People</Select.Item>
-                                            <Select.Item id="6-10">6-10 People</Select.Item>
-                                            <Select.Item id="11+">11+ People</Select.Item>
+                                        <Select
+                                            name="salesTeamSize"
+                                            label="Sales Team Size"
+                                            defaultSelectedKey={normalizeLegacySalesTeamSize(company?.salesTeamSize ?? company?.totalSalesPeople) || undefined}
+                                        >
+                                            {SALES_TEAM_SIZE_OPTIONS.map((opt) => (
+                                                <Select.Item key={opt.value} id={opt.value}>{opt.label}</Select.Item>
+                                            ))}
                                         </Select>
-                                        <TextField name="geographicCoverage" defaultValue={company?.geographicCoverage?.join(", ") ?? ""}>
-                                            <Label>Geographic Coverage</Label>
-                                            <InputBase size="md" />
-                                        </TextField>
+                                    </div>
+
+                                    {/* Geographic Coverage — multi-select pills matching onboarding (Phase 2) */}
+                                    <div className="flex flex-col gap-2">
+                                        <Label>Geographic Coverage</Label>
+                                        <p className="text-xs text-tertiary">Select all regions where you operate.</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {GEOGRAPHIC_COVERAGE_OPTIONS.map((g) => {
+                                                const selected = geoCoverageSelected.includes(g);
+                                                return (
+                                                    <button
+                                                        key={g}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setGeoCoverageSelected((prev) =>
+                                                                prev.includes(g) ? prev.filter((v) => v !== g) : [...prev, g],
+                                                            )
+                                                        }
+                                                        className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                                                            selected
+                                                                ? "border-brand-solid bg-brand-solid/10 text-brand-primary"
+                                                                : "border-secondary bg-primary text-secondary hover:border-tertiary"
+                                                        }`}
+                                                    >
+                                                        {g}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {/* Target Customer Base — multi-select pills (Phase 2: added — was missing in Settings) */}
+                                    <div className="flex flex-col gap-2">
+                                        <Label>Target Customer Base</Label>
+                                        <p className="text-xs text-tertiary">Select all customer segments you target.</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {TARGET_CUSTOMER_BASE_OPTIONS.map((c) => {
+                                                const selected = targetCustomerSelected.includes(c);
+                                                return (
+                                                    <button
+                                                        key={c}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setTargetCustomerSelected((prev) =>
+                                                                prev.includes(c) ? prev.filter((v) => v !== c) : [...prev, c],
+                                                            )
+                                                        }
+                                                        className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                                                            selected
+                                                                ? "border-brand-solid bg-brand-solid/10 text-brand-primary"
+                                                                : "border-secondary bg-primary text-secondary hover:border-tertiary"
+                                                        }`}
+                                                    >
+                                                        {c}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1374,7 +1681,7 @@ function SettingsPageContent() {
                                         </Table.Header>
                                         <Table.Body items={teamMembers.map((m) => ({ ...m, id: m._id }))}>
                                             {(item) => (
-                                                <Table.Row id={item._id}>
+                                                <Table.Row id={item._id} className={item.status === "deactivated" ? "opacity-60" : undefined}>
                                                     <Table.Cell>
                                                         {/* data-team-user-id anchors the notification deep-link scroll/highlight (2.5). */}
                                                         <div className="flex items-center gap-3 transition-shadow" data-team-user-id={item._id}>
@@ -1427,6 +1734,7 @@ function SettingsPageContent() {
                                         {invitations.filter((inv) => inv.status === "pending").map((inv) => {
                                             const deliveryFailed = inv.emailDeliveryStatus === "failed";
                                             const deliveryPending = !inv.emailDeliveryStatus || inv.emailDeliveryStatus === "pending";
+                                            const deliveryDelivered = inv.emailDeliveryStatus === "delivered";
                                             return (
                                                 <div key={inv._id} className="flex items-center justify-between p-4 border border-secondary rounded-lg bg-secondary_subtle">
                                                     <div className="flex flex-col gap-0.5">
@@ -1439,6 +1747,8 @@ function SettingsPageContent() {
                                                     <div className="flex items-center gap-2">
                                                         {deliveryFailed ? (
                                                             <Badge size="sm" color="error">Email Failed</Badge>
+                                                        ) : deliveryDelivered ? (
+                                                            <Badge size="sm" color="success">Delivered</Badge>
                                                         ) : deliveryPending ? (
                                                             <Badge size="sm" color="warning">Sending…</Badge>
                                                         ) : (
@@ -1455,29 +1765,16 @@ function SettingsPageContent() {
                             </div>
                         )}
 
-                        {/* Plan & Billing Tab */}
+                        {/* Plan Tab — Phase 4E: subscription tier selection.
+                            Billing data (invoices + payment methods) lives in
+                            the new sibling "Billing" tab below. */}
                         {selectedTab === "plan" && (
                             isCompanyLoading ? <LoadingSpinner /> : (
                             <div className="flex flex-col gap-8">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
                                     <div className="flex flex-col gap-1">
-                                        <h2 className="text-lg font-semibold text-primary">Plan & Billing</h2>
+                                        <h2 className="text-lg font-semibold text-primary">Plan</h2>
                                         <p className="text-sm text-tertiary">Choose the plan that fits your team. Upgrade or downgrade anytime.</p>
-                                    </div>
-                                    <div className="flex items-center gap-3 mt-4 sm:mt-0">
-                                        <Button size="md" color="secondary" iconLeading={CreditCard02} onClick={async () => {
-                                            try {
-                                                const result = await openPortal({
-                                                    returnUrl: `${window.location.origin}/settings?tab=plan`,
-                                                });
-                                                if (result?.url && (result.url.startsWith("https://checkout.stripe.com") || result.url.startsWith("https://billing.stripe.com"))) {
-                                                    window.location.href = result.url;
-                                                }
-                                            } catch (err) {
-                                                if (process.env.NODE_ENV === "development") console.error(err);
-                                                toast.error(friendlyError(err, "We couldn't open the billing portal. Please try again."));
-                                            }
-                                        }}>Update Payment Method</Button>
                                     </div>
                                 </div>
 
@@ -1486,7 +1783,7 @@ function SettingsPageContent() {
                                         <PricingCards currentPlanId={company?.planId ?? "growth"} onManagePlan={async () => {
                                             try {
                                                 const result = await openPortal({
-                                                    returnUrl: `${window.location.origin}/settings?tab=plan`,
+                                                    returnUrl: `${window.location.origin}/settings?tab=billing`,
                                                 });
                                                 if (result?.url && (result.url.startsWith("https://checkout.stripe.com") || result.url.startsWith("https://billing.stripe.com"))) {
                                                     window.location.href = result.url;
@@ -1521,14 +1818,17 @@ function SettingsPageContent() {
                                         </div>
                                     </div>
                                 </div>
-
-                                <div className="flex flex-col gap-6 mt-4">
-                                    <div className="p-6 border border-dashed border-secondary rounded-xl text-center">
-                                        <p className="text-sm text-tertiary">Billing history is managed through your payment provider. Contact support for invoices.</p>
-                                    </div>
-                                </div>
                             </div>
                             )
+                        )}
+
+                        {/* Billing Tab — Phase 4F + 4G: real Stripe invoices,
+                            payment methods, and "Manage subscription". */}
+                        {selectedTab === "billing" && (
+                            <SettingsBillingPanel
+                                openPortal={openPortal}
+                                companyHasStripeCustomer={!!company?.stripeCustomerId}
+                            />
                         )}
 
                         {/* Integrations Tab */}
@@ -1564,7 +1864,14 @@ function SettingsPageContent() {
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {integrations.map((item) => {
-                                        const isConnected = item.provider === "stripe" && !!company?.stripeCustomerId;
+                                        // Phase 7: Connection status flows in from
+                                        // `companyIntegrations` (Convex query, see below).
+                                        // For providers that haven't been wired up yet
+                                        // (`available: false`), we keep the "Coming Soon"
+                                        // chip regardless of the stored status.
+                                        const record = companyIntegrations?.find((c) => c.provider === item.provider);
+                                        const isConnected = item.available && record?.status === "connected";
+                                        const needsReauth = item.available && record?.status === "error";
                                         const comingSoon = !item.available;
                                         return (
                                             <div
@@ -1573,12 +1880,15 @@ function SettingsPageContent() {
                                             >
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div className="flex items-center gap-3 min-w-0">
-                                                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg p-2 ${item.logoColor}`}>
-                                                            {item.logoUrl ? (
-                                                                /* eslint-disable-next-line @next/next/no-img-element */
-                                                                <img src={item.logoUrl} alt={`${item.name} logo`} className="h-full w-full object-contain" />
+                                                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${item.tileColor}`}>
+                                                            {item.icon ? (
+                                                                <BrandLogo
+                                                                    icon={item.icon}
+                                                                    size={22}
+                                                                    color={item.iconColor}
+                                                                />
                                                             ) : (
-                                                                <span className="text-white text-xs font-bold tracking-tight">{item.monogram}</span>
+                                                                <span className="text-secondary text-xs font-bold tracking-tight">{item.monogram}</span>
                                                             )}
                                                         </div>
                                                         <div className="flex flex-col gap-0.5 min-w-0">
@@ -1589,6 +1899,8 @@ function SettingsPageContent() {
                                                                     <Badge color="warning" size="sm">Coming Soon</Badge>
                                                                 ) : isConnected ? (
                                                                     <Badge color="success" size="sm">Connected</Badge>
+                                                                ) : needsReauth ? (
+                                                                    <Badge color="error" size="sm">Needs Re-auth</Badge>
                                                                 ) : (
                                                                     <Badge color="gray" size="sm">Not Connected</Badge>
                                                                 )}
@@ -1597,6 +1909,11 @@ function SettingsPageContent() {
                                                     </div>
                                                 </div>
                                                 <p className="text-sm text-tertiary">{item.description}</p>
+                                                {isConnected && record?.accountEmail && (
+                                                    <p className="text-xs text-tertiary">
+                                                        Connected as <span className="font-medium text-secondary">{record.accountEmail}</span>
+                                                    </p>
+                                                )}
                                                         <div className="mt-auto pt-2">
                                                             {comingSoon ? (
                                                                 <Button size="sm" color="secondary" className="w-full" isDisabled>Coming Soon</Button>
@@ -1607,17 +1924,17 @@ function SettingsPageContent() {
                                                                     size="sm"
                                                                     color="secondary"
                                                                     className="w-full"
-                                                                    onClick={() => {
-                                                                        // Stripe disconnect goes through the billing portal;
-                                                                        // other providers will gain disconnect flows as they land.
-                                                                        if (item.provider === "stripe") {
-                                                                            window.location.href = "/billing";
-                                                                        } else {
-                                                                            toast.info("Disconnect flow is coming soon.");
+                                                                    onClick={async () => {
+                                                                        if (!record) return;
+                                                                        try {
+                                                                            await disconnectIntegration({ integrationId: record._id });
+                                                                            toast.success(`${item.name} disconnected.`);
+                                                                        } catch (error) {
+                                                                            toast.error(friendlyError(error, `Failed to disconnect ${item.name}.`));
                                                                         }
                                                                     }}
                                                                 >
-                                                                    {item.provider === "stripe" ? "Manage" : "Disconnect"}
+                                                                    Disconnect
                                                                 </Button>
                                                             ) : (
                                                                 <Button
@@ -1626,18 +1943,26 @@ function SettingsPageContent() {
                                                                     className="w-full"
                                                                     iconLeading={Link01}
                                                                     onClick={() => {
-                                                                        // Stripe is wired through the billing flow; other
-                                                                        // providers should not reach here because they are
-                                                                        // marked `available: false` (Coming Soon) — this is a
-                                                                        // defensive fallback so the click is never a no-op.
-                                                                        if (item.provider === "stripe") {
-                                                                            window.location.href = "/billing";
-                                                                        } else {
+                                                                        // Phase 7: OAuth handshake starts at our connect
+                                                                        // endpoint, which builds the provider's authorize
+                                                                        // URL and redirects the user. Provider routing is
+                                                                        // a 1:1 mapping from internal provider id to URL
+                                                                        // slug — currently only HubSpot + Outlook are
+                                                                        // wired (`available: true` gating).
+                                                                        const slug =
+                                                                            item.provider === "hubspot"
+                                                                                ? "hubspot"
+                                                                                : item.provider === "outlook_email"
+                                                                                    ? "outlook"
+                                                                                    : null;
+                                                                        if (!slug) {
                                                                             toast.info(`${item.name} integration is coming soon.`);
+                                                                            return;
                                                                         }
+                                                                        window.location.href = `/api/integrations/${slug}/connect`;
                                                                     }}
                                                                 >
-                                                                    Connect
+                                                                    {needsReauth ? "Reconnect" : "Connect"}
                                                                 </Button>
                                                             )}
                                                         </div>
@@ -1787,17 +2112,22 @@ function SettingsPageContent() {
                 const member = teamMembers?.find((m) => m._id === openUserMenu);
                 if (!member) return null;
                 const anchor = userMenuAnchor ?? { top: 120, left: 120 };
-                // Clamp to viewport so the menu never renders off-screen.
+                // The dropdown swaps in a wider QuotaEditor when the admin
+                // picks "Set Search Quota". We size + reposition the popover
+                // accordingly so the input, hint copy, and footer buttons all
+                // stay inside the rounded container.
+                const isQuotaMode = editingQuota?.userId === member._id;
+                const menuWidth = isQuotaMode ? 320 : 208;
                 const viewportH = typeof window !== "undefined" ? window.innerHeight : 800;
                 const viewportW = typeof window !== "undefined" ? window.innerWidth : 1280;
-                const clampedTop = Math.min(anchor.top, viewportH - 120);
-                const clampedLeft = Math.max(8, Math.min(anchor.left, viewportW - 216));
+                const clampedTop = Math.min(anchor.top, viewportH - (isQuotaMode ? 320 : 120));
+                const clampedLeft = Math.max(8, Math.min(anchor.left, viewportW - (menuWidth + 8)));
                 return (
                     <div className="fixed inset-0 z-[60] pointer-events-none" onClick={() => { setOpenUserMenu(null); setUserMenuAnchor(null); setEditingRole(null); }}>
                         <div
                             ref={menuRef}
-                            className="fixed w-52 rounded-lg border border-secondary bg-primary shadow-xl pointer-events-auto"
-                            style={{ top: clampedTop, left: clampedLeft }}
+                            className="fixed rounded-lg border border-secondary bg-primary shadow-xl pointer-events-auto overflow-hidden"
+                            style={{ top: clampedTop, left: clampedLeft, width: menuWidth }}
                             onClick={(e) => e.stopPropagation()}
                         >
                             {editingRole?.userId === member._id ? (
@@ -1816,6 +2146,17 @@ function SettingsPageContent() {
                                     ))}
                                     <button type="button" className="mt-1 border-t border-secondary px-3 py-2 text-left text-sm text-tertiary hover:bg-secondary_hover rounded-b-md transition-colors" onClick={() => setEditingRole(null)}>Cancel</button>
                                 </div>
+                            ) : editingQuota?.userId === member._id ? (
+                                /* Phase 9C — Inline quota editor. Opens when the
+                                   admin picks "Set Search Quota" from the menu. */
+                                <QuotaEditor
+                                    userId={member._id}
+                                    value={editingQuota.value}
+                                    onChange={(v) => setEditingQuota({ userId: member._id, value: v })}
+                                    onSave={(v) => handleSaveQuota(member._id, v)}
+                                    onCancel={() => setEditingQuota(null)}
+                                    isSaving={isSavingQuota}
+                                />
                             ) : (
                                 <div className="flex flex-col p-1">
                                     {/* Pending users get explicit Approve / Reject
@@ -1832,6 +2173,16 @@ function SettingsPageContent() {
                                         </>
                                     )}
                                     <button type="button" className="rounded-md px-3 py-2 text-left text-sm text-secondary hover:bg-secondary_hover transition-colors" onClick={() => setEditingRole({ userId: member._id, role: member.role })}>Change Role</button>
+                                    {/* Phase 9C — admin-only entry point into the inline quota editor. */}
+                                    {member.status !== "pending" && (
+                                        <button
+                                            type="button"
+                                            className="rounded-md px-3 py-2 text-left text-sm text-secondary hover:bg-secondary_hover transition-colors"
+                                            onClick={() => setEditingQuota({ userId: member._id, value: "" })}
+                                        >
+                                            Set Search Quota
+                                        </button>
+                                    )}
                                     {member.status !== "pending" && (
                                         <button
                                             type="button"
@@ -1853,7 +2204,7 @@ function SettingsPageContent() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                     <div className="bg-primary border border-secondary rounded-xl p-6 shadow-xl max-w-md w-full mx-4">
                         <h3 className="text-lg font-semibold text-primary mb-1">Invite Team Member</h3>
-                        <p className="text-sm text-tertiary mb-6">Send an invitation to join your team on CyberHook.</p>
+                        <p className="text-sm text-tertiary mb-6">Send an invitation to join your team on CyberHook AI.</p>
                         <div className="flex flex-col gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-secondary mb-1.5">Name</label>
@@ -1877,18 +2228,16 @@ function SettingsPageContent() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-secondary mb-1.5">Role</label>
-                                <NativeSelect
+                                <Select
                                     aria-label="Role"
-                                    value={inviteRole}
-                                    onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
-                                    options={[
-                                        { label: "Sales Rep", value: "sales_rep" },
-                                        { label: "Sales Admin", value: "sales_admin" },
-                                        { label: "Billing", value: "billing" },
-                                    ]}
-                                    className="w-full"
-                                    selectClassName="text-sm"
-                                />
+                                    size="md"
+                                    selectedKey={inviteRole}
+                                    onSelectionChange={(key) => setInviteRole(key as typeof inviteRole)}
+                                >
+                                    <Select.Item id="sales_rep">Sales Rep</Select.Item>
+                                    <Select.Item id="sales_admin">Sales Admin</Select.Item>
+                                    <Select.Item id="billing">Billing</Select.Item>
+                                </Select>
                             </div>
                         </div>
                         <div className="flex items-center justify-end gap-3 mt-6">
@@ -1901,5 +2250,191 @@ function SettingsPageContent() {
                 </div>
             )}
         </main>
+    );
+}
+
+// ─── Settings → Billing tab (Phase 4F + 4G) ─────────────────────────────────
+
+type PortalAction = (args: { returnUrl: string }) => Promise<{ url?: string } | null | undefined>;
+
+function SettingsBillingPanel({ openPortal, companyHasStripeCustomer }: { openPortal: PortalAction; companyHasStripeCustomer: boolean }) {
+    const listInvoices = useAction(api.stripe.listInvoices);
+    const listPaymentMethods = useAction(api.stripe.listPaymentMethods);
+
+    const [invoices, setInvoices] = useState<Awaited<ReturnType<typeof listInvoices>> | undefined>(undefined);
+    const [paymentMethods, setPaymentMethods] = useState<Awaited<ReturnType<typeof listPaymentMethods>> | undefined>(undefined);
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    const refetch = useCallback(async () => {
+        if (!companyHasStripeCustomer) {
+            setInvoices([]);
+            setPaymentMethods([]);
+            setIsLoading(false);
+            return;
+        }
+        setIsLoading(true);
+        setErrorMessage(null);
+        try {
+            const [inv, pm] = await Promise.all([listInvoices({}), listPaymentMethods({})]);
+            setInvoices(inv ?? []);
+            setPaymentMethods(pm ?? []);
+        } catch (err) {
+            if (process.env.NODE_ENV === "development") console.error("Billing fetch failed:", err);
+            setErrorMessage(friendlyError(err, "We couldn't load your billing data right now."));
+        } finally {
+            setIsLoading(false);
+        }
+    }, [companyHasStripeCustomer, listInvoices, listPaymentMethods]);
+
+    useEffect(() => {
+        void refetch();
+    }, [refetch]);
+
+    const handleManageSubscription = useCallback(async () => {
+        try {
+            const result = await openPortal({ returnUrl: `${window.location.origin}/settings?tab=billing` });
+            const url = result?.url;
+            if (url && (url.startsWith("https://billing.stripe.com") || url.startsWith("https://checkout.stripe.com"))) {
+                window.location.href = url;
+            } else {
+                toast.error("We couldn't open the Stripe billing portal.");
+            }
+        } catch (err) {
+            toast.error(friendlyError(err, "We couldn't open the billing portal. Please try again."));
+        }
+    }, [openPortal]);
+
+    return (
+        <div className="flex flex-col gap-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-secondary pb-6">
+                <div className="flex flex-col gap-1">
+                    <h2 className="text-lg font-semibold text-primary">Billing</h2>
+                    <p className="text-sm text-tertiary">View invoices, manage payment methods, and update your subscription.</p>
+                </div>
+                <div className="flex items-center gap-3 mt-4 sm:mt-0">
+                    <Button size="md" color="primary" iconLeading={CreditCard02} onClick={handleManageSubscription}>
+                        Manage Subscription
+                    </Button>
+                </div>
+            </div>
+
+            {!companyHasStripeCustomer && (
+                <div className="rounded-xl border border-dashed border-secondary bg-secondary_subtle p-6 text-center">
+                    <p className="text-sm text-secondary">Your billing details will appear here after your first subscription is set up.</p>
+                </div>
+            )}
+
+            {companyHasStripeCustomer && (
+                <>
+                    {/* Payment methods */}
+                    <div className="flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-md font-semibold text-primary">Payment Methods</h3>
+                            <Button size="sm" color="secondary" onClick={handleManageSubscription}>
+                                Add or remove cards
+                            </Button>
+                        </div>
+                        {isLoading ? (
+                            <LoadingSpinner />
+                        ) : paymentMethods && paymentMethods.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {paymentMethods.map((pm) => (
+                                    <div key={pm.id} className="flex items-center gap-4 rounded-xl border border-secondary bg-primary p-4">
+                                        <div className="flex h-11 w-16 items-center justify-center rounded-lg border border-secondary bg-secondary_subtle">
+                                            <CreditCard02 className="h-6 w-6 text-tertiary" />
+                                        </div>
+                                        <div className="flex flex-1 flex-col gap-0.5">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-medium text-primary capitalize">{pm.brand} •••• {pm.last4}</span>
+                                                {pm.isDefault && <Badge color="brand" size="sm">Default</Badge>}
+                                            </div>
+                                            <span className="text-sm text-tertiary">Expires {String(pm.expMonth).padStart(2, "0")}/{pm.expYear}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-xl border border-dashed border-secondary p-6 text-center text-sm text-tertiary">
+                                No payment methods on file. Use “Manage Subscription” to add one.
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Invoices */}
+                    <div className="flex flex-col gap-4">
+                        <h3 className="text-md font-semibold text-primary">Invoices</h3>
+                        {isLoading ? (
+                            <LoadingSpinner />
+                        ) : invoices && invoices.length > 0 ? (
+                            <TableCard.Root className="rounded-xl">
+                                <div className="overflow-x-auto">
+                                    <Table aria-label="Invoices">
+                                        <Table.Header>
+                                            <Table.Row>
+                                                <Table.Head id="date" isRowHeader>Date</Table.Head>
+                                                <Table.Head id="number">Invoice</Table.Head>
+                                                <Table.Head id="amount">Amount</Table.Head>
+                                                <Table.Head id="status">Status</Table.Head>
+                                                <Table.Head id="actions" className="w-32" />
+                                            </Table.Row>
+                                        </Table.Header>
+                                        <Table.Body items={invoices.map((inv) => ({ ...inv, id: inv.id }))}>
+                                            {(item) => (
+                                                <Table.Row id={item.id}>
+                                                    <Table.Cell>
+                                                        <span className="text-secondary whitespace-nowrap">
+                                                            {new Date(item.createdAt).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" })}
+                                                        </span>
+                                                    </Table.Cell>
+                                                    <Table.Cell>
+                                                        <span className="font-medium text-primary">{item.number ?? item.id.slice(-8).toUpperCase()}</span>
+                                                    </Table.Cell>
+                                                    <Table.Cell>
+                                                        <span className="font-medium text-secondary">
+                                                            {item.currency} {item.amount.toFixed(2)}
+                                                        </span>
+                                                    </Table.Cell>
+                                                    <Table.Cell>
+                                                        <Badge
+                                                            size="sm"
+                                                            color={item.status === "paid" ? "success" : item.status === "open" ? "warning" : item.status === "uncollectible" || item.status === "void" ? "error" : "gray"}
+                                                        >
+                                                            {(item.status ?? "—").charAt(0).toUpperCase() + (item.status ?? "—").slice(1)}
+                                                        </Badge>
+                                                    </Table.Cell>
+                                                    <Table.Cell>
+                                                        <div className="flex items-center gap-2">
+                                                            {item.hostedInvoiceUrl && (
+                                                                <a href={item.hostedInvoiceUrl} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand-secondary hover:underline">View</a>
+                                                            )}
+                                                            {item.pdfUrl && (
+                                                                <a href={item.pdfUrl} target="_blank" rel="noreferrer" aria-label="Download PDF" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-tertiary hover:bg-secondary_hover">
+                                                                    <DownloadCloud01 className="h-4 w-4" />
+                                                                </a>
+                                                            )}
+                                                        </div>
+                                                    </Table.Cell>
+                                                </Table.Row>
+                                            )}
+                                        </Table.Body>
+                                    </Table>
+                                </div>
+                            </TableCard.Root>
+                        ) : (
+                            <div className="rounded-xl border border-dashed border-secondary p-6 text-center text-sm text-tertiary">
+                                {errorMessage ?? "No invoices yet. Your first invoice will appear here after the trial period ends."}
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
+
+            {errorMessage && (
+                <div className="rounded-md border border-error-secondary bg-error-50 px-4 py-3 text-sm text-error-primary">
+                    {errorMessage}
+                </div>
+            )}
+        </div>
     );
 }

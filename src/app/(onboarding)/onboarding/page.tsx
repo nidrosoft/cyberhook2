@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useUser, useSession } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { useMutation } from "convex/react";
+import { useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { setOnboardingComplete } from "@/app/actions/clerk";
@@ -38,48 +38,14 @@ import { friendlyError } from "@/lib/friendly-errors";
 import { PLANS, PLAN_ORDER, type PlanTier } from "@/lib/plans";
 import { CheckCircle } from "@untitledui/icons";
 
-const businessModels = [
-    { id: "msp", label: "MSP/MSSP" },
-    { id: "var", label: "VAR/Reseller" },
-    { id: "si", label: "Systems Integrator" },
-    { id: "vad", label: "VAD" },
-    { id: "tap", label: "TAP" },
-    { id: "consultant", label: "Consultant/Referral Partner" },
-];
-
-const revenueRanges = [
-    { id: "0-4", label: "$0–4M" },
-    { id: "5-9", label: "$5–9M" },
-    { id: "10-24", label: "$10–24M" },
-    { id: "25-49", label: "$25–49M" },
-    { id: "50-99", label: "$50–99M" },
-    { id: "100-249", label: "$100–249M" },
-    { id: "250-1b", label: "$250M–1B" },
-    { id: "1b+", label: "$1B+" },
-];
-
-const geoOptions = ["North America", "EMEA", "APAC", "ANZ", "LATAM"];
-const customerOptions = ["SMB", "Mid Market", "Enterprise", "Fortune 500"];
-
-const employeeRanges = [
-    { id: "1-10", label: "1–10" },
-    { id: "11-50", label: "11–50" },
-    { id: "51-100", label: "51–100" },
-    { id: "101-150", label: "101–150" },
-    { id: "151-250", label: "151–250" },
-    { id: "251-500", label: "251–500" },
-    { id: "501+", label: "501+" },
-];
-
-const salesRanges = [
-    { id: "just-me", label: "Just me" },
-    { id: "2-3", label: "2–3" },
-    { id: "3-5", label: "3–5" },
-    { id: "5-10", label: "5–10" },
-    { id: "10-25", label: "10–25" },
-    { id: "25-50", label: "25–50" },
-    { id: "50+", label: "50+" },
-];
+import {
+    PRIMARY_BUSINESS_MODEL_OPTIONS as businessModels,
+    ANNUAL_REVENUE_OPTIONS as revenueRanges,
+    GEOGRAPHIC_COVERAGE_OPTIONS as geoOptions,
+    TARGET_CUSTOMER_BASE_OPTIONS as customerOptions,
+    TOTAL_EMPLOYEES_OPTIONS as employeeRanges,
+    SALES_TEAM_SIZE_OPTIONS as salesRanges,
+} from "@/lib/constants/profile-options";
 
 
 function getSteps(currentStep: number): ProgressFeaturedIconType[] {
@@ -111,10 +77,6 @@ interface FormData {
     planSelectedManually: boolean;
     logoUrl: string;
     logoStorageId: Id<"_storage"> | "";
-    cardNumber: string;
-    cardExpiry: string;
-    cardCvc: string;
-    cardZip: string;
 }
 
 type FieldErrors = Partial<Record<keyof FormData, string>>;
@@ -137,10 +99,6 @@ const defaultFormData: FormData = {
     planSelectedManually: false,
     logoUrl: "",
     logoStorageId: "",
-    cardNumber: "",
-    cardExpiry: "",
-    cardCvc: "",
-    cardZip: "",
 };
 
 function loadSavedStep(): number {
@@ -173,6 +131,9 @@ export default function OnboardingPage() {
     const [error, setError] = useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const completeOnboarding = useMutation(api.onboarding.completeOnboarding);
+    // Phase 4B: signup creates a Stripe Checkout Session with a 7-day trial
+    // before the user lands on the pending-approval page.
+    const createCheckoutSession = useAction(api.stripe.createCheckoutSession);
     const [formData, setFormData] = useState<FormData>(loadSavedForm);
     const { uploadWithMetadata: uploadLogo, isUploading: isLogoUploading } = useFileUpload();
     const [logoError, setLogoError] = useState<string | null>(null);
@@ -193,38 +154,13 @@ export default function OnboardingPage() {
         } catch {}
     }, []);
 
-    // Step 4 validation: require plan manually selected + all CC fields valid
-    const step4Validation = useMemo(() => {
-        const digits = formData.cardNumber.replace(/\D/g, "");
-        const cardNumberValid = digits.length >= 13 && digits.length <= 19;
-
-        const expParts = formData.cardExpiry.replace(/\s/g, "").split("/");
-        let expiryValid = false;
-        if (expParts.length === 2) {
-            const mm = parseInt(expParts[0], 10);
-            const yy = parseInt(expParts[1], 10);
-            if (mm >= 1 && mm <= 12 && !Number.isNaN(yy)) {
-                const now = new Date();
-                const currentYY = now.getFullYear() % 100;
-                const currentMM = now.getMonth() + 1;
-                if (yy > currentYY || (yy === currentYY && mm >= currentMM)) {
-                    expiryValid = true;
-                }
-            }
-        }
-
-        const cvcValid = /^\d{3,4}$/.test(formData.cardCvc);
-        const zipValid = /^[A-Za-z0-9\- ]{3,10}$/.test(formData.cardZip.trim());
-
-        return {
-            planSelected: formData.planSelectedManually,
-            cardNumberValid,
-            expiryValid,
-            cvcValid,
-            zipValid,
-            allValid: formData.planSelectedManually && cardNumberValid && expiryValid && cvcValid && zipValid,
-        };
-    }, [formData.planSelectedManually, formData.cardNumber, formData.cardExpiry, formData.cardCvc, formData.cardZip]);
+    // Phase 4B: card collection moved to Stripe Checkout. The only step-4
+    // requirement now is an explicit plan pick — Stripe handles everything
+    // else over its own hosted form.
+    const step4Validation = useMemo(() => ({
+        planSelected: formData.planSelectedManually,
+        allValid: formData.planSelectedManually,
+    }), [formData.planSelectedManually]);
 
     const setErrorsForFields = useCallback((keys: Array<keyof FormData>, errors: FieldErrors) => {
         setFieldErrors((prev) => {
@@ -302,7 +238,7 @@ export default function OnboardingPage() {
             {/* Logo */}
             <div className="mb-8 flex items-center gap-2 text-xl font-bold tracking-tight text-primary">
                 <Shield01 className="h-6 w-6 text-brand-primary" />
-                <span>CyberHook</span>
+                <span>CyberHook AI</span>
             </div>
 
             {/* Progress Stepper */}
@@ -376,7 +312,7 @@ export default function OnboardingPage() {
                                 onSelectionChange={(key) => updateField("businessModel", String(key))}
                             >
                                 {businessModels.map((m) => (
-                                    <Select.Item key={m.id} id={m.id}>{m.label}</Select.Item>
+                                    <Select.Item key={m.value} id={m.value}>{m.label}</Select.Item>
                                 ))}
                             </Select>
                             {fieldErrors.businessModel && <p className="text-xs text-error-primary">{fieldErrors.businessModel}</p>}
@@ -389,7 +325,7 @@ export default function OnboardingPage() {
                                 onSelectionChange={(key) => updateField("annualRevenue", String(key))}
                             >
                                 {revenueRanges.map((r) => (
-                                    <Select.Item key={r.id} id={r.id}>{r.label}</Select.Item>
+                                    <Select.Item key={r.value} id={r.value}>{r.label}</Select.Item>
                                 ))}
                             </Select>
                             {fieldErrors.annualRevenue && <p className="text-xs text-error-primary">{fieldErrors.annualRevenue}</p>}
@@ -445,7 +381,7 @@ export default function OnboardingPage() {
                                     onSelectionChange={(key) => updateField("totalEmployees", String(key))}
                                 >
                                     {employeeRanges.map((e) => (
-                                        <Select.Item key={e.id} id={e.id}>{e.label}</Select.Item>
+                                        <Select.Item key={e.value} id={e.value}>{e.label}</Select.Item>
                                     ))}
                                 </Select>
                                 {fieldErrors.totalEmployees && <p className="text-xs text-error-primary">{fieldErrors.totalEmployees}</p>}
@@ -458,7 +394,7 @@ export default function OnboardingPage() {
                                     onSelectionChange={(key) => updateField("totalSales", String(key))}
                                 >
                                     {salesRanges.map((s) => (
-                                        <Select.Item key={s.id} id={s.id}>{s.label}</Select.Item>
+                                        <Select.Item key={s.value} id={s.value}>{s.label}</Select.Item>
                                     ))}
                                 </Select>
                                 {fieldErrors.totalSales && <p className="text-xs text-error-primary">{fieldErrors.totalSales}</p>}
@@ -637,75 +573,23 @@ export default function OnboardingPage() {
                             })}
                         </div>
 
-                        {/* Payment Form */}
+                        {/* Phase 4B: card details are collected on Stripe's
+                            hosted Checkout page, not in our form. We just
+                            confirm the chosen plan + trial summary here. */}
                         <div className="mx-auto w-full max-w-xl">
-                            <div className="flex flex-col gap-5 rounded-xl border border-secondary bg-primary p-6">
+                            <div className="flex flex-col gap-3 rounded-xl border border-secondary bg-primary p-6">
                                 <div className="flex items-center gap-2">
                                     <CreditCard02 className="h-5 w-5 text-tertiary" />
-                                    <h3 className="text-md font-semibold text-primary">Payment Details</h3>
+                                    <h3 className="text-md font-semibold text-primary">Secure Checkout</h3>
                                 </div>
-                                <div className="flex flex-col gap-4">
-                                    <TextField name="cardNumber" isRequired>
-                                        <Label>Card Number</Label>
-                                        <InputBase
-                                            size="md"
-                                            placeholder="4242 4242 4242 4242"
-                                            icon={CreditCard02}
-                                            value={formData.cardNumber}
-                                            onChange={(value: string) => {
-                                                const digits = String(value).replace(/\D/g, "").slice(0, 19);
-                                                const grouped = digits.replace(/(.{4})/g, "$1 ").trim();
-                                                setFormData((prev) => ({ ...prev, cardNumber: grouped }));
-                                            }}
-                                            inputMode="numeric"
-                                            autoComplete="cc-number"
-                                        />
-                                    </TextField>
-                                    <div className="grid grid-cols-3 gap-4">
-                                        <TextField name="expiry" isRequired>
-                                            <Label>Expiry</Label>
-                                            <InputBase
-                                                size="md"
-                                                placeholder="MM / YY"
-                                                value={formData.cardExpiry}
-                                                onChange={(value: string) => {
-                                                    const digits = String(value).replace(/\D/g, "").slice(0, 4);
-                                                    const formatted = digits.length > 2 ? `${digits.slice(0, 2)} / ${digits.slice(2)}` : digits;
-                                                    setFormData((prev) => ({ ...prev, cardExpiry: formatted }));
-                                                }}
-                                                inputMode="numeric"
-                                                autoComplete="cc-exp"
-                                            />
-                                        </TextField>
-                                        <TextField name="cvc" isRequired>
-                                            <Label>CVC</Label>
-                                            <InputBase
-                                                size="md"
-                                                placeholder="123"
-                                                value={formData.cardCvc}
-                                                onChange={(value: string) => {
-                                                    const digits = String(value).replace(/\D/g, "").slice(0, 4);
-                                                    setFormData((prev) => ({ ...prev, cardCvc: digits }));
-                                                }}
-                                                inputMode="numeric"
-                                                autoComplete="cc-csc"
-                                            />
-                                        </TextField>
-                                        <TextField name="zip" isRequired>
-                                            <Label>ZIP</Label>
-                                            <InputBase
-                                                size="md"
-                                                placeholder="94103"
-                                                value={formData.cardZip}
-                                                onChange={(value: string) => {
-                                                    const v = String(value).replace(/[^0-9A-Za-z\- ]/g, "").slice(0, 10);
-                                                    setFormData((prev) => ({ ...prev, cardZip: v }));
-                                                }}
-                                                autoComplete="postal-code"
-                                            />
-                                        </TextField>
-                                    </div>
-                                </div>
+                                <p className="text-sm text-secondary">
+                                    Start your 7-day free trial — you won&apos;t be charged until day 8. We&apos;ll hand you off to Stripe&apos;s secure checkout to enter your card details. You can cancel any time from your Settings.
+                                </p>
+                                <ul className="mt-1 flex flex-col gap-1.5 text-sm text-tertiary">
+                                    <li className="flex items-start gap-2"><CheckCircle className="h-4 w-4 text-success-500 mt-0.5 shrink-0" /> No charge during the 7-day trial.</li>
+                                    <li className="flex items-start gap-2"><CheckCircle className="h-4 w-4 text-success-500 mt-0.5 shrink-0" /> Cancel anytime from your billing settings.</li>
+                                    <li className="flex items-start gap-2"><CheckCircle className="h-4 w-4 text-success-500 mt-0.5 shrink-0" /> Payment is handled by Stripe, PCI-DSS Level 1 certified.</li>
+                                </ul>
                             </div>
                         </div>
 
@@ -714,17 +598,7 @@ export default function OnboardingPage() {
                         )}
                         {!step4Validation.allValid && (
                             <p className="text-xs text-tertiary text-center">
-                                {!step4Validation.planSelected
-                                    ? "Select a plan to continue."
-                                    : !step4Validation.cardNumberValid
-                                        ? "Enter a valid card number."
-                                        : !step4Validation.expiryValid
-                                            ? "Enter a valid expiry date (MM / YY)."
-                                            : !step4Validation.cvcValid
-                                                ? "Enter a valid CVC."
-                                                : !step4Validation.zipValid
-                                                    ? "Enter a valid ZIP / postal code."
-                                                    : ""}
+                                {!step4Validation.planSelected ? "Select a plan to continue." : ""}
                             </p>
                         )}
                         <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-between">
@@ -749,19 +623,17 @@ export default function OnboardingPage() {
                                         return;
                                     }
                                     if (!step4Validation.allValid) {
-                                        setError("Please enter your credit card information to start your free trial.");
+                                        setError("Please select a plan to continue.");
                                         return;
                                     }
                                     setIsSubmitting(true);
                                     setError(null);
                                     try {
-                                        // Parse team emails
                                         const teamEmailsArray = formData.teamEmails
                                             .split(",")
                                             .map((e) => e.trim())
                                             .filter((e) => e.length > 0);
 
-                                        // Save to Convex
                                         const result = await completeOnboarding({
                                             clerkId: user.id,
                                             email: user.primaryEmailAddress?.emailAddress || "",
@@ -782,28 +654,49 @@ export default function OnboardingPage() {
                                             logoStorageId: formData.logoStorageId || undefined,
                                             selectedPlanId: formData.selectedPlan,
                                             planSelectedManually: formData.planSelectedManually,
-                                            paymentMethodProvided: step4Validation.allValid,
+                                            // Stripe Checkout is now the payment gate; this flag stays
+                                            // true here so the existing onboarding state machine accepts
+                                            // the submission. Approval still waits for the
+                                            // checkout.session.completed webhook.
+                                            paymentMethodProvided: true,
                                         });
 
-                                        if (result.success) {
-                                            await setOnboardingComplete(
-                                                user.id,
-                                                result.userId,
-                                                result.companyId,
-                                            );
-
-                                            clearSavedProgress();
-
-                                            // Force the Clerk session to refresh its JWT so the
-                                            // middleware sees the updated publicMetadata immediately.
-                                            if (session) {
-                                                await session.reload();
-                                            }
-
-                                            window.location.href = "/pending-approval";
-                                        } else {
+                                        if (!result.success) {
                                             setError("Failed to complete onboarding. Please try again.");
                                             setIsSubmitting(false);
+                                            return;
+                                        }
+
+                                        await setOnboardingComplete(
+                                            user.id,
+                                            result.userId,
+                                            result.companyId,
+                                        );
+
+                                        clearSavedProgress();
+                                        if (session) {
+                                            await session.reload();
+                                        }
+
+                                        // Phase 4B: hand off to Stripe Checkout for the selected
+                                        // plan. The 7-day free trial defers the actual charge.
+                                        const selectedTier = formData.selectedPlan as PlanTier;
+                                        const planConfig = PLANS[selectedTier] ?? PLANS.growth;
+                                        const checkout = await createCheckoutSession({
+                                            priceId: planConfig.stripePriceId,
+                                            planId: planConfig.id,
+                                            successUrl: `${window.location.origin}/pending-approval?checkout=success`,
+                                            cancelUrl: `${window.location.origin}/onboarding?step=4&checkout=cancelled`,
+                                            trialPeriodDays: 7,
+                                        });
+
+                                        if (checkout?.url && checkout.url.startsWith("https://checkout.stripe.com")) {
+                                            window.location.href = checkout.url;
+                                        } else {
+                                            // Stripe didn't return a URL — degrade gracefully: take the
+                                            // user to the pending-approval page so onboarding isn't
+                                            // wedged, and surface a toast so support can investigate.
+                                            window.location.href = "/pending-approval";
                                         }
                                     } catch (err) {
                                         if (process.env.NODE_ENV === "development") console.error("Error completing onboarding:", err);
@@ -820,9 +713,24 @@ export default function OnboardingPage() {
             </div>
 
             <p className="mt-6 text-xs text-tertiary">
-                By continuing, you agree to CyberHook&apos;s{" "}
-                <a href="#" className="underline hover:text-primary">Terms of Service</a> and{" "}
-                <a href="#" className="underline hover:text-primary">Privacy Policy</a>.
+                By continuing, you agree to CyberHook AI&apos;s{" "}
+                <a
+                    href="https://cyberhook.ai/terms-and-conditions"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-primary"
+                >
+                    Terms &amp; Conditions
+                </a>{" "}
+                and{" "}
+                <a
+                    href="https://cyberhook.ai/privacy-policy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-primary"
+                >
+                    Privacy Policy
+                </a>.
             </p>
         </div>
     );

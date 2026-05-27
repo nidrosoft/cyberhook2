@@ -2,8 +2,22 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal, components } from "./_generated/api";
 import { registerRoutes } from "@convex-dev/stripe";
+import { resend } from "./emails";
 
 const http = httpRouter();
+
+// Resend lifecycle webhook. Add this URL in the Resend dashboard
+// (Settings → Webhooks): https://<your-convex-deployment>.convex.site/resend-webhook
+// and copy the signing secret into the Convex env var RESEND_WEBHOOK_SECRET.
+// Without this, Resend lifecycle events (delivered/bounced/complained/failed)
+// never reach us, so a rejected send keeps showing up as "sent" in the UI.
+http.route({
+  path: "/resend-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    return await resend.handleResendEventWebhook(ctx, req);
+  }),
+});
 
 // Clerk webhook handler
 http.route({

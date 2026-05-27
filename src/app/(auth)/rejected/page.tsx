@@ -23,7 +23,7 @@ export default function RejectedPage() {
 
                     {/* Description */}
                     <p className="mt-3 text-md text-secondary max-w-sm">
-                        Unfortunately, your application to join CyberHook was not approved at this time.
+                        Unfortunately, your application to join CyberHook AI was not approved at this time.
                     </p>
 
                     {/* Info Card */}

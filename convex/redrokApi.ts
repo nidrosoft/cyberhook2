@@ -315,13 +315,27 @@ export const liveSearch = action({
   },
 });
 
+/**
+ * Live Leads adapter.
+ *
+ * Redrok's `/search/LiveLeads` contract (empirically verified — see
+ * `CYBERHOOK_INTEGRATION_STATUS_REPORT.md`):
+ *   - `days`    (int)    — honored server-side
+ *   - `country` (string) — honored server-side; expects lowercase name, e.g. "united states"
+ *   - `region`  (string) — honored server-side; expects lowercase state, e.g. "minnesota"
+ *   - `size`    (int 0-8) — accepted but SILENTLY IGNORED (verified via `size=6` returning all sizes)
+ *   - `city`    (string)  — accepted but SILENTLY IGNORED
+ *
+ * Industry is not part of the request shape at all. Industry / size / city
+ * filters are therefore applied client-side in the UI against the response
+ * fields `industry`, `size`, and `locality`.
+ */
 export const liveLeads = action({
   args: {
     companyId: v.id("companies"),
     days: v.number(),
     country: v.optional(v.string()),
     region: v.optional(v.string()),
-    city: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{
     success: boolean;
@@ -351,11 +365,15 @@ export const liveLeads = action({
         company.redrokToken, company.redrokTokenExpiresAt
       );
 
+      // Normalize country/region to the lowercase form Redrok expects.
+      // (Redrok is case-insensitive on `region` but lowercase keeps the
+      // payload consistent and matches the country list it returns.)
       const result = await redrokFetch(token, "/search/LiveLeads", {
         days: args.days,
-        country: args.country || "",
-        region: args.region || "",
-        city: args.city || "",
+        size: 0,
+        country: (args.country || "").trim().toLowerCase(),
+        region: (args.region || "").trim().toLowerCase(),
+        city: "",
       });
 
       const companies: RedrokCompany[] = result.companyData || [];

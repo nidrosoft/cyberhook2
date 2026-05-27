@@ -291,7 +291,7 @@ export default function WatchlistPage() {
                     </div>
                     <div className="flex items-center gap-3 mt-4 sm:mt-0">
                         <SlideoutMenu.Trigger>
-                            <Button color="primary" iconLeading={Plus}>Add Domain</Button>
+                            <Button color="primary" iconLeading={Plus} data-tour="watchlist-add">Add Domain</Button>
                             <SlideoutMenu>
                                 {({ close }) => (
                                     <>
@@ -411,7 +411,7 @@ export default function WatchlistPage() {
                 </div>
 
                 {/* Watchlist Table */}
-                <TableCard.Root className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
+                <TableCard.Root data-tour="watchlist-table" className="rounded-xl border border-secondary shadow-sm bg-primary overflow-x-auto">
                     <TableCard.Header title="Monitored Domains" badge={`${filteredItems.length} domains`} />
 
                     <Table

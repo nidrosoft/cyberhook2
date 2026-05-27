@@ -73,6 +73,15 @@ const PATTERNS: Array<{ test: RegExp; message: string }> = [
             "You've used all your tokens for this billing period. Upgrade your plan or wait for the next reset.",
     },
 
+    // Phase 9C — per-user search quota set by the company admin. Distinct
+    // from the company-wide cap so the message tells them exactly where to
+    // get more (their admin, not Stripe).
+    {
+        test: /USER_SEARCH_QUOTA_EXCEEDED/i,
+        message:
+            "You've hit your monthly search quota. Contact your admin to increase it.",
+    },
+
     // Validation noise that occasionally bubbles up from Convex.
     {
         test: /argumentvalidationerror|validator|missing the required field|object is missing/i,

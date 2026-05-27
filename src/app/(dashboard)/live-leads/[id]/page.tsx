@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { devError } from "@/utils/dev-error";
 import {
@@ -32,6 +32,7 @@ import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { Tabs } from "@/components/application/tabs/tabs";
 import { useCompany } from "@/hooks/use-company";
+import { useReportConsumer } from "@/hooks/use-report-consumer";
 import { generateExposureReport } from "@/lib/pdf-report";
 import { ensureProtocol } from "@/utils/sanitize-url";
 import { api } from "../../../../../convex/_generated/api";
@@ -511,10 +512,13 @@ export default function LeadDetailPage() {
     const leadId = params.id as Id<"leads">;
     const [activeTab, setActiveTab] = useState("overview");
     const { company: companyData } = useCompany();
+    const consumeReportQuota = useReportConsumer();
     const resolvedLogoUrl = useQuery(api.storage.getUrl, companyData?.logoStorageId ? { storageId: companyData.logoStorageId } : "skip");
 
     const lead = useQuery(api.leads.getById, { id: leadId });
     const contacts = useQuery(api.contacts.getByLeadId, { leadId });
+    const pushLeadToHubSpot = useAction(api.integrationsActions.pushLeadToHubSpot);
+    const [isPushingToCRM, setIsPushingToCRM] = useState(false);
 
     if (lead === undefined) {
         return <LoadingState />;
@@ -529,8 +533,31 @@ export default function LeadDetailPage() {
 
     const location = [typedLead.city, typedLead.region, typedLead.country].filter(Boolean).join(", ");
 
+    async function handlePushToCRM() {
+        // Phase 7C: pushes the lead to HubSpot as a company + contact.
+        // The Convex action looks up the connected HubSpot integration
+        // for this company; if HubSpot isn't connected we surface a
+        // toast pointing the user to Settings → Integrations.
+        setIsPushingToCRM(true);
+        try {
+            const result = await pushLeadToHubSpot({ leadId });
+            if (result.ok) {
+                toast.success("Lead pushed to HubSpot.");
+            } else {
+                toast.error(result.error ?? "Failed to push lead to HubSpot.");
+            }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to push lead to HubSpot.");
+        } finally {
+            setIsPushingToCRM(false);
+        }
+    }
+
     async function handleGenerateReport() {
         const domain = typedLead.domain?.trim() || typedLead.name.toLowerCase().replace(/\s+/g, "") + ".com";
+        // Phase 4H: enforce the plan's monthly report quota before rendering.
+        const allowed = await consumeReportQuota(companyData?._id);
+        if (!allowed) return;
         toast.info(`Generating report for ${typedLead.name}...`);
         try {
             await generateExposureReport({
@@ -622,8 +649,14 @@ export default function LeadDetailPage() {
                         <Button color="secondary" size="sm" iconLeading={Target05}>
                             Start Campaign
                         </Button>
-                        <Button color="secondary" size="sm" iconLeading={Copy01}>
-                            Push to CRM
+                        <Button
+                            color="secondary"
+                            size="sm"
+                            iconLeading={Copy01}
+                            onClick={handlePushToCRM}
+                            isDisabled={isPushingToCRM}
+                        >
+                            {isPushingToCRM ? "Pushing…" : "Push to CRM"}
                         </Button>
                         <Button color="primary" size="sm" iconLeading={BarChartSquare02} onClick={handleGenerateReport}>
                             Generate Report

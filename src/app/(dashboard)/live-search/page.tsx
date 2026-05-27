@@ -32,6 +32,7 @@ import { PaginationCardMinimal } from "@/components/application/pagination/pagin
 import { MetricsChart04 } from "@/components/application/metrics/metrics";
 import { SlideoutMenu } from "@/components/application/slideout-menus/slideout-menu";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useReportConsumer } from "@/hooks/use-report-consumer";
 import { useCompany } from "@/hooks/use-company";
 import { usePlanGate } from "@/hooks/use-plan-gate";
 import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
@@ -77,6 +78,7 @@ function getSeverityBadge(severity: number): { color: "error" | "warning" | "suc
 export default function LiveSearchPage() {
     const { user, companyId } = useCurrentUser();
     const { company: companyData, tokensRemaining, tokenAllocation, isLoading: isCompanyLoading } = useCompany();
+    const consumeReportQuota = useReportConsumer();
     const { searches, canPerformAction, planId } = usePlanGate();
     const { showUpgradeModal } = useUpgradeModal();
     const isTrial = companyData?.status === "trial";
@@ -306,7 +308,7 @@ export default function LiveSearchPage() {
                             </p>
                         </div>
 
-                        <div className="flex w-full flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        <div data-tour="live-search-input" className="flex w-full flex-col sm:flex-row items-stretch sm:items-center gap-3">
                             <InputBase
                                 type="text"
                                 size="md"
@@ -454,7 +456,7 @@ export default function LiveSearchPage() {
 
                 {/* Results State */}
                 {searchState === "results" && (
-                    <div className="flex flex-col gap-6 animate-fade-in">
+                    <div data-tour="live-search-results" className="flex flex-col gap-6 animate-fade-in">
                         {/* Summary Header */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 border-b border-secondary">
                             <div className="flex items-center gap-4">
@@ -519,6 +521,11 @@ export default function LiveSearchPage() {
                                 onClick={async () => {
                                     const companyName = currentSearchResults[0]?.companyName || 
                                         (domain.includes(".") ? domain.split(".")[0].charAt(0).toUpperCase() + domain.split(".")[0].slice(1) : domain);
+                                    // Phase 4H: meter exposure reports against the plan's monthly quota
+                                    // before we kick off the PDF render. Returns false (and shows the
+                                    // upgrade modal) if the company is out of reports.
+                                    const allowed = await consumeReportQuota(companyId);
+                                    if (!allowed) return;
                                     toast.info(`Generating report for ${companyName}...`);
                                     try {
                                         await generateExposureReport({

@@ -19,6 +19,7 @@ import {
 import { Badge } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { MetricsChart04, MetricsIcon04 } from "@/components/application/metrics/metrics";
+import { GettingStartedChecklist } from "@/components/walkthrough/getting-started-checklist";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "../../../../convex/_generated/api";
@@ -191,7 +192,7 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-8">
 
                 {/* ── 1. Greeting ──────────────────────────── */}
-                <div className="px-4 sm:px-6 lg:px-8">
+                <div className="px-4 sm:px-6 lg:px-8" data-tour="dashboard-greeting">
                     <div className="flex flex-col gap-1">
                         <h1 className="text-display-xs font-semibold text-primary sm:text-display-sm">
                             {greeting} 👋
@@ -203,8 +204,13 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
+                {/* Phase 10 — Guided onboarding tile. Self-hides when the tour is complete. */}
+                <div className="px-4 sm:px-6 lg:px-8">
+                    <GettingStartedChecklist />
+                </div>
+
                 {/* ── 2. KPI Tiles ─────────────────────────── */}
-                <div className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:gap-5 sm:px-6 lg:grid-cols-4 lg:gap-6 lg:px-8 items-stretch">
+                <div data-tour="dashboard-kpis" className="grid grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:gap-5 sm:px-6 lg:grid-cols-4 lg:gap-6 lg:px-8 items-stretch">
                     <MetricsChart04
                         title={kpis.tokenBalance.value?.toLocaleString() ?? "0"}
                         subtitle="Token Balance"
@@ -510,7 +516,7 @@ export default function DashboardPage() {
                         </div>
 
                         {/* Quick Actions */}
-                        <div className="rounded-xl border border-secondary bg-primary shadow-xs">
+                        <div data-tour="dashboard-quick-actions" className="rounded-xl border border-secondary bg-primary shadow-xs">
                             <div className="flex items-center justify-between border-b border-secondary px-5 py-4">
                                 <h2 className="text-lg font-semibold text-primary">Quick Actions</h2>
                             </div>

@@ -89,6 +89,29 @@ const downloadCatLabels: Record<string, string> = {
     case_studies: "Case Studies", partner_overview: "Partner Overview", other: "Other",
 };
 
+// Phase 9B — Renders a "View File" link for a certification document. The
+// signed URL is resolved on-the-fly via api.storage.getUrl so we don't keep
+// long-lived references to internal storage IDs in the UI bundle.
+function CertFileLink({ storageId }: { storageId: string }) {
+    const url = useQuery(api.storage.getUrl, { storageId: storageId as Id<"_storage"> });
+    if (url === undefined) {
+        return <span className="text-xs text-tertiary">Loading…</span>;
+    }
+    if (!url) {
+        return <span className="text-xs text-tertiary">Unavailable</span>;
+    }
+    return (
+        <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-medium text-brand-secondary hover:underline"
+        >
+            View file
+        </a>
+    );
+}
+
 export default function RfpHubPage() {
     const { user, companyId, isLoading: isUserLoading } = useCurrentUser();
 
@@ -112,7 +135,10 @@ export default function RfpHubPage() {
     const createRfpDownload = useMutation(api.rfpHub.createRfpDownload);
     const updateRfpEntry = useMutation(api.rfpHub.updateRfpEntry);
     const updateUseCase = useMutation(api.rfpHub.updateUseCase);
+    // Phase 9B — Convex storage upload URL generator for certification attachments.
+    const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
     const downloadFileRef = useRef<HTMLInputElement>(null);
+    const certFileRef = useRef<HTMLInputElement>(null);
 
     // ─── Local state ─────────────────────────────────────
     const [rfpSort, setRfpSort] = useState<SortDescriptor>({ column: "submissionDeadline", direction: "ascending" });
@@ -153,6 +179,10 @@ export default function RfpHubPage() {
     const [certAuthority, setCertAuthority] = useState("");
     const [certDesc, setCertDesc] = useState("");
     const [isCertSubmitting, setIsCertSubmitting] = useState(false);
+    // Phase 9B — file attachment for certifications. We keep the selected file
+    // in component state until submit; the actual upload happens during
+    // handleCreateCert so the slideout can show a single "Adding..." spinner.
+    const [certFile, setCertFile] = useState<File | null>(null);
 
     // Slideout form state — RFP Entry
     const [rfpTitle, setRfpTitle] = useState("");
@@ -283,15 +313,47 @@ export default function RfpHubPage() {
             toast.error("Please wait until your account is loaded, then try again.");
             return;
         }
+        // Phase 9B — file is optional, but if provided we validate type/size
+        // before kicking off the upload so users see the error immediately.
+        if (certFile) {
+            const allowed = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
+            if (!allowed.includes(certFile.type)) {
+                toast.error("Only PDF, PNG, and JPG files are supported.");
+                return;
+            }
+            if (certFile.size > 10 * 1024 * 1024) {
+                toast.error("File too large. Maximum 10 MB.");
+                return;
+            }
+        }
         setIsCertSubmitting(true);
         try {
+            let documentFileId: string | undefined;
+            if (certFile) {
+                // Phase 9B — two-step Convex storage upload:
+                // 1. Get a short-lived signed upload URL.
+                // 2. PUT the file blob to it. The response carries the
+                //    permanent storage ID we then attach to the certification.
+                const uploadUrl = await generateUploadUrl();
+                const res = await fetch(uploadUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": certFile.type },
+                    body: certFile,
+                });
+                if (!res.ok) throw new Error("File upload failed");
+                const { storageId } = await res.json();
+                documentFileId = storageId;
+            }
             await createCertification({
                 companyId, createdByUserId: user._id,
                 name: certName.trim(), category: certCategory, status: certStatus,
                 issuingAuthority: certAuthority || undefined, description: certDesc || undefined,
+                documentFileId,
             });
-            toast.success("Certification added");
+            toast.success(certFile ? "Certification added with file" : "Certification added");
             setCertName(""); setCertCategory("certification"); setCertStatus("active"); setCertAuthority(""); setCertDesc("");
+            setCertFile(null);
+            if (certFileRef.current) certFileRef.current.value = "";
             close();
         } catch (e) { devError("rfp:", e); toast.error(friendlyError(e, "We couldn't add that certification. Please try again.")); } finally { setIsCertSubmitting(false); }
     }
@@ -710,7 +772,7 @@ export default function RfpHubPage() {
 
                         {/* ═══ CERTIFICATIONS TAB ═══ */}
                         <Tabs.Panel id="certifications">
-                            <div className="flex flex-col gap-6">
+                            <div data-tour="rfp-certifications" className="flex flex-col gap-6">
                                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
                                     <div className="relative w-full sm:max-w-md">
                                         <InputBase type="text" size="md" placeholder="Search certifications..." className="w-full shadow-sm" icon={SearchLg} value={certSearch} onChange={(v: string) => setCertSearch(v)} />
@@ -742,6 +804,26 @@ export default function RfpHubPage() {
                                                             </div>
                                                             {formInput("Issuing Authority", certAuthority, setCertAuthority, "e.g. AICPA")}
                                                             {formTextarea("Description", certDesc, setCertDesc, "Details about the certification")}
+                                                            {/* Phase 9B — optional supporting document.
+                                                                Accepts PDF/PNG/JPG up to 10 MB; uploaded to Convex
+                                                                storage on submit and linked via documentFileId. */}
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-secondary mb-1.5">Document (optional)</label>
+                                                                <input
+                                                                    ref={certFileRef}
+                                                                    type="file"
+                                                                    accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                                                                    onChange={(e) => setCertFile(e.target.files?.[0] ?? null)}
+                                                                    className="block w-full text-sm text-secondary file:mr-3 file:rounded-md file:border-0 file:bg-secondary_subtle file:px-3 file:py-2 file:text-sm file:font-medium file:text-secondary hover:file:bg-secondary_hover"
+                                                                />
+                                                                <p className="mt-1 text-xs text-tertiary">PDF, PNG, or JPG. Max 10 MB.</p>
+                                                                {certFile && (
+                                                                    <div className="mt-2 flex items-center justify-between rounded-md border border-secondary px-3 py-2 text-sm">
+                                                                        <span className="truncate text-secondary">{certFile.name}</span>
+                                                                        <button type="button" className="text-xs font-medium text-error-primary hover:underline" onClick={() => { setCertFile(null); if (certFileRef.current) certFileRef.current.value = ""; }}>Remove</button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </SlideoutMenu.Content>
                                                     <SlideoutMenu.Footer>
@@ -774,13 +856,14 @@ export default function RfpHubPage() {
                                         <div className="overflow-x-auto">
                                         <Table aria-label="Certifications" sortDescriptor={certSort} onSortChange={setCertSort}>
                                             <Table.Header>
-                                                <Table.Row>
-                                                    <Table.Head id="name" isRowHeader allowsSorting>Name</Table.Head>
-                                                    <Table.Head id="category" allowsSorting>Category</Table.Head>
-                                                    <Table.Head id="status" allowsSorting>Status</Table.Head>
-                                                    <Table.Head id="expiry" allowsSorting>Expiry</Table.Head>
-                                                    <Table.Head id="actions" className="w-12"></Table.Head>
-                                                </Table.Row>
+                                                    <Table.Row>
+                                                        <Table.Head id="name" isRowHeader allowsSorting>Name</Table.Head>
+                                                        <Table.Head id="category" allowsSorting>Category</Table.Head>
+                                                        <Table.Head id="status" allowsSorting>Status</Table.Head>
+                                                        <Table.Head id="expiry" allowsSorting>Expiry</Table.Head>
+                                                        <Table.Head id="file" className="w-24">Document</Table.Head>
+                                                        <Table.Head id="actions" className="w-12"></Table.Head>
+                                                    </Table.Row>
                                             </Table.Header>
                                             <Table.Body items={filteredCerts.map((item) => ({ ...item, id: item._id }))}>
                                                 {(item) => (
@@ -801,6 +884,16 @@ export default function RfpHubPage() {
                                                             <span className="text-secondary">
                                                                 {item.expiryDate ? formatDate(item.expiryDate) : "No Expiry"}
                                                             </span>
+                                                        </Table.Cell>
+                                                        <Table.Cell>
+                                                            {/* Phase 9B — View File link. The signed URL is fetched
+                                                                lazily per row so we don't issue a query for rows
+                                                                without an attached document. */}
+                                                            {item.documentFileId ? (
+                                                                <CertFileLink storageId={item.documentFileId} />
+                                                            ) : (
+                                                                <span className="text-xs text-tertiary">—</span>
+                                                            )}
                                                         </Table.Cell>
                                                         <Table.Cell>
                                                             <ButtonUtility size="sm" color="tertiary" icon={Trash01} aria-label="Delete" onClick={() => confirmAndDelete("certification", () => handleDeleteCert(item._id))} />

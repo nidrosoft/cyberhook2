@@ -180,17 +180,52 @@ export const create = mutation({
       throw new Error("Insufficient tokens");
     }
 
+    // Phase 9C — per-user quota check. If the user has a personal cap set by
+    // an admin, enforce it on top of the company-wide allocation. The error
+    // string is matched on the client to render a specific block message.
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser) throw new Error("User not found");
+
+    const now = Date.now();
+    let userQuotaUsed = targetUser.searchQuotaUsed ?? 0;
+    const userQuotaReset = targetUser.searchQuotaResetDate ?? 0;
+
+    // Lazy monthly rollover for the per-user counter. We reset to zero and
+    // schedule the next reset 30d out the first time we land past the boundary.
+    let nextResetDate = userQuotaReset;
+    if (userQuotaReset && now >= userQuotaReset) {
+      userQuotaUsed = 0;
+      nextResetDate = now + 30 * 24 * 60 * 60 * 1000;
+    }
+
+    if (
+      targetUser.searchQuotaMonthly !== undefined &&
+      userQuotaUsed >= targetUser.searchQuotaMonthly
+    ) {
+      throw new Error("USER_SEARCH_QUOTA_EXCEEDED");
+    }
+
     const searchId = await ctx.db.insert("searches", {
       companyId: args.companyId,
       userId: args.userId,
       domain: args.domain,
       status: "pending",
       tokensConsumed: 1,
-      createdAt: Date.now(),
+      createdAt: now,
     });
 
     await ctx.db.patch(args.companyId, {
       tokensUsed: company.tokensUsed + 1,
+      searchesUsed: (company.searchesUsed ?? 0) + 1,
+    });
+
+    // Always increment the user counter so admins can see usage even for
+    // users on the default (inherited) plan. Only the cap is conditional.
+    await ctx.db.patch(args.userId, {
+      searchQuotaUsed: userQuotaUsed + 1,
+      searchQuotaResetDate:
+        nextResetDate || now + 30 * 24 * 60 * 60 * 1000,
+      updatedAt: now,
     });
 
     return searchId;

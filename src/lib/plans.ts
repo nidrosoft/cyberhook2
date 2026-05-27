@@ -9,6 +9,8 @@ export interface PlanEntitlements {
   name: string;
   price: number;
   priceLabel: string;
+  yearlyPrice: number;
+  yearlyPriceLabel: string;
   maxUsers: number;
   searchesPerMonth: number;
   reportsPerMonth: number; // -1 = unlimited
@@ -21,6 +23,25 @@ export interface PlanEntitlements {
   features: string[];
   badge?: string;
   isDefault?: boolean;
+  // Stripe price IDs — live keys. Prefer env-driven overrides so a staging
+  // environment can swap them without code changes (kept inline as fallback
+  // because Convex actions and the React bundle both need to reach them).
+  stripePriceId: string;
+  stripeYearlyPriceId: string;
+  /** Next-tier upgrade target. `null` for the top plan. */
+  upgradePath: PlanTier | null;
+}
+
+/**
+ * Returns the Stripe price ID for a plan, preferring env overrides when
+ * present (e.g. `NEXT_PUBLIC_STRIPE_PRICE_GROWTH_MONTHLY`). Falls back to
+ * the inlined live-mode value so existing deployments keep working.
+ */
+function envOr(envKey: string, fallback: string): string {
+  if (typeof process !== "undefined" && process.env?.[envKey]) {
+    return process.env[envKey] as string;
+  }
+  return fallback;
 }
 
 export const PLANS: Record<PlanTier, PlanEntitlements> = {
@@ -29,6 +50,8 @@ export const PLANS: Record<PlanTier, PlanEntitlements> = {
     name: "Solo",
     price: 99,
     priceLabel: "$99",
+    yearlyPrice: 950,
+    yearlyPriceLabel: "$950",
     maxUsers: 1,
     searchesPerMonth: 250,
     reportsPerMonth: 25,
@@ -45,12 +68,23 @@ export const PLANS: Record<PlanTier, PlanEntitlements> = {
       "Built-in knowledge base to support outreach",
       "Ideal for individuals building pipeline",
     ],
+    stripePriceId: envOr(
+      "NEXT_PUBLIC_STRIPE_PRICE_SOLO_MONTHLY",
+      "price_1TILtWBs6XEduMNFnbOxNXbH",
+    ),
+    stripeYearlyPriceId: envOr(
+      "NEXT_PUBLIC_STRIPE_PRICE_SOLO_YEARLY",
+      "price_1TILtWBs6XEduMNFmuGWVEav",
+    ),
+    upgradePath: "growth",
   },
   growth: {
     id: "growth",
     name: "Growth",
     price: 299,
     priceLabel: "$299",
+    yearlyPrice: 2870,
+    yearlyPriceLabel: "$2,870",
     maxUsers: 3,
     searchesPerMonth: 1000,
     reportsPerMonth: 100,
@@ -70,12 +104,26 @@ export const PLANS: Record<PlanTier, PlanEntitlements> = {
       "Monitor more domains and opportunities",
       "Built for consistent pipeline and deal flow",
     ],
+    // Phase 4: replaced the legacy $199 / $1910 prices that Stripe was
+    // returning when "Upgrade to Growth" was clicked. The new IDs below
+    // correspond to the documented $299 / $2,870 amounts.
+    stripePriceId: envOr(
+      "NEXT_PUBLIC_STRIPE_PRICE_GROWTH_MONTHLY",
+      "price_1TX5UhBs6XEduMNFOA2eAQ3S",
+    ),
+    stripeYearlyPriceId: envOr(
+      "NEXT_PUBLIC_STRIPE_PRICE_GROWTH_YEARLY",
+      "price_1TX5UkBs6XEduMNFVjaQeoCJ",
+    ),
+    upgradePath: "scale",
   },
   scale: {
     id: "scale",
     name: "Scale",
     price: 499,
     priceLabel: "$499",
+    yearlyPrice: 4790,
+    yearlyPriceLabel: "$4,790",
     maxUsers: 10,
     searchesPerMonth: 5000,
     reportsPerMonth: -1, // unlimited
@@ -93,8 +141,39 @@ export const PLANS: Record<PlanTier, PlanEntitlements> = {
       "Priority access to integrations and features",
       "Designed for aggressive growth and expansion",
     ],
+    stripePriceId: envOr(
+      "NEXT_PUBLIC_STRIPE_PRICE_SCALE_MONTHLY",
+      "price_1TILtXBs6XEduMNFxtWYdxHH",
+    ),
+    stripeYearlyPriceId: envOr(
+      "NEXT_PUBLIC_STRIPE_PRICE_SCALE_YEARLY",
+      "price_1TILtXBs6XEduMNFY0oTCnSN",
+    ),
+    upgradePath: null,
   },
 };
+
+/**
+ * Map a Stripe price ID back to a plan tier. Used by webhook handlers and
+ * post-checkout sync code to figure out which plan the customer paid for.
+ * Returns `null` if the price isn't one of ours (e.g. legacy/archived).
+ */
+export function getPlanFromStripePriceId(priceId: string): PlanTier | null {
+  for (const tier of PLAN_ORDER) {
+    const p = PLANS[tier];
+    if (p.stripePriceId === priceId || p.stripeYearlyPriceId === priceId) return tier;
+  }
+  return null;
+}
+
+/**
+ * Returns the next-tier plan, or `null` if already on the top tier.
+ * Equivalent to looking up `PLANS[current].upgradePath`.
+ */
+export function getNextPlan(current: PlanTier): PlanEntitlements | null {
+  const next = PLANS[current].upgradePath;
+  return next ? PLANS[next] : null;
+}
 
 export const PLAN_ORDER: PlanTier[] = ["solo", "growth", "scale"];
 export const DEFAULT_PLAN: PlanTier = "growth";

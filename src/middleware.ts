@@ -12,6 +12,10 @@ const isPublicRoute = createRouteMatcher([
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
+// Phase 3: the accept-invite page handles its own auth and onboarding side
+// effects (it calls setOnboardingComplete after a successful join). We let it
+// through the middleware so invited users aren't bounced back to /onboarding.
+const isAcceptInviteRoute = createRouteMatcher(["/accept-invite(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
   // CVE-2025-29927: Block middleware bypass attempts
@@ -39,7 +43,7 @@ export default clerkMiddleware(async (auth, req) => {
   const metadata = sessionClaims?.metadata as Record<string, unknown> | undefined;
   const onboardingComplete = metadata?.onboardingComplete === true;
 
-  if (!onboardingComplete && !isAdminRoute(req) && !isOnboardingRoute(req)) {
+  if (!onboardingComplete && !isAdminRoute(req) && !isOnboardingRoute(req) && !isAcceptInviteRoute(req)) {
     return NextResponse.redirect(new URL("/onboarding", req.url));
   }
 

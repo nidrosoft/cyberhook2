@@ -11,6 +11,7 @@ import { Button as AriaButton, Dialog as AriaDialog, DialogTrigger as AriaDialog
 import { AvatarLabelGroup } from "@/components/base/avatar/avatar-label-group";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
+import { TourMenuItem } from "@/components/walkthrough/tour-menu-item";
 import { cx } from "@/utils/cx";
 
 export const NavAccountMenu = ({
@@ -62,6 +63,8 @@ export const NavAccountMenu = ({
                 <div className="flex flex-col gap-0.5 py-1.5">
                     <NavAccountCardMenuItem label="View profile" icon={User01} href="/settings?tab=profile" />
                     <NavAccountCardMenuItem label="Account settings" icon={Settings01} href="/settings" />
+                    {/* Phase 10 — Restart guided tour from anywhere. */}
+                    <TourMenuItem />
                     {/* Documentation link intentionally hidden until the docs
                         site is live (orange item 18.1). Re-enable with the
                         correct URL once Notion/GitBook/internal docs are ready. */}

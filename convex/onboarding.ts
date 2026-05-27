@@ -3,6 +3,7 @@ import { mutation, action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { getPlanLimits, getTokenAllocationForPlan, DEFAULT_PLAN } from "./lib/plans";
 import type { PlanTier } from "./lib/plans";
+import { generateInviteToken } from "./invitations";
 
 function requireText(value: string, message: string) {
   if (!value || !value.trim()) {
@@ -190,6 +191,7 @@ export const completeOnboarding = mutation({
 
       for (const email of args.teamEmails) {
         if (email && email.trim() && email !== args.email) {
+          const inviteToken = generateInviteToken();
           const invitationId = await ctx.db.insert("invitations", {
             companyId,
             email: email.trim().toLowerCase(),
@@ -199,6 +201,7 @@ export const completeOnboarding = mutation({
             expiresAt,
             createdAt: now,
             emailDeliveryStatus: "pending",
+            inviteToken,
           });
 
           // Send invite email to each team member
@@ -208,6 +211,7 @@ export const completeOnboarding = mutation({
             companyName: args.companyName,
             inviteeEmail: email.trim().toLowerCase(),
             role: "sales_rep",
+            inviteToken,
           });
         }
       }

@@ -343,7 +343,7 @@ export const extractFromUrl = action({
       try {
         response = await fetch(url, {
           headers: {
-            "User-Agent": "CyberHook-Bot/1.0",
+            "User-Agent": "CyberHook-AI-Bot/1.0",
             Accept: "text/html,application/xhtml+xml,text/plain",
           },
           signal: controller.signal,
