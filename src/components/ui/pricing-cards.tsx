@@ -28,7 +28,7 @@ const planMarketing: Record<PlanTier, {
       { text: "Email Support", icon: <Headphones size={18} /> },
     ],
     includes: [
-      "Solo includes:",
+      "Starter includes:",
       "Live Search & Exposure Reports",
       "Live Leads Discovery",
       "3 Watchlist Domains",
@@ -44,7 +44,7 @@ const planMarketing: Record<PlanTier, {
       { text: "Priority Support", icon: <Headphones size={18} /> },
     ],
     includes: [
-      "Everything in Solo, plus:",
+      "Everything in Starter, plus:",
       "AI Email Campaigns",
       "CRM Integrations",
       "10 Watchlist Domains",

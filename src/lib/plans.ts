@@ -47,7 +47,7 @@ function envOr(envKey: string, fallback: string): string {
 export const PLANS: Record<PlanTier, PlanEntitlements> = {
   solo: {
     id: "solo",
-    name: "Solo",
+    name: "Starter",
     price: 99,
     priceLabel: "$99",
     yearlyPrice: 950,
@@ -93,7 +93,7 @@ export const PLANS: Record<PlanTier, PlanEntitlements> = {
     integrations: true,
     whiteLabel: true,
     tagline: "For teams ready to scale outreach and close more deals",
-    marketingDescription: "Everything in Solo, plus:",
+    marketingDescription: "Everything in Starter, plus:",
     badge: "Most Popular",
     isDefault: true,
     features: [
@@ -119,7 +119,7 @@ export const PLANS: Record<PlanTier, PlanEntitlements> = {
   },
   scale: {
     id: "scale",
-    name: "Scale",
+    name: "Enterprise",
     price: 499,
     priceLabel: "$499",
     yearlyPrice: 4790,

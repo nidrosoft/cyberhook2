@@ -77,7 +77,10 @@ function baseLayout(content: string): string {
 <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f9fafb;">
   <div style="max-width:560px;margin:40px auto;background:#ffffff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
     <div style="padding:32px 32px 0;">
-      <img src="https://cyberhook.ai/logo.png" alt="CyberHook AI" height="28" style="display:block;margin-bottom:24px;" />
+      <!-- Text wordmark instead of a hosted image: many clients block remote
+           images by default, and the marketing site has no logo.png asset, so
+           a styled text mark renders reliably everywhere. -->
+      <div style="margin-bottom:24px;font-size:20px;font-weight:700;letter-spacing:-0.02em;color:#7c3aed;">CyberHook<span style="color:#111827;">&nbsp;AI</span></div>
     </div>
     <div style="padding:0 32px 32px;">
       ${content}
