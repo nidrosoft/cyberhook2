@@ -81,7 +81,7 @@ import { siGmail, siGooglecalendar, siHubspot } from "simple-icons";
 import { BrandLogo } from "@/components/integrations/brand-logo";
 import type { SimpleIcon } from "simple-icons";
 
-type IntegrationCategory = "Payments" | "Email" | "Calendar" | "CRM" | "Messaging" | "Social" | "PSA / RMM";
+type IntegrationCategory = "Payments" | "Email" | "Calendar" | "CRM" | "Messaging" | "Social";
 
 type Integration = {
     name: string;
@@ -104,8 +104,7 @@ type Integration = {
         | "ghl"
         | "teams"
         | "slack"
-        | "linkedin"
-        | "connectwise";
+        | "linkedin";
     available: boolean;
 };
 
@@ -124,6 +123,32 @@ const MICROSOFT_ICON: SimpleIcon = {
     license: undefined,
 };
 
+// Slack and LinkedIn were also removed from Simple Icons over trademark
+// concerns. We reproduce their official single-path marks here (same
+// approach as MICROSOFT_ICON) so they render as real brand logos instead
+// of monograms. Rendered monochrome in the official brand color.
+const SLACK_ICON: SimpleIcon = {
+    title: "Slack",
+    slug: "slack",
+    hex: "4A154B",
+    source: "https://slack.com/media-kit",
+    svg: "",
+    path: "M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.528 2.528 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.528 2.528 0 0 1 2.521-2.52 2.528 2.528 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.685 8.834a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.52-2.521V2.522A2.528 2.528 0 0 1 15.164 0a2.528 2.528 0 0 1 2.521 2.522v6.312zM15.164 18.956a2.528 2.528 0 0 1 2.521 2.522A2.528 2.528 0 0 1 15.164 24a2.528 2.528 0 0 1-2.52-2.522v-2.522h2.52zM15.164 17.685a2.528 2.528 0 0 1-2.52-2.52 2.528 2.528 0 0 1 2.52-2.521h6.314A2.528 2.528 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.52h-6.314z",
+    guidelines: undefined,
+    license: undefined,
+};
+
+const LINKEDIN_ICON: SimpleIcon = {
+    title: "LinkedIn",
+    slug: "linkedin",
+    hex: "0A66C2",
+    source: "https://brand.linkedin.com",
+    svg: "",
+    path: "M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z",
+    guidelines: undefined,
+    license: undefined,
+};
+
 // Flat list rendered in a single 3-column grid. Category is shown as a small
 // label inside each card so we keep the grouping context without breaking
 // the row-of-three layout the way per-category sub-grids did.
@@ -134,16 +159,15 @@ const MICROSOFT_ICON: SimpleIcon = {
 // the new OAuth Connect flow renders the live button. Other providers
 // stay gated until their OAuth implementations ship.
 const integrations: Integration[] = [
-    { name: "Outlook", category: "Email", description: "Send AI Agent emails from your Microsoft Outlook account", icon: MICROSOFT_ICON, iconColor: "#0078D4", tileColor: "bg-[#EFF6FC]", provider: "outlook_email", available: true },
+    { name: "Outlook", category: "Email", description: "Send AI Agent emails from your Microsoft Outlook account", icon: MICROSOFT_ICON, iconColor: "#0078D4", tileColor: "bg-[#E5F1FB]", provider: "outlook_email", available: true },
     { name: "Gmail", category: "Email", description: "Sync emails and contacts from Google Workspace", icon: siGmail, tileColor: "bg-[#FCE8E6]", provider: "gmail", available: false },
-    { name: "Outlook Calendar", category: "Calendar", description: "Sync meetings and events from Outlook Calendar", icon: MICROSOFT_ICON, iconColor: "#0078D4", tileColor: "bg-[#EFF6FC]", provider: "outlook_calendar", available: false },
+    { name: "Outlook Calendar", category: "Calendar", description: "Sync meetings and events from Outlook Calendar", icon: MICROSOFT_ICON, iconColor: "#0078D4", tileColor: "bg-[#E5F1FB]", provider: "outlook_calendar", available: false },
     { name: "Google Calendar", category: "Calendar", description: "Sync meetings and events from Google Calendar", icon: siGooglecalendar, tileColor: "bg-[#E8F0FE]", provider: "google_calendar", available: false },
-    { name: "HubSpot", category: "CRM", description: "Push leads to HubSpot as contacts and companies", icon: siHubspot, tileColor: "bg-[#FFF1EC]", provider: "hubspot", available: true },
-    { name: "GoHighLevel", category: "CRM", description: "Sync leads and pipeline data with GHL", monogram: "GHL", tileColor: "bg-[#E8F8F0]", provider: "ghl", available: false },
-    { name: "Microsoft Teams", category: "Messaging", description: "Send notifications and alerts to Teams channels", icon: MICROSOFT_ICON, iconColor: "#4B53BC", tileColor: "bg-[#EEEFFA]", provider: "teams", available: false },
-    { name: "Slack", category: "Messaging", description: "Send notifications and alerts to Slack channels", monogram: "Sl", tileColor: "bg-[#F4EAF5]", provider: "slack", available: false },
-    { name: "LinkedIn", category: "Social", description: "Enrich leads and automate outreach via LinkedIn", monogram: "in", tileColor: "bg-[#E7F1F9]", provider: "linkedin", available: false },
-    { name: "ConnectWise", category: "PSA / RMM", description: "Sync tickets, contacts, and companies with ConnectWise Manage", monogram: "CW", tileColor: "bg-[#E6F1F9]", provider: "connectwise", available: false },
+    { name: "HubSpot", category: "CRM", description: "Push leads to HubSpot as contacts and companies", icon: siHubspot, tileColor: "bg-[#FFEDE5]", provider: "hubspot", available: true },
+    { name: "GoHighLevel", category: "CRM", description: "Sync leads and pipeline data with GHL", monogram: "GHL", tileColor: "bg-[#E6F7F0]", provider: "ghl", available: false },
+    { name: "Microsoft Teams", category: "Messaging", description: "Send notifications and alerts to Teams channels", icon: MICROSOFT_ICON, iconColor: "#4B53BC", tileColor: "bg-[#ECEDFA]", provider: "teams", available: false },
+    { name: "Slack", category: "Messaging", description: "Send notifications and alerts to Slack channels", icon: SLACK_ICON, tileColor: "bg-[#F6EAF6]", provider: "slack", available: false },
+    { name: "LinkedIn", category: "Social", description: "Enrich leads and automate outreach via LinkedIn", icon: LINKEDIN_ICON, tileColor: "bg-[#E5F0FB]", provider: "linkedin", available: false },
 ];
 
 function formatRole(role: string): string {

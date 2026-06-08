@@ -109,7 +109,7 @@ export const HeaderNavigationBase = ({
     hideBorder = false,
 }: HeaderNavigationBaseProps) => {
     const router = useRouter();
-    const { user, clerkUser } = useCurrentUser();
+    const { user, clerkUser, isConvexAuthenticated } = useCurrentUser();
     const { tokensRemaining, tokenAllocation } = useCompany();
     const avatarSrc = user?.imageUrl ?? clerkUser?.imageUrl ?? "";
     const avatarAlt = user ? `${user.firstName} ${user.lastName}` : clerkUser?.fullName ?? "User";
@@ -118,14 +118,16 @@ export const HeaderNavigationBase = ({
     const tokenPercent = tokensTotal > 0 ? Math.round((tokensLeft / tokensTotal) * 100) : 0;
     const activeSubNavItems = subItems || items.find((item) => item.current && item.items && item.items.length > 0)?.items;
 
-    // Real notifications from Convex
+    // Real notifications from Convex. These hit `requireAuth`, so gate on the
+    // verified Convex auth token (not just `user._id`, which resolves from the
+    // auth-less getByClerkId query before the token attaches).
     const notifications = useQuery(
         api.notifications.getRecent,
-        user?._id ? { userId: user._id, limit: 15 } : "skip"
+        isConvexAuthenticated && user?._id ? { userId: user._id, limit: 15 } : "skip"
     );
     const unreadCount = useQuery(
         api.notifications.getUnreadCount,
-        user?._id ? { userId: user._id } : "skip"
+        isConvexAuthenticated && user?._id ? { userId: user._id } : "skip"
     );
     const markAsRead = useMutation(api.notifications.markAsRead);
     const markAllAsRead = useMutation(api.notifications.markAllAsRead);

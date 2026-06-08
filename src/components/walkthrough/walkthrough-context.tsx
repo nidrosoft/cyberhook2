@@ -103,7 +103,13 @@ export function WalkthroughProvider({ children }: ProviderProps) {
     const pathname = usePathname();
     const currentUser = useCurrentUser();
 
-    const queryProgress = useQuery(api.tour.getTourProgress);
+    // `tour.getTourProgress` calls `requireAuth`. Skip until the Convex auth
+    // token is verified, otherwise it throws "Unauthorized" during the
+    // post-login / refresh window and trips the global error boundary.
+    const queryProgress = useQuery(
+        api.tour.getTourProgress,
+        currentUser.isConvexAuthenticated ? {} : "skip"
+    );
     const updateProgress = useMutation(api.tour.updateTourProgress);
 
     const isLoading = queryProgress === undefined;

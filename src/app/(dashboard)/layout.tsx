@@ -31,11 +31,14 @@ const headerItems: any[] = [];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
-    const { companyId } = useCurrentUser();
+    const { companyId, isConvexAuthenticated } = useCurrentUser();
 
+    // `tasks.getStats` calls `requireAuth`, so only fire it once the Convex
+    // auth token is verified. Gating on `companyId` alone races the token
+    // attachment and throws "Unauthorized", which trips the error boundary.
     const taskStats = useQuery(
         api.tasks.getStats,
-        companyId ? { companyId } : "skip"
+        isConvexAuthenticated && companyId ? { companyId } : "skip"
     );
 
     const pendingTasks = taskStats?.pending ?? 0;
