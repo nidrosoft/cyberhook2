@@ -5,7 +5,6 @@ import {
   RedrokRequestError,
   authenticateRedrokRequest,
 } from "./lib/redrok/auth";
-import { encryptRedrokPassword } from "./lib/redrok/crypto";
 import {
   type FallbackLiveLead,
   type RedrokErrorCode,
@@ -450,9 +449,9 @@ async function executeCompanyRedrokEndpoint<T>(
         const result = await authenticateRedrokRequest(email, password);
         if (result.ok && company?.usesLegacyPassword) {
           try {
-            await ctx.runMutation(internal.redrokCredentials.migrateLegacyPassword, {
+            await ctx.runAction(internal.redrokCredentialActions.migrateLegacyPassword, {
               companyId: companyId as any,
-              encryptedPassword: encryptRedrokPassword(password),
+              password,
             });
           } catch {
             // Authentication succeeded; migration can retry on a later request.
@@ -588,9 +587,9 @@ export const liveLeads = action({
           const result = await authenticateRedrokForLiveLeads(email, password);
           if (result.ok && company?.usesLegacyPassword) {
             try {
-              await ctx.runMutation(internal.redrokCredentials.migrateLegacyPassword, {
+              await ctx.runAction(internal.redrokCredentialActions.migrateLegacyPassword, {
                 companyId: args.companyId,
-                encryptedPassword: encryptRedrokPassword(password),
+                password,
               });
             } catch {
               // Authentication succeeded; migration can retry on a later request.

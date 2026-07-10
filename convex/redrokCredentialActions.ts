@@ -223,6 +223,19 @@ export const resolveCredentials = internalAction({
     },
 });
 
+export const migrateLegacyPassword = internalAction({
+    args: {
+        companyId: v.id("companies"),
+        password: v.string(),
+    },
+    handler: async (ctx, args): Promise<{ migrated: boolean }> => {
+        return await ctx.runMutation(internal.redrokCredentials.migrateLegacyPassword, {
+            companyId: args.companyId,
+            encryptedPassword: encryptRedrokPassword(args.password),
+        });
+    },
+});
+
 export const testCredentials = action({
     args: { email: v.string(), password: v.string() },
     handler: async (ctx, args) => {
