@@ -76,8 +76,6 @@ export interface Company {
     status: "trial" | "active" | "past_due" | "cancelled" | "pending_approval";
     // Redrok API
     redrokEmail?: string;
-    redrokToken?: string;
-    redrokTokenExpiresAt?: number;
     // Timestamps
     createdAt: number;
     updatedAt?: number;

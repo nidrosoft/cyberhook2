@@ -156,6 +156,25 @@ export default defineSchema({
     redrokPassword: v.optional(v.string()),
     redrokToken: v.optional(v.string()),
     redrokTokenExpiresAt: v.optional(v.number()),
+    redrokPasswordEncrypted: v.optional(v.string()),
+    redrokCredentialSource: v.optional(
+      v.union(v.literal("company"), v.literal("shared"))
+    ),
+    redrokHealthStatus: v.optional(
+      v.union(
+        v.literal("unknown"),
+        v.literal("healthy"),
+        v.literal("auth_invalid"),
+        v.literal("credentials_missing"),
+        v.literal("rate_limited"),
+        v.literal("unavailable")
+      )
+    ),
+    redrokLastHealthCheckAt: v.optional(v.number()),
+    redrokLastHealthErrorCode: v.optional(v.string()),
+    redrokLastHealthErrorMessage: v.optional(v.string()),
+    redrokLastAlertAt: v.optional(v.number()),
+    redrokLastRecoveryAlertAt: v.optional(v.number()),
     // Owner reference
     ownerId: v.optional(v.id("users")),
     status: v.union(
@@ -379,6 +398,7 @@ export default defineSchema({
     domain: v.optional(v.string()),
     industry: v.optional(v.string()),
     country: v.optional(v.string()),
+    normalizedCountry: v.optional(v.string()),
     region: v.optional(v.string()),
     attackDate: v.number(),
     ransomwareGroup: v.optional(v.string()),
@@ -408,6 +428,8 @@ export default defineSchema({
     .index("by_country", ["country"])
     .index("by_incidentType", ["incidentType"])
     .index("by_source", ["source"])
+    .index("by_source_incidentType_attackDate", ["source", "incidentType", "attackDate"])
+    .index("by_source_incidentType_country_attackDate", ["source", "incidentType", "normalizedCountry", "attackDate"])
     // Compound index for dedup lookups by (source, companyName, attackDate).
     // Used by ransomHub.internalCreate / internalBulkCreate so we can find a
     // duplicate via a point lookup instead of scanning every row from the

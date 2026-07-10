@@ -14,6 +14,44 @@
  *     the team has been notified if there's nothing actionable.
  *   - Keep the copy short — one or two sentences max.
  */
+import type { RedrokErrorCode, RedrokHealthStatus } from "../../convex/lib/redrok/resilience";
+
+export type RedrokUserMessage = {
+    title: string;
+    canRetry: boolean;
+    adminActionRequired: boolean;
+};
+
+const REDROK_USER_MESSAGES: Record<RedrokErrorCode, Omit<RedrokUserMessage, "canRetry">> = {
+    REDROK_AUTH_INVALID: { title: "Redrok needs to be reconnected", adminActionRequired: true },
+    REDROK_CREDENTIALS_MISSING: { title: "Redrok needs to be connected", adminActionRequired: true },
+    REDROK_CREDENTIALS_UNREADABLE: { title: "Redrok needs to be reconnected", adminActionRequired: true },
+    REDROK_RATE_LIMITED: { title: "Live exposure data is temporarily rate limited", adminActionRequired: false },
+    REDROK_TIMEOUT: { title: "Live exposure data took too long to respond", adminActionRequired: false },
+    REDROK_UNAVAILABLE: { title: "Live exposure data is temporarily unavailable", adminActionRequired: false },
+    REDROK_TOKEN_EXPIRED: { title: "Your Redrok session needs to be refreshed", adminActionRequired: false },
+    REDROK_UNKNOWN: { title: "Live exposure data could not be loaded", adminActionRequired: false },
+};
+
+export function getRedrokUserMessage(code: RedrokErrorCode, retryable: boolean): RedrokUserMessage {
+    const message = REDROK_USER_MESSAGES[code];
+    return { ...message, canRetry: retryable && !message.adminActionRequired };
+}
+
+export function getRedrokStatusPresentation(
+    healthStatus: RedrokHealthStatus,
+    connected: boolean,
+): { label: string; color: "success" | "warning" | "error" | "gray" } {
+    if (!connected || healthStatus === "credentials_missing") return { label: "Not connected", color: "gray" };
+    if (healthStatus === "healthy") return { label: "Connected", color: "success" };
+    if (healthStatus === "auth_invalid") return { label: "Needs attention", color: "error" };
+    if (healthStatus === "rate_limited" || healthStatus === "unavailable") return { label: "Degraded", color: "warning" };
+    return { label: "Checking", color: "gray" };
+}
+
+export function getLiveLeadSaveSource(isFallback: boolean): "ransom_hub" | "live_leads" {
+    return isFallback ? "ransom_hub" : "live_leads";
+}
 
 const PATTERNS: Array<{ test: RegExp; message: string }> = [
     // Auth / credentials — generic outage from the user's perspective.

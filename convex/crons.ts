@@ -40,4 +40,10 @@ crons.interval(
   internal.integrationsActions.refreshExpiring
 );
 
+crons.interval(
+  "redrok-credential-health",
+  { hours: 6 },
+  internal.redrokCredentialActions.healthCheckAll
+);
+
 export default crons;

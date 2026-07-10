@@ -10,7 +10,7 @@ import { useCurrentUser, useCompany, useTokens, useFileUpload, usePlanGate } fro
 import { useUpgradeModal } from "@/components/application/upgrade-modal/upgrade-modal";
 import { PlanGateBadge } from "@/components/application/upgrade-modal/upgrade-modal";
 import { getPlan } from "@/lib/plans";
-import { friendlyError } from "@/lib/friendly-errors";
+import { friendlyError, getRedrokStatusPresentation, getRedrokUserMessage } from "@/lib/friendly-errors";
 import { validateCompanyLogo } from "@/lib/logo-validation";
 import {
     PRIMARY_BUSINESS_MODEL_OPTIONS,
@@ -47,12 +47,13 @@ import { Avatar } from "@/components/base/avatar/avatar";
 import { Badge, BadgeWithIcon } from "@/components/base/badges/badges";
 import { Button } from "@/components/base/buttons/button";
 import { Form } from "@/components/base/form/form";
-import { InputBase, TextField } from "@/components/base/input/input";
+import { Input, InputBase, TextField } from "@/components/base/input/input";
 import { Label } from "@/components/base/input/label";
 import { Select } from "@/components/base/select/select";
 import { NativeSelect } from "@/components/base/select/select-native";
 import { Table, TableCard } from "@/components/application/table/table";
 import { ButtonUtility } from "@/components/base/buttons/button-utility";
+import { Dialog, Modal, ModalOverlay } from "@/components/application/modals/modal";
 import type { SortDescriptor } from "react-aria-components";
 
 // Phase 4E: "Plan & Billing" was split into a "Plan" tab (subscription
@@ -169,6 +170,75 @@ const integrations: Integration[] = [
     { name: "Slack", category: "Messaging", description: "Send notifications and alerts to Slack channels", icon: SLACK_ICON, tileColor: "bg-[#F6EAF6]", provider: "slack", available: false },
     { name: "LinkedIn", category: "Social", description: "Enrich leads and automate outreach via LinkedIn", icon: LINKEDIN_ICON, tileColor: "bg-[#E5F0FB]", provider: "linkedin", available: false },
 ];
+
+type RedrokCredentialModalProps = {
+    isOpen: boolean;
+    email: string;
+    password: string;
+    isBusy: boolean;
+    onEmailChange: (value: string) => void;
+    onPasswordChange: (value: string) => void;
+    onClose: () => void;
+    onTest: () => void;
+    onSave: () => void;
+};
+
+function RedrokCredentialModal({
+    isOpen,
+    email,
+    password,
+    isBusy,
+    onEmailChange,
+    onPasswordChange,
+    onClose,
+    onTest,
+    onSave,
+}: RedrokCredentialModalProps) {
+    const hasCredentials = email.trim().length > 0 && password.length > 0;
+
+    return (
+        <ModalOverlay isOpen={isOpen} isDismissable={!isBusy} onOpenChange={(open) => !open && onClose()}>
+            <Modal>
+                <Dialog aria-label="Connect Redrok">
+                    <div className="w-full max-w-lg rounded-2xl border border-secondary bg-primary shadow-xl">
+                        <div className="flex items-start justify-between gap-4 border-b border-secondary px-6 py-5">
+                            <div>
+                                <h2 className="text-lg font-semibold text-primary">Connect Redrok</h2>
+                                <p className="mt-1 text-sm text-tertiary">Credentials are encrypted and the password is never displayed again.</p>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Close Redrok credentials"
+                                onClick={onClose}
+                                disabled={isBusy}
+                                className="rounded-lg p-1.5 text-quaternary transition duration-100 ease-linear hover:bg-primary_hover hover:text-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <XClose className="size-5" aria-hidden="true" />
+                            </button>
+                        </div>
+                        <div className="flex flex-col gap-4 px-6 py-5">
+                            <Input label="Redrok email" type="email" autoComplete="username" value={email} onChange={onEmailChange} placeholder="analyst@company.com" isRequired />
+                            <Input
+                                label="Redrok password"
+                                type="password"
+                                autoComplete="current-password"
+                                value={password}
+                                onChange={onPasswordChange}
+                                hint="Write-only: this field is cleared after every test, save attempt, or close."
+                                isRequired
+                            />
+                        </div>
+                        <div className="flex items-center justify-end gap-3 border-t border-secondary px-6 py-4">
+                            <Button color="secondary" size="md" onClick={onClose} isDisabled={isBusy}>Cancel</Button>
+                            <Button color="secondary" size="md" onClick={onTest} isDisabled={!hasCredentials || isBusy}>Test credentials</Button>
+                            <Button color="primary" size="md" onClick={onSave} isDisabled={!hasCredentials || isBusy} isLoading={isBusy}>Save connection</Button>
+                        </div>
+                    </div>
+                </Dialog>
+            </Modal>
+        </ModalOverlay>
+    );
+}
 
 function formatRole(role: string): string {
     switch (role) {
@@ -553,6 +623,11 @@ function SettingsPageContent() {
     const [inviteName, setInviteName] = useState("");
     const [inviteRole, setInviteRole] = useState<"sales_rep" | "sales_admin" | "billing">("sales_rep");
     const [isInviting, setIsInviting] = useState(false);
+    const [isRedrokModalOpen, setIsRedrokModalOpen] = useState(false);
+    const [redrokEmail, setRedrokEmail] = useState("");
+    const [redrokPassword, setRedrokPassword] = useState("");
+    const [isTestingRedrok, setIsTestingRedrok] = useState(false);
+    const [isSavingRedrok, setIsSavingRedrok] = useState(false);
 
     // Location management
     const [showLocationForm, setShowLocationForm] = useState(false);
@@ -612,6 +687,59 @@ function SettingsPageContent() {
         companyId ? { companyId } : "skip",
     );
     const disconnectIntegration = useMutation(api.integrations.disconnect);
+    const redrokStatus = useQuery(api.redrokCredentials.getStatus, user ? {} : "skip");
+    const testRedrokCredentials = useAction(api.redrokCredentialActions.testCredentials);
+    const saveRedrokCredentials = useAction(api.redrokCredentialActions.saveCredentials);
+    const removeRedrokCredentials = useMutation(api.redrokCredentials.removeCredentials);
+
+    const closeRedrokModal = useCallback(() => {
+        setRedrokPassword("");
+        setRedrokEmail("");
+        setIsRedrokModalOpen(false);
+    }, []);
+
+    const handleTestRedrok = useCallback(async () => {
+        if (!redrokEmail.trim() || !redrokPassword) return;
+        setIsTestingRedrok(true);
+        try {
+            const result = await testRedrokCredentials({ email: redrokEmail.trim(), password: redrokPassword });
+            if (result.ok) toast.success("Redrok credentials are valid.");
+            else toast.error(getRedrokUserMessage(result.code, result.retryable).title);
+        } catch (error) {
+            toast.error(friendlyError(error, "We couldn't test those credentials. Please try again."));
+        } finally {
+            setRedrokPassword("");
+            setIsTestingRedrok(false);
+        }
+    }, [redrokEmail, redrokPassword, testRedrokCredentials]);
+
+    const handleSaveRedrok = useCallback(async () => {
+        if (!redrokEmail.trim() || !redrokPassword) return;
+        setIsSavingRedrok(true);
+        try {
+            const result = await saveRedrokCredentials({ email: redrokEmail.trim(), password: redrokPassword });
+            if (!result.ok) {
+                toast.error(getRedrokUserMessage(result.code, result.retryable).title);
+                return;
+            }
+            toast.success("Redrok connection saved.");
+            closeRedrokModal();
+        } catch (error) {
+            toast.error(friendlyError(error, "We couldn't save the Redrok connection. Please try again."));
+        } finally {
+            setRedrokPassword("");
+            setIsSavingRedrok(false);
+        }
+    }, [closeRedrokModal, redrokEmail, redrokPassword, saveRedrokCredentials]);
+
+    const handleDisconnectRedrok = useCallback(async () => {
+        try {
+            await removeRedrokCredentials({});
+            toast.success("Company Redrok credentials disconnected.");
+        } catch (error) {
+            toast.error(friendlyError(error, "We couldn't disconnect Redrok. Please try again."));
+        }
+    }, [removeRedrokCredentials]);
 
     const teamMembers = useQuery(
         api.users.getByCompanyId,
@@ -1076,9 +1204,25 @@ function SettingsPageContent() {
         }
         return filtered;
     }, [auditLogs, auditSearch, auditDateFilter, auditUserMap]);
+    const isSalesAdmin = user?.role === "sales_admin" && user.status === "approved";
+    const redrokBadge = getRedrokStatusPresentation(redrokStatus?.healthStatus ?? "unknown", redrokStatus?.connected ?? false);
+    const isRedrokBusy = isTestingRedrok || isSavingRedrok;
 
     return (
         <main className="min-w-0 flex-1 bg-primary pt-8 pb-12">
+            {isSalesAdmin && (
+                <RedrokCredentialModal
+                    isOpen={isRedrokModalOpen}
+                    email={redrokEmail}
+                    password={redrokPassword}
+                    isBusy={isRedrokBusy}
+                    onEmailChange={setRedrokEmail}
+                    onPasswordChange={setRedrokPassword}
+                    onClose={closeRedrokModal}
+                    onTest={handleTestRedrok}
+                    onSave={handleSaveRedrok}
+                />
+            )}
             <div className="flex flex-col gap-8">
                 <div className="flex flex-col gap-5 px-4 lg:px-8 max-w-[1600px] mx-auto w-full">
                     <div className="relative flex flex-col gap-5">
@@ -1887,6 +2031,44 @@ function SettingsPageContent() {
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    <div className="flex flex-col gap-4 rounded-xl border border-secondary bg-primary p-5 transition duration-100 ease-linear hover:border-brand">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand-secondary">
+                                                    <Zap className="size-5 text-fg-brand-secondary" aria-hidden="true" />
+                                                </div>
+                                                <div className="flex min-w-0 flex-col gap-0.5">
+                                                    <span className="font-semibold text-primary">Redrok</span>
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-tertiary">Data</span>
+                                                        <Badge color={redrokBadge.color} size="sm">{redrokStatus === undefined ? "Loading" : redrokBadge.label}</Badge>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <p className="text-sm text-tertiary">Power Live-Leads with credential-exposure company data.</p>
+                                        {redrokStatus?.connected && (
+                                            <div className="flex flex-col gap-1 text-xs text-tertiary">
+                                                <span>Credential source: <span className="font-medium text-secondary">{redrokStatus.credentialSource === "company" ? "Company" : "Shared"}</span></span>
+                                                {redrokStatus.emailMasked && <span>Connected as <span className="font-medium text-secondary">{redrokStatus.emailMasked}</span></span>}
+                                                {redrokStatus.lastHealthCheckAt && <span>Last checked {new Date(redrokStatus.lastHealthCheckAt).toLocaleString()}</span>}
+                                            </div>
+                                        )}
+                                        <div className="mt-auto flex flex-wrap gap-2 pt-2">
+                                            {isSalesAdmin ? (
+                                                <>
+                                                    <Button size="sm" color="primary" className="flex-1" iconLeading={Link01} onClick={() => setIsRedrokModalOpen(true)}>
+                                                        {redrokStatus?.credentialSource === "company" ? "Replace" : "Connect"}
+                                                    </Button>
+                                                    {redrokStatus?.credentialSource === "company" && (
+                                                        <Button size="sm" color="secondary-destructive" onClick={handleDisconnectRedrok}>Disconnect</Button>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <p className="text-xs text-tertiary">A Sales Admin manages this connection.</p>
+                                            )}
+                                        </div>
+                                    </div>
                                     {integrations.map((item) => {
                                         // Phase 7: Connection status flows in from
                                         // `companyIntegrations` (Convex query, see below).

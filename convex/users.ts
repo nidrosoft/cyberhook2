@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { requireAuth, assertCompanyAccess, requireRole, requireAdminAccess } from "./lib/auth";
 import { getPlanLimits } from "./lib/plans";
+import { toClientSafeCompany } from "./lib/company/projection";
 
 // ============================================
 // QUERIES
@@ -87,7 +88,10 @@ export const getCurrentUserWithCompany = query({
 
     const company = await ctx.db.get(user.companyId);
 
-    return { user, company };
+    return {
+      user,
+      company: company ? toClientSafeCompany(company) : null,
+    };
   },
 });
 

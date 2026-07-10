@@ -1,6 +1,11 @@
 import { v } from "convex/values";
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import { requireAuth } from "./lib/auth";
+
+export function normalizeIncidentCountry(country?: string): string | undefined {
+  const normalized = country?.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+  return normalized || undefined;
+}
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +87,41 @@ export const getRecent = query({
     }
 
     return incidents;
+  },
+});
+
+export const internalFallbackForLiveLeads = internalQuery({
+  args: {
+    days: v.number(),
+    country: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const cutoff = Date.now() - Math.max(0, args.days) * 24 * 60 * 60 * 1000;
+    const country = normalizeIncidentCountry(args.country);
+    if (country) {
+      return await ctx.db
+        .query("ransomIncidents")
+        .withIndex("by_source_incidentType_country_attackDate", (q) =>
+          q
+            .eq("source", "ransomware_live")
+            .eq("incidentType", "ransomware")
+            .eq("normalizedCountry", country)
+            .gte("attackDate", cutoff),
+        )
+        .order("desc")
+        .take(100);
+    }
+
+    return await ctx.db
+      .query("ransomIncidents")
+      .withIndex("by_source_incidentType_attackDate", (q) =>
+        q
+          .eq("source", "ransomware_live")
+          .eq("incidentType", "ransomware")
+          .gte("attackDate", cutoff),
+      )
+      .order("desc")
+      .take(100);
   },
 });
 
@@ -222,10 +262,20 @@ export const internalCreate = internalMutation({
       )
       .first();
 
-    if (existing) return existing._id;
+    if (existing) {
+      const normalizedCountry = normalizeIncidentCountry(args.country);
+      if (existing.normalizedCountry !== normalizedCountry) {
+        await ctx.db.patch(existing._id, {
+          normalizedCountry,
+          updatedAt: Date.now(),
+        });
+      }
+      return existing._id;
+    }
 
     const incidentId = await ctx.db.insert("ransomIncidents", {
       ...args,
+      normalizedCountry: normalizeIncidentCountry(args.country),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
@@ -274,15 +324,51 @@ export const internalBulkCreate = internalMutation({
         )
         .first();
 
-      if (existing) continue;
+      if (existing) {
+        const normalizedCountry = normalizeIncidentCountry(incident.country);
+        if (existing.normalizedCountry !== normalizedCountry) {
+          await ctx.db.patch(existing._id, {
+            normalizedCountry,
+            updatedAt: Date.now(),
+          });
+        }
+        continue;
+      }
 
       const id = await ctx.db.insert("ransomIncidents", {
         ...incident,
+        normalizedCountry: normalizeIncidentCountry(incident.country),
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
       ids.push(id);
     }
     return ids;
+  },
+});
+
+export const backfillNormalizedCountries = internalMutation({
+  args: { cursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("ransomIncidents").paginate({
+      cursor: args.cursor ?? null,
+      numItems: 100,
+    });
+    let updated = 0;
+    for (const incident of page.page) {
+      const normalizedCountry = normalizeIncidentCountry(incident.country);
+      if (incident.normalizedCountry === normalizedCountry) continue;
+      await ctx.db.patch(incident._id, {
+        normalizedCountry,
+        updatedAt: Date.now(),
+      });
+      updated += 1;
+    }
+    return {
+      processed: page.page.length,
+      updated,
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
   },
 });

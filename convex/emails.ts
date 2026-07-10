@@ -241,6 +241,41 @@ function adminPendingApprovalEmailTemplate(args: {
   };
 }
 
+function redrokHealthEmailTemplate(args: {
+  firstName: string;
+  companyName: string;
+  status: "unhealthy" | "recovered";
+  settingsUrl: string;
+  errorCode?: string;
+}): { subject: string; html: string } {
+  const recovered = args.status === "recovered";
+  const heading = recovered ? "Redrok integration recovered" : "Redrok integration needs attention";
+  const description = recovered
+    ? `CyberHook AI can connect to Redrok again for ${args.companyName}. Live credential-exposure searches are available.`
+    : `CyberHook AI could not verify the Redrok integration for ${args.companyName}. Review the integration settings to restore live credential-exposure searches.`;
+  const diagnostic = !recovered && args.errorCode
+    ? `<p style="margin:0 0 24px;font-size:13px;color:#6b7280;">Diagnostic code: <strong>${args.errorCode}</strong></p>`
+    : "";
+
+  return {
+    subject: recovered
+      ? `Redrok integration recovered for ${args.companyName}`
+      : `Action needed: Redrok integration for ${args.companyName}`,
+    html: baseLayout(`
+      <h1 style="margin:0 0 8px;font-size:22px;font-weight:600;color:#111827;">${heading}</h1>
+      <p style="margin:0 0 16px;font-size:15px;color:#6b7280;line-height:1.6;">Hi ${args.firstName || "there"},</p>
+      <p style="margin:0 0 24px;font-size:15px;color:#6b7280;line-height:1.6;">${description}</p>
+      ${diagnostic}
+      <a href="${args.settingsUrl}" style="display:inline-block;padding:12px 24px;background:#7c3aed;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
+        Review integration settings
+      </a>
+      <p style="margin:24px 0 0;font-size:13px;color:#9ca3af;">
+        You're receiving this because you're an approved Sales Admin. You can disable these emails in Settings → My details.
+      </p>
+    `),
+  };
+}
+
 function passwordResetEmailTemplate(args: {
   firstName: string;
   resetUrl: string;
@@ -503,6 +538,73 @@ export const sendAdminPendingApprovalEmailInternal = internalAction({
       } catch (err) {
         const message = err instanceof Error ? err.message : "unknown";
         console.error(`[sendAdminPendingApprovalEmail] failed for ${r.email}:`, message);
+      }
+    }
+    return { sent };
+  },
+});
+
+export const getRedrokHealthAlertRecipients = internalQuery({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const company = await ctx.db.get(args.companyId);
+    if (!company) return null;
+
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_companyId", (q) => q.eq("companyId", args.companyId))
+      .collect();
+
+    return {
+      companyName: company.name ?? "your company",
+      recipients: users
+        .filter(
+          (user) =>
+            user.role === "sales_admin" &&
+            user.status === "approved" &&
+            user.emailNotifications !== false,
+        )
+        .map((user) => ({ email: user.email, firstName: user.firstName })),
+    };
+  },
+});
+
+export const sendRedrokHealthAlertInternal = internalAction({
+  args: {
+    companyId: v.id("companies"),
+    status: v.union(v.literal("unhealthy"), v.literal("recovered")),
+    errorCode: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ sent: number }> => {
+    const data: {
+      companyName: string;
+      recipients: Array<{ email: string; firstName: string }>;
+    } | null = await ctx.runQuery(internal.emails.getRedrokHealthAlertRecipients, {
+      companyId: args.companyId,
+    });
+    if (!data) return { sent: 0 };
+
+    const settingsUrl = `${SITE_URL}/settings?tab=integrations`;
+    let sent = 0;
+    for (const recipient of data.recipients) {
+      const { subject, html } = redrokHealthEmailTemplate({
+        firstName: recipient.firstName,
+        companyName: data.companyName,
+        status: args.status,
+        settingsUrl,
+        errorCode: args.errorCode,
+      });
+      try {
+        await resend.sendEmail(ctx, {
+          from: FROM_TEAM,
+          to: recipient.email,
+          subject,
+          html,
+        });
+        sent += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown";
+        console.error(`[sendRedrokHealthAlertInternal] failed for ${recipient.email}:`, message);
       }
     }
     return { sent };

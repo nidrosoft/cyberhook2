@@ -63,7 +63,7 @@ export const latestBySource = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    const sources = ["ransomware_live", "hhs_ocr", "california_ag", "privacy_rights"];
+    const sources = ["ransomware_live", "hhs_ocr", "california_ag", "privacy_rights", "redrok_auth"];
     const rows = await Promise.all(
       sources.map((s) =>
         ctx.db

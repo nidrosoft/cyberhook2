@@ -233,6 +233,10 @@ export const NOTIFICATION_TYPES = {
   TOKENS_LOW: "billing.tokens_low",
   SUBSCRIPTION_EXPIRING: "billing.subscription_expiring",
   PAYMENT_FAILED: "billing.payment_failed",
+
+  // Integrations
+  REDROK_UNHEALTHY: "integration.redrok_unhealthy",
+  REDROK_RECOVERED: "integration.redrok_recovered",
   
   // System
   SYSTEM_ANNOUNCEMENT: "system.announcement",

@@ -46,14 +46,16 @@ import { TextArea } from "@/components/base/textarea/textarea";
 import { useCompany } from "@/hooks/use-company";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useReportConsumer } from "@/hooks/use-report-consumer";
-import { friendlyError } from "@/lib/friendly-errors";
+import { friendlyError, getLiveLeadSaveSource, getRedrokUserMessage } from "@/lib/friendly-errors";
 import { generateExposureReport } from "@/lib/pdf-report";
 import { ensureProtocol } from "@/utils/sanitize-url";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { RedrokCompany } from "../../../../convex/redrokApi";
+import type { FallbackLiveLead, RedrokErrorCode } from "../../../../convex/lib/redrok/resilience";
 
 type ExposureSeverity = "critical" | "high" | "medium" | "low" | "clean";
+type DiscoveredCompany = RedrokCompany | FallbackLiveLead;
 
 function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleDateString("en-US", {
@@ -202,7 +204,11 @@ export default function LiveLeadsPage() {
     const [discoverIndustry, setDiscoverIndustry] = useState("All");
     const [discoverSize, setDiscoverSize] = useState("All");
     const [isDiscovering, setIsDiscovering] = useState(false);
-    const [discoveredLeads, setDiscoveredLeads] = useState<RedrokCompany[]>([]);
+    const [discoveredLeads, setDiscoveredLeads] = useState<DiscoveredCompany[]>([]);
+    const [discoverSource, setDiscoverSource] = useState<"redrok" | "ransomware_live_fallback" | "none">("none");
+    const [isFallback, setIsFallback] = useState(false);
+    const [discoverErrorCode, setDiscoverErrorCode] = useState<RedrokErrorCode | undefined>();
+    const [discoverRetryable, setDiscoverRetryable] = useState(false);
     // `discoverError` is used only for hard upstream errors. The empty-
     // results case is handled by the inline empty state below the table.
     const [discoverError, setDiscoverError] = useState<string | null>(null);
@@ -389,6 +395,10 @@ export default function LiveLeadsPage() {
         setIsDiscovering(true);
         setDiscoverError(null);
         setDiscoveredLeads([]);
+        setDiscoverSource("none");
+        setIsFallback(false);
+        setDiscoverErrorCode(undefined);
+        setDiscoverRetryable(false);
         try {
             const result = await fetchLiveLeads({
                 companyId,
@@ -399,12 +409,22 @@ export default function LiveLeadsPage() {
                 // (Redrok's /search/regions endpoint is broken upstream).
                 region: discoverState,
             });
+            setDiscoverSource(result.source);
+            setIsFallback(result.isFallback);
+            setDiscoverErrorCode(result.errorCode);
+            setDiscoverRetryable(result.retryable ?? false);
             if (result.success) {
                 setDiscoveredLeads(result.companies);
+                if (result.isFallback) {
+                    setDiscoverCity("");
+                    setDiscoverSize("All");
+                }
                 // Empty-result case is rendered as a friendly empty state
                 // below the table; we no longer surface it as an error.
             } else {
-                setDiscoverError(friendlyError(result.error, "We couldn't load leads right now. Please try again or contact support."));
+                setDiscoverError(result.errorCode
+                    ? getRedrokUserMessage(result.errorCode, result.retryable ?? false).title
+                    : friendlyError(result.error, "We couldn't load leads right now. Please try again or contact support."));
             }
         } catch (error) {
             setDiscoverError(friendlyError(error, "We couldn't load leads right now. Please try again or contact support."));
@@ -413,8 +433,9 @@ export default function LiveLeadsPage() {
         }
     }
 
-    async function handleSaveDiscoveredLead(company: RedrokCompany) {
+    async function handleSaveDiscoveredLead(company: DiscoveredCompany) {
         if (!companyId || !user) return;
+        const fallbackLead = "source" in company && company.source === "ransomware_live_fallback";
         try {
             await createLead({
                 companyId,
@@ -426,7 +447,8 @@ export default function LiveLeadsPage() {
                 region: company.region || undefined,
                 employeeCount: company.size || undefined,
                 linkedinUrl: company.linkedin_url || undefined,
-                source: "live_leads",
+                source: getLiveLeadSaveSource(fallbackLead),
+                sourceId: fallbackLead && "incidentId" in company ? company.incidentId : undefined,
             });
             toast.success(`${company.name} saved to your leads!`);
         } catch (error) {
@@ -1011,6 +1033,7 @@ export default function LiveLeadsPage() {
                                         placeholder="Any city"
                                         value={discoverCity}
                                         onChange={(value: string) => setDiscoverCity(value)}
+                                        isDisabled={isFallback}
                                         inputClassName="text-sm"
                                     />
                                 </div>
@@ -1030,6 +1053,7 @@ export default function LiveLeadsPage() {
                                         aria-label="Company size"
                                         value={discoverSize}
                                         onChange={(e) => setDiscoverSize(e.target.value)}
+                                        disabled={isFallback}
                                         options={sizeOptions.map((s) => ({ label: s === "All" ? "All Sizes" : `${s} employees`, value: s }))}
                                         selectClassName="text-sm"
                                     />
@@ -1053,22 +1077,46 @@ export default function LiveLeadsPage() {
                                 )}
                             </div>
 
-                            {discoverError && (
-                                <div className="flex items-center justify-between gap-2 text-sm text-warning-700 bg-warning-50 px-4 py-2.5 rounded-lg">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                        <AlertCircle className="w-4 h-4 shrink-0" />
-                                        <span className="truncate">{discoverError}</span>
+                            {isFallback && discoverSource === "ransomware_live_fallback" && (
+                                <div className="flex items-start gap-3 rounded-lg border border-warning bg-warning-secondary px-4 py-3">
+                                    <AlertCircle className="mt-0.5 size-5 shrink-0 text-fg-warning-primary" aria-hidden="true" />
+                                    <div className="flex flex-col gap-1">
+                                        <p className="text-sm font-semibold text-warning-primary">
+                                            Limited public ransomware data — not credential-exposure results.
+                                        </p>
+                                        <p className="text-sm text-tertiary">
+                                            Company size and city filters are unavailable for this source.
+                                            {discoverErrorCode === "REDROK_AUTH_INVALID" || discoverErrorCode === "REDROK_CREDENTIALS_MISSING"
+                                                ? " Ask your Sales Admin to reconnect Redrok."
+                                                : ""}
+                                        </p>
                                     </div>
-                                    <Button
-                                        size="sm"
-                                        color="secondary"
-                                        iconLeading={RefreshCw01}
-                                        onClick={handleDiscover}
-                                        isDisabled={isDiscovering}
-                                        className="shrink-0"
-                                    >
-                                        Retry
-                                    </Button>
+                                </div>
+                            )}
+
+                            {discoverError && (
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-warning bg-warning-secondary px-4 py-3 text-sm">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <AlertCircle className="size-4 shrink-0 text-fg-warning-primary" aria-hidden="true" />
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="font-medium text-warning-primary">{discoverError}</span>
+                                            {(discoverErrorCode === "REDROK_AUTH_INVALID" || discoverErrorCode === "REDROK_CREDENTIALS_MISSING") && (
+                                                <span className="text-tertiary">Ask your Sales Admin to reconnect Redrok.</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {(!discoverErrorCode || getRedrokUserMessage(discoverErrorCode, discoverRetryable).canRetry) && (
+                                        <Button
+                                            size="sm"
+                                            color="secondary"
+                                            iconLeading={RefreshCw01}
+                                            onClick={handleDiscover}
+                                            isDisabled={isDiscovering}
+                                            className="shrink-0"
+                                        >
+                                            Retry
+                                        </Button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1102,8 +1150,11 @@ export default function LiveLeadsPage() {
                                         <Table.Head id="name" label="Company" isRowHeader className="min-w-[200px]" />
                                         <Table.Head id="website" label="Website" className="min-w-[160px]" />
                                         <Table.Head id="industry" label="Industry" className="min-w-[140px]" />
-                                        <Table.Head id="size" label="Size" className="min-w-[100px]" />
+                                        {!isFallback && <Table.Head id="size" label="Size" className="min-w-[100px]" />}
                                         <Table.Head id="country" label="Location" className="min-w-[140px]" />
+                                        {isFallback && <Table.Head id="attackDate" label="Attack date" className="min-w-[130px]" />}
+                                        {isFallback && <Table.Head id="group" label="Group" className="min-w-[140px]" />}
+                                        {isFallback && <Table.Head id="source" label="Source" className="min-w-[150px]" />}
                                         <Table.Head id="actions" label="" className="w-[160px]" />
                                     </Table.Header>
 
@@ -1117,6 +1168,9 @@ export default function LiveLeadsPage() {
                                                         </div>
                                                         <div className="flex flex-col">
                                                             <span className="font-medium text-primary text-sm">{item.name}</span>
+                                                            {"source" in item && item.source === "ransomware_live_fallback" && (
+                                                                <span className="text-xs text-warning-primary">Public ransomware incident</span>
+                                                            )}
                                                             {item.linkedin_url && (
                                                                 <a href={ensureProtocol(item.linkedin_url)} target="_blank" rel="noopener noreferrer" className="text-xs text-brand-600 hover:underline">LinkedIn</a>
                                                             )}
@@ -1133,9 +1187,11 @@ export default function LiveLeadsPage() {
                                                         <span className="text-sm text-quaternary">—</span>
                                                     )}
                                                 </Table.Cell>
-                                                <Table.Cell>
-                                                    <span className="text-sm text-secondary">{item.size || "—"}</span>
-                                                </Table.Cell>
+                                                {!isFallback && (
+                                                    <Table.Cell>
+                                                        <span className="text-sm text-secondary">{item.size || "—"}</span>
+                                                    </Table.Cell>
+                                                )}
                                                 <Table.Cell>
                                                     <div className="flex flex-col">
                                                         <span className="text-sm text-secondary capitalize">{item.country || "—"}</span>
@@ -1146,6 +1202,34 @@ export default function LiveLeadsPage() {
                                                         )}
                                                     </div>
                                                 </Table.Cell>
+                                                {isFallback && (
+                                                    <Table.Cell>
+                                                        <span className="text-sm text-secondary">{"attackDate" in item ? formatDate(item.attackDate) : "—"}</span>
+                                                    </Table.Cell>
+                                                )}
+                                                {isFallback && (
+                                                    <Table.Cell>
+                                                        <span className="text-sm text-secondary">
+                                                            {"ransomwareGroup" in item ? item.ransomwareGroup || "Unknown" : "—"}
+                                                        </span>
+                                                    </Table.Cell>
+                                                )}
+                                                {isFallback && (
+                                                    <Table.Cell>
+                                                        {"sourceUrl" in item && item.sourceUrl ? (
+                                                            <a
+                                                                href={ensureProtocol(item.sourceUrl)}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-sm font-medium text-brand-secondary hover:text-brand-secondary_hover"
+                                                            >
+                                                                View source
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-sm text-quaternary">ransomware.live</span>
+                                                        )}
+                                                    </Table.Cell>
+                                                )}
                                                 <Table.Cell>
                                                     <div className="flex items-center gap-2">
                                                         <Button

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { requireAuth, assertCompanyAccess } from "./lib/auth";
 import { getPlanLimits } from "./lib/plans";
+import { toClientSafeCompany } from "./lib/company/projection";
 
 // ============================================
 // QUERIES
@@ -12,7 +13,8 @@ export const getById = query({
   handler: async (ctx, args) => {
     const currentUser = await requireAuth(ctx);
     assertCompanyAccess(currentUser.companyId, args.id);
-    return await ctx.db.get(args.id);
+    const company = await ctx.db.get(args.id);
+    return company ? toClientSafeCompany(company) : null;
   },
 });
 
@@ -20,12 +22,13 @@ export const getByStripeCustomerId = query({
   args: { stripeCustomerId: v.string() },
   handler: async (ctx, args) => {
     await requireAuth(ctx);
-    return await ctx.db
+    const company = await ctx.db
       .query("companies")
       .withIndex("by_stripeCustomerId", (q) =>
         q.eq("stripeCustomerId", args.stripeCustomerId)
       )
       .first();
+    return company ? toClientSafeCompany(company) : null;
   },
 });
 
@@ -42,7 +45,8 @@ export const getCurrentCompany = query({
 
     if (!user) return null;
 
-    return await ctx.db.get(user.companyId);
+    const company = await ctx.db.get(user.companyId);
+    return company ? toClientSafeCompany(company) : null;
   },
 });
 
@@ -79,21 +83,6 @@ export const internalGetById = internalQuery({
   args: { id: v.id("companies") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.id);
-  },
-});
-
-export const getRedrokCredentials = internalQuery({
-  args: { companyId: v.id("companies") },
-  handler: async (ctx, args) => {
-    const company = await ctx.db.get(args.companyId);
-    if (!company) throw new Error("Company not found");
-
-    return {
-      redrokEmail: company.redrokEmail,
-      redrokPassword: company.redrokPassword,
-      redrokToken: company.redrokToken,
-      redrokTokenExpiresAt: company.redrokTokenExpiresAt,
-    };
   },
 });
 
